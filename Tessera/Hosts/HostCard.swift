@@ -27,12 +27,15 @@ struct HostCard: View {
     let onOpen: () -> Void
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
+    var isSelected = false
+    var fitsNarrowColumn = false
+    var onSelect: (() -> Void)?
 
     @Environment(\.designTokens) private var T
     @State private var hover = false
 
     var body: some View {
-        Button(action: onOpen) {
+        Button(action: onSelect ?? onOpen) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     OSBadge(osHint: host.osHint, size: 18)
@@ -56,22 +59,15 @@ struct HostCard: View {
                     .lineLimit(1)
                     .padding(.top, 4)
 
-                // Always reserve the chip-row height so cards stay
-                // size-matched whether or not the host has tags.
-                HStack(spacing: 6) {
-                    if tagTexts.isEmpty {
-                        // Invisible spacer, and the tags themselves are tool
-                        // names (mosh, tmux) that stay English everywhere.
-                        Tag(verbatim: "—")
-                            .opacity(0)
-                            .accessibilityHidden(true)
-                    } else {
-                        ForEach(Array(tagTexts.enumerated()), id: \.offset) { _, text in
-                            Tag(verbatim: text)
-                        }
+                if fitsNarrowColumn {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        tags.fixedSize(horizontal: true, vertical: false)
                     }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+                } else {
+                    tags.padding(.top, 10)
                 }
-                .padding(.top, 10)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -79,11 +75,14 @@ struct HostCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(hover ? T.borderStrong : T.border, lineWidth: 1)
+                    .stroke(isSelected ? T.accent : (hover ? T.borderStrong : T.border),
+                            lineWidth: isSelected ? 0.5 : 1)
             }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("host-card-\(host.id)")
         .contextMenu {
             Button("connect", systemImage: "terminal", action: onOpen)
             if let onEdit {
@@ -95,6 +94,22 @@ struct HostCard: View {
         }
         .onHover { hover = $0 }
         .animation(.easeInOut(duration: 0.14), value: hover)
+    }
+
+    /// Reserve the chip-row height even for an untagged host. In the narrow
+    /// management column the row scrolls, so long user tags cannot widen it.
+    private var tags: some View {
+        HStack(spacing: 6) {
+            if tagTexts.isEmpty {
+                Tag(verbatim: "—")
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            } else {
+                ForEach(Array(tagTexts.enumerated()), id: \.offset) { _, text in
+                    Tag(verbatim: text)
+                }
+            }
+        }
     }
 
     private var endpointText: String {

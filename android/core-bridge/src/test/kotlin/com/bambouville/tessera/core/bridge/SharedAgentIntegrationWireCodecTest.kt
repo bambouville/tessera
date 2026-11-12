@@ -93,6 +93,24 @@ class SharedAgentIntegrationWireCodecTest {
     }
 
     @Test
+    fun decisionObservationSaysWhenNoLifecycleCanReachTheApp() {
+        fun observation(deliverable: Boolean?) = org.json.JSONObject(SharedAgentIntegrationWireCodec.encodeDecisionRequest(
+            SharedAgentIntegrationObservation(
+                installation = SharedAgentIntegrationInstallation.Current,
+                foreground = SharedAgentIntegrationForeground.Agent,
+                shellIntegrationActive = false,
+                agentIntegrationActive = false,
+                agentRequiresLifecycleHook = true,
+                agentLifecycleDeliverable = deliverable,
+            ),
+            requestedAction = null,
+        )).getJSONObject("observation")
+
+        assertEquals(false, observation(false).getBoolean("agentLifecycleDeliverable"))
+        assertTrue(observation(null).isNull("agentLifecycleDeliverable"))
+    }
+
+    @Test
     fun appUpdateRequiredDecisionOffersNoActionAndWarns() {
         val decision = SharedAgentIntegrationWireCodec.decodeDecision(
             """{"decision":{"kind":"appUpdateRequired"},"effectiveAction":null,"showsWarning":true}""",

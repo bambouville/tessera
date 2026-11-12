@@ -28,6 +28,7 @@ import com.bambouville.tessera.agent.platform.AgentTmuxLaunchReceipt
 import com.bambouville.tessera.core.bridge.CoreCallResult
 import com.bambouville.tessera.core.bridge.SharedAgentMarkdown
 import com.bambouville.tessera.core.bridge.SharedAgentRuntime
+import com.bambouville.tessera.core.bridge.SharedAgentHostSearch
 import com.bambouville.tessera.core.bridge.SharedAgentPageSearch
 import com.bambouville.tessera.core.bridge.SharedAgentInitialLoadPolicy
 import com.bambouville.tessera.core.bridge.SharedAgentReadStatus
@@ -50,13 +51,14 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +66,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -132,6 +135,8 @@ class AgentCenterPresenter(
     private val pendingOwners = ConcurrentHashMap<String, PendingOwner>()
     private val ownerBindingLocks = ConcurrentHashMap<String, Mutex>()
     private val retiredOwnerThreads = ConcurrentHashMap.newKeySet<String>()
+    /** Catalog observations retired here; Core retires their tokens later, on replacement. */
+    private val retiredObservationTokens = ConcurrentHashMap.newKeySet<String>()
     private val endedConversations = ConcurrentHashMap.newKeySet<String>()
     private val occupancySweepJobs = ConcurrentHashMap<AgentSessionKey, Job>()
     private val occupancySweepLocks = ConcurrentHashMap<AgentSessionKey, Mutex>()
@@ -148,6 +153,41 @@ class AgentCenterPresenter(
     private var lastRuntimeEventGeneration = 0L
     private val actionBindingTokens = ConcurrentHashMap<String, String>()
     private val outgoingArms = ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Boolean>>()
+    /** Core's reply to an answer's check before a write, by lease token. */
+    private val promptAnswerChecks = ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Boolean>>()
+    /**
+     * Core input that can move a thread's waiting prompt (its hooks, head and
+     * bootstrap pages, and live captures of a changed screen), counted by
+     * thread as it is forwarded. History pages and summaries cannot move it,
+     * nor can the screen Core was last shown, so they pass uncounted: every
+     * count costs an answer another check. An answer takes the count with its
+     * Core check, under the same lock: input counted since then sits behind
+     * that check in Core's queue, so its write waits for a check that saw it.
+     */
+    private val questionInputLock = Any()
+    private val questionInputs = HashMap<String, Long>()
+    private val questionScreens = HashMap<String, String>()
+
+    private fun forwardQuestionInput(threadKey: String?, send: () -> Boolean): Boolean = synchronized(questionInputLock) {
+        send().also { if (it && threadKey != null) questionInputs[threadKey] = (questionInputs[threadKey] ?: 0L) + 1 }
+    }
+
+    private fun forwardQuestionScreen(threadKey: String, observation: JSONObject, send: () -> Boolean): Boolean =
+        synchronized(questionInputLock) {
+            // Its fence is part of what Core was told: Core refuses a capture
+            // under a stale fence, so the same screen under a newer one is new.
+            val screen = listOf(observation.opt("observedLifecycleSequence"), observation.opt("observedGeneration"),
+                observation.opt("bindingToken"), observation.optBoolean("onDisplay"),
+                observation.optJSONObject("promptObservation")?.optString("visibleText"),
+                observation.optJSONObject("promptObservation")?.optString("currentCursorLine")).joinToString("\u0000")
+            send().also { sent ->
+                if (sent && questionScreens.put(threadKey, screen) != screen) {
+                    questionInputs[threadKey] = (questionInputs[threadKey] ?: 0L) + 1
+                }
+            }
+        }
+
+    private fun questionInputCount(threadKey: String): Long = synchronized(questionInputLock) { questionInputs[threadKey] ?: 0L }
     private val actionJobs = ConcurrentHashMap<String, ActionJob>()
     /** Queued `notSent` results by thread, until Core withdraws or keeps the bubble. */
     private val notSentLedger = AgentNotSentLedger()
@@ -181,6 +221,36 @@ class AgentCenterPresenter(
     /** Fill requests waiting for the read ahead of them (see [fillHistory]). */
     private val pendingFillRequests = ConcurrentHashMap.newKeySet<String>()
     private val pendingLatestRequests = ConcurrentHashMap.newKeySet<String>()
+    /** A search match to read around once the thread's current read ends. */
+    private val pendingSeekRequests = ConcurrentHashMap<String, AgentSearchResultRow>()
+    private val searchLandingIDs = java.util.concurrent.atomic.AtomicLong()
+    /** Core's replies to [readerPlace], by request id. */
+    private val readerPlaceChecks = ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<AgentSearchResultRow?>>()
+    private val readerPlaceIDs = java.util.concurrent.atomic.AtomicLong()
+    /**
+     * A reader's place in history ([readerPlace]), kept from the read that
+     * opens it until a seek lands there, the host refuses it, or the reader
+     * moves on: a read cut off in between (the app away again, the
+     * connection dropped) leaves it to the next, as Core's window by then
+     * holds the newest page.
+     */
+    private val readerPlaces = ConcurrentHashMap<String, AgentSearchResultRow>()
+    /**
+     * Threads whose place a notification gave up ([openNotificationThread]):
+     * no read opens it until the thread's next opening read ends, whatever
+     * row Core is told meanwhile.
+     */
+    private val readerPlacesGivenUp = ConcurrentHashMap.newKeySet<String>()
+    /** The row each detail last reported its viewport starts at; none while it follows the newest page. */
+    private val viewportAnchors = ConcurrentHashMap<String, String>()
+    /**
+     * Threads a seek opens on a connection with no window, by the read's
+     * token: their snapshots wait in [heldDetails] until the seek ends, so
+     * the newest page it starts from never shows.
+     */
+    private val presentationHolds = mutableMapOf<String, Any>()
+    private val heldDetails = mutableMapOf<String, AgentThreadDetail>()
+    private val presentationHoldLock = Any()
     private val projectionSources = ConcurrentHashMap<String, ProjectionSource>()
     private val directoryProofs = ConcurrentHashMap<String, DirectoryProof>()
     /** Newest record already acknowledged per thread, to drop scroll repeats. */
@@ -238,12 +308,53 @@ class AgentCenterPresenter(
     private val ingestionScopes = ConcurrentHashMap<NativeHostKey, String>()
     private val ingestionPoolLock = Any()
     private val ingestionInventories = ConcurrentHashMap<AgentSessionKey, Job>()
+    /** Lifecycle frames ask the endpoint's inventory job for another pass. */
+    private class NativeInventoryRequests(val endpoint: AgentSessionEndpoint) {
+        val passes = Channel<Unit>(Channel.CONFLATED)
+        /** Conversations that asked once; a refused hook repeats every few seconds. */
+        val asked: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        /** Whether this tab's last pass reached the end; a dropped carrier's fails each time. */
+        @Volatile var worked = false
+        /** The pass listing the host now, if any. */
+        @Volatile var running: InventoryPass? = null
+    }
+
+    /**
+     * What one pass skipped because another owner held it, and which owners
+     * left while it ran. A thread whose owner left needs another pass only if
+     * this one had already skipped it: one it has yet to reach, it lists.
+     */
+    private class InventoryPass {
+        private val skipped = hashSetOf<String>()
+        private val left = hashSetOf<String>()
+        private var finished = false
+        @Synchronized fun skip(threadKey: String) { skipped += threadKey }
+        /** False once the pass has finished: the caller asks for a new one. */
+        @Synchronized fun leave(threadKeys: Collection<String>): Boolean {
+            if (finished) return false
+            left += threadKeys
+            return true
+        }
+        /** Whether an owner left a thread this pass skipped. */
+        @Synchronized fun finish(): Boolean {
+            finished = true
+            return left.any { it in skipped }
+        }
+    }
+    private val nativeInventoryRequests = ConcurrentHashMap<AgentSessionKey, NativeInventoryRequests>()
+    /** No inventory pass starts sooner than this after the last one began. */
+    internal var nativeInventoryIntervalMillis = 10_000L
+    /** How long a thread whose token was replaced waits for the successor's bind. */
+    internal var successorBindGraceMillis = 10_000L
     private val ingestionVisibleCards = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var ingestionOpenDetail: String? = null
     private var ingestionInterestJob: Job? = null
     private var ingestionInterestRevision = 0L
     private val ingestionCommits = ConcurrentHashMap<String, CompletableDeferred<NativeCommit>>()
     private var searchJob: Job? = null
+    /** The needle whose rows the list shows, and the results last sent for it. */
+    private var presentedSearchNeedle = ""
+    private var presentedSearchResults = JSONArray()
     /** One OS notification per reduced attention/generation tuple for this process. */
     private val deliveredAttention = ConcurrentHashMap.newKeySet<String>()
     private val lifecycleArrivalSequence = AtomicLong(0)
@@ -294,6 +405,7 @@ class AgentCenterPresenter(
         if (!foreground) {
             occupancySweepJobs.values.forEach(Job::cancel); occupancySweepJobs.clear()
             searchJob?.cancel(); searchJob = null
+            mutableState.value = mutableState.value.copy(searching = false)
             livePromptWatchJobs.values.forEach(Job::cancel); livePromptWatchJobs.clear()
             cancelProjectionReads()
             closeIngestionHosts()
@@ -312,7 +424,14 @@ class AgentCenterPresenter(
     /** Lazily opens the independent ABI after the Agent destination is visible. */
     fun activate() {
         if (!enabled) return
-        if (runtime != null || observer != null) return
+        if (runtime != null || observer != null) {
+            // Opening the screen lists what changed since the last pass, as on
+            // iOS; a completed pass otherwise waits for agent activity. Any
+            // one tab's pass lists its whole host.
+            nativeInventoryRequests.values.map { it.endpoint.binding.value.hostID }.distinct()
+                .forEach { hostID -> hostLister(hostID)?.passes?.trySend(Unit) }
+            return
+        }
         mutableState.value = mutableState.value.copy(loading = true, unavailableReason = null)
         val created = runCatching { coordinator.runtime() }.getOrElse { failure ->
             mutableState.value = mutableState.value.copy(loading = false, unavailableReason = failure.message ?: "Agent runtime unavailable")
@@ -371,48 +490,13 @@ class AgentCenterPresenter(
             coordinator.directory.sessions.collect { bindings ->
                 refreshPaneAgentProviders()
                 val live = bindings.mapTo(linkedSetOf()) { it.key }
-                endpointObservers.keys.filterNot(live::contains).forEach { key ->
-                    occupancySweepJobs.remove(key)?.cancel()
-                    occupancySweepLocks.remove(key)
-                    ingestionInventories.remove(key)?.cancel()
-                    ingestionHosts.filterKeys { it.session == key }.values.distinct().forEach(::discardNativeHost)
-                    ingestionScopes.keys.removeIf { it.session == key }
-                    endpointObservers.remove(key)?.cancel()
-                    tierACandidateJobs.remove(key)?.cancel()
-                    tierACandidateBindings.remove(key)?.let { old -> removeTierACandidates(key, old) }
-                    tierCInventoryJobs.remove(key)?.cancel()
-                    tierCInventoryBindings.remove(key)
-                    tierCConformances.remove(key)
-                    teardownEndpointOwners(key)
-                    bindingTokens.keys.filter { it.startsWith("${key.liveSessionID.canonicalAgentUUID()}\u001f") }.forEach(bindingTokens::remove)
-                    reconfigureTierCConformances()
-                }
+                retireEndpoints(endpointObservers.keys.filterNot(live::contains))
                 for (binding in bindings) {
                     val endpoint = coordinator.directory.resolve(binding.key) ?: continue
                     startNativeInventory(endpoint)
                     if (endpointObservers[binding.key] == null) {
                         scheduleOccupancySweeps(endpoint)
-                        endpointObservers[binding.key] = launch {
-                            endpoint.lifecycleFrames.collect { frame ->
-                                val retained = endpoint.retainedLifecycleFrame(frame.binding)
-                                if (retained != null && (!retained.binding.sameRouteAs(frame.binding) ||
-                                        !retained.payload.contentEquals(frame.payload))) return@collect
-                                val retryKey = endpoint.key to frame.binding.paneID
-                                lifecycleProofRetries.cancel(retryKey)
-                                if (consumeLifecycle(endpoint, frame)) {
-                                    lifecycleProofRetries.schedule(retryKey,
-                                        isCurrent = {
-                                            coordinator.directory.resolve(endpoint.key) === endpoint &&
-                                                endpoint.isCurrentRoute(frame.binding) &&
-                                                (endpoint.retainedLifecycleFrame(frame.binding)?.let { latest ->
-                                                    latest.binding.sameRouteAs(frame.binding) && latest.payload.contentEquals(frame.payload)
-                                                } ?: true)
-                                        },
-                                        attempt = { consumeLifecycle(endpoint, frame) },
-                                    )
-                                }
-                            }
-                        }
+                        endpointObservers[binding.key] = launch { observeEndpointEvents(endpoint) }
                     }
                     val previousInventoryBinding = tierCInventoryBindings.put(binding.key, binding)
                     if (previousInventoryBinding != binding) {
@@ -455,6 +539,8 @@ class AgentCenterPresenter(
         if (mutableState.value.selectedThreadKey != threadKey) invalidateSendAnyway()
         initialPrefetchJobs.keys.filter { it != threadKey }.forEach(::cancelInitialPrefetch)
         pendingFillRequests.removeIf { it != threadKey }
+        pendingSeekRequests.keys.removeIf { it != threadKey }
+        readerPlaces.keys.removeIf { it != threadKey }
         readRetryJobs.keys.filter { it != threadKey && it !in ingestionVisibleCards }.forEach { readRetryJobs.remove(it)?.cancel() }
         val current = mutableState.value
         // Do not render an old selected thread while Core resolves the new
@@ -463,6 +549,8 @@ class AgentCenterPresenter(
         mutableState.value = current.copy(
             selectedThreadKey = threadKey,
             detail = threadKey?.let(current.projectedDetails::get)?.let(::withKnownDirectoryProof),
+            searchLanding = current.searchLanding?.takeIf { it.threadKey == threadKey },
+            latestOpening = current.latestOpening?.takeIf { it == threadKey },
         )
         publishSendingThreads()
         // A thread key is a display identity. The native ABI remains authoritative
@@ -472,16 +560,52 @@ class AgentCenterPresenter(
         // omits from its live-only list. Reuse only its current registered
         // projection source and owner; this does not mint a binding or send to
         // the terminal.
-        threadKey?.let(::scheduleExistingProjection)
+        // A newest page left queued when the reader left it comes first.
+        if (threadKey != null && pendingLatestRequests.remove(threadKey)) loadNewer(threadKey, latest = true)
+        else threadKey?.let(::scheduleExistingProjection)
         startDisplayedLivePromptWatch()
     }
 
     fun search(query: String) {
         mutableState.value = mutableState.value.copy(searchQuery = query)
         searchJob?.cancel()
-        val bounded = query.trim().take(512)
-        if (!enabled || !applicationForeground) { searchJob = null; return }
-        searchJob = scope.launch { runRemoteSearch(bounded) }
+        // One needle for the host request, the paged pages and the exact
+        // re-match: the Agent Host refuses more than 512 UTF-8 bytes.
+        val bounded = agentSearchNeedle(query)
+        if (!enabled || !applicationForeground) {
+            searchJob = null
+            mutableState.value = mutableState.value.copy(searching = false)
+            return
+        }
+        // A new query shows none of the last one's rows, even before hosts
+        // answer; the same query run again keeps its rows until it ends.
+        if (bounded != presentedSearchNeedle) {
+            presentedSearchNeedle = bounded
+            publishSearch(JSONArray(), JSONArray())
+        }
+        if (bounded.isEmpty()) {
+            searchJob = null
+            mutableState.value = mutableState.value.copy(searching = false)
+            return
+        }
+        mutableState.value = mutableState.value.copy(searching = true)
+        searchJob = scope.launch {
+            val job = currentCoroutineContext().job
+            try { runRemoteSearch(bounded) }
+            finally {
+                if (searchJob === job) {
+                    searchJob = null
+                    mutableState.value = mutableState.value.copy(searching = false)
+                }
+            }
+        }
+    }
+
+    /** Hands Core the rows to show; a search's rows show as it finds them. */
+    private fun publishSearch(results: JSONArray, unavailableHosts: JSONArray) {
+        presentedSearchResults = results
+        forward(JSONObject().put("v", 1).put("kind", "search")
+            .put("searchSnapshot", JSONObject().put("results", results).put("unavailableHostIDs", unavailableHosts)))
     }
 
     fun setGrouping(value: String) {
@@ -585,8 +709,148 @@ class AgentCenterPresenter(
     }
 
     fun viewportAnchor(threadKey: String, recordID: String?) {
+        // A reader who follows the newest page has left any kept place.
+        if (recordID == null) { viewportAnchors.remove(threadKey); readerPlaces.remove(threadKey) }
+        else viewportAnchors[threadKey] = recordID
         val thread = threadKey.threadIDJson() ?: return
         forward(JSONObject().put("v", 1).put("kind", "viewportAnchor").put("threadID", thread).putOpt("recordID", recordID))
+    }
+
+    /** Opens the result's thread at its match. */
+    fun openSearchResult(result: AgentSearchResultRow) {
+        select(result.threadKey)
+        mutableState.value = mutableState.value.copy(searchLanding =
+            AgentSearchLanding(result.threadKey, result.recordID, searchLandingIDs.incrementAndGet()))
+        // The match supersedes navigation queued before it, and the place.
+        readerPlaces.remove(result.threadKey)
+        pendingLatestRequests.remove(result.threadKey)
+        pendingHistoryRequests.remove(result.threadKey)
+        pendingFillRequests.remove(result.threadKey)
+        requestSeek(result)
+    }
+
+    /** The reader chose the newest page over a match still opening. */
+    fun returnToLatest(threadKey: String) {
+        pendingSeekRequests.remove(threadKey)
+        readerPlaces.remove(threadKey)
+        dropSearchLanding(threadKey)
+        loadNewer(threadKey, latest = true)
+    }
+
+    /**
+     * Opens a notification's conversation at its newest reply, unless a
+     * window on a live connection still shows the reader's place there: a
+     * notification never waits on a read of that place ([readerPlace]). A
+     * place read already under way shows the newest page it read first.
+     */
+    fun openNotificationThread(threadKey: String) {
+        val shown = ingestionHosts.values.any { host -> host.connection?.isClosed == false && host.threads[threadKey]?.window != null }
+        if (!shown || readerPlaces.containsKey(threadKey)) {
+            readerPlacesGivenUp.add(threadKey)
+            viewportAnchor(threadKey, null)
+            mutableState.value.searchLanding?.takeIf { it.threadKey == threadKey && !it.marked }?.let {
+                dropSearchLanding(threadKey)
+                synchronized(presentationHoldLock) {
+                    if (presentationHolds.remove(threadKey) != null) {
+                        heldDetails.remove(threadKey)?.let { detail ->
+                            // The newest page shows; the seek's reply, dropped, is not waited on.
+                            val current = mutableState.value.withThreadSnapshot(detail)
+                            mutableState.value = current.copy(loadingTranscriptThreads = current.loadingTranscriptThreads - threadKey)
+                        }
+                    }
+                }
+            }
+            mutableState.value = mutableState.value.copy(latestOpening = threadKey)
+        }
+        select(threadKey)
+    }
+
+    /** The detail opened [threadKey] at its newest page ([openNotificationThread]). */
+    fun finishLatestOpening(threadKey: String) {
+        if (mutableState.value.latestOpening == threadKey) mutableState.value = mutableState.value.copy(latestOpening = null)
+    }
+
+    /** An index the host rebuilt since the search names the landed match anew; the landing follows it. */
+    private fun retargetSearchLanding(threadKey: String, recordID: String, landed: String): Boolean {
+        val landing = mutableState.value.searchLanding ?: return false
+        if (landing.threadKey != threadKey || landing.recordID != recordID) return false
+        mutableState.value = mutableState.value.copy(searchLanding = landing.copy(recordID = landed))
+        return true
+    }
+
+    /** The detail landed on [landing]; a later page never moves the reader for it. */
+    fun finishSearchLanding(landing: AgentSearchLanding) {
+        if (mutableState.value.searchLanding == landing) mutableState.value = mutableState.value.copy(searchLanding = null)
+    }
+
+    /**
+     * The match could not be read: the thread stays at its newest page, and a
+     * later page holding the record must not move the reader there. Without a
+     * record, the thread's landing still unread is abandoned.
+     */
+    private fun abandonSearchLanding(threadKey: String, recordID: String? = null) {
+        val current = mutableState.value
+        val landing = current.searchLanding ?: return
+        if (landing.threadKey != threadKey || (recordID != null && landing.recordID != recordID)) return
+        if (current.projectedDetails[threadKey]?.live?.any { it.recordID == landing.recordID } == true) return
+        mutableState.value = current.copy(searchLanding = null)
+    }
+
+    /** The reader chose the newest page, or (without a thread) every read was reset. */
+    private fun dropSearchLanding(threadKey: String? = null) {
+        val landing = mutableState.value.searchLanding ?: return
+        if (threadKey != null && landing.threadKey != threadKey) return
+        mutableState.value = mutableState.value.copy(searchLanding = null)
+    }
+
+    /**
+     * Opens a search match where it lies, for as long as the reader waits on
+     * it. A read in flight may still move the window, so the match waits for
+     * its end and is checked again. A match loaded by then needs no read;
+     * otherwise the host reads the page around it from the live cursor
+     * (`window.seek.v1`), opening the thread first if it has no window yet. A
+     * provider that cannot seek opens an empty thread at its newest page,
+     * which may hold the match. A refused or unreadable match leaves the
+     * thread at its newest page.
+     */
+    private fun requestSeek(result: AgentSearchResultRow, replayed: Boolean = false) {
+        val threadKey = result.threadKey
+        pendingSeekRequests.remove(threadKey)
+        val landing = mutableState.value.searchLanding
+        if (landing == null || landing.threadKey != threadKey || landing.recordID != result.recordID) return
+        if (projectionJobs[threadKey]?.isActive == true) {
+            pendingSeekRequests[threadKey] = result
+            // The read in flight (the selection's own, at least) may replace
+            // the rows on screen; the detail lands only once it ends, which
+            // clears this.
+            mutableState.value = mutableState.value.copy(loadingTranscriptThreads = mutableState.value.loadingTranscriptThreads + threadKey)
+            return
+        }
+        val live = mutableState.value.projectedDetails[threadKey]?.live.orEmpty()
+        if (live.any { it.recordID == result.recordID }) return
+        val provider = threadKey.threadIDJson()?.optJSONObject("providerID")?.optString("rawValue")
+        val seeks = result.sequence?.seekOrder() != null && provider in setOf("codex", "claude", "pi", "kimi")
+        val source = projectionSources[threadKey]
+        val endpoint = source?.let { coordinator.directory.resolve(it.endpointKey) }
+        if (!(seeks || (live.isEmpty() && !replayed)) || !enabled || !applicationForeground ||
+            mutableState.value.selectedThreadKey != threadKey || source == null || endpoint == null) {
+            abandonSearchLanding(threadKey, result.recordID)
+            return
+        }
+        cancelInitialPrefetch(threadKey)
+        clearNativeReadStatus(threadKey)
+        // The match's read replaces the window any queued navigation was for.
+        pendingLatestRequests.remove(threadKey)
+        pendingHistoryRequests.remove(threadKey)
+        pendingFillRequests.remove(threadKey)
+        scheduleProjection(endpoint, source.binding, JSONObject(source.threadID), source.provider,
+            source.transcriptRef, threadKey, source.bindingToken, null,
+            nativeDirection = if (seeks) "seek" else "before", seek = result.takeIf { seeks })
+        if (!seeks) {
+            // The newest page's end checks it once more.
+            if (projectionJobs[threadKey]?.isActive == true) pendingSeekRequests[threadKey] = result
+            else abandonSearchLanding(threadKey, result.recordID)
+        }
     }
 
     fun loadNewer(threadKey: String, latest: Boolean = false) {
@@ -982,6 +1246,11 @@ class AgentCenterPresenter(
         mutableState.value = mutableState.value.copy(notice = "This terminal is no longer available. Open its session to continue.")
     }
 
+    /** A transcript selection action missed; the message is the terminal's own. */
+    fun reportSelectionMiss(message: String) {
+        mutableState.value = mutableState.value.copy(notice = message)
+    }
+
     /** Candidate focus is route-checked like thread focus; it never synthesizes a thread action. */
     suspend fun focusCandidateExact(candidate: AgentTerminalCandidate, isStillPresented: () -> Boolean = { true }): AgentTerminalFocusOutcome {
         val exact = candidate.endpointBindingOrNull() ?: return AgentTerminalFocusOutcome.RouteGone
@@ -1037,6 +1306,7 @@ class AgentCenterPresenter(
         invalidateSendAnyway()
         mutableState.value = mutableState.value.copy(
             selectedThreadKey = threadKey,
+            searchLanding = mutableState.value.searchLanding?.takeIf { it.threadKey == threadKey },
             notice = "Review the current prompt before answering.",
         )
     }
@@ -1058,6 +1328,8 @@ class AgentCenterPresenter(
             }
             is SharedAgentRuntimeEvent.RoutesRetired -> {
                 for (retirement in event.retirements) {
+                    // Already retired here, all at once, at its endpoint's teardown.
+                    if (retiredObservationTokens.remove(retirement.bindingToken)) continue
                     val id = retirement.threadID.toJson()
                     val key = canonicalAgentThreadKey(id.getString("hostID"), id.getJSONObject("providerID").getString("rawValue"),
                         id.getString("providerSessionID"))
@@ -1145,7 +1417,11 @@ class AgentCenterPresenter(
                 // (or may now probe, once the pending actions ended).
                 notSentLedger.noteRejection(event.code).forEach { advanceNotSent(it, 0) }
             }
-            is SharedAgentRuntimeEvent.Notice -> Unit
+            is SharedAgentRuntimeEvent.Notice -> if (event.kind == "readerPlace") {
+                event.details.string("ingestionRequestID")?.let { id ->
+                    readerPlaceChecks.remove(id)?.complete(event.details.obj("search")?.let(AgentPresentation::searchResults)?.firstOrNull())
+                }
+            }
         }
     }
 
@@ -1205,6 +1481,9 @@ class AgentCenterPresenter(
         val outgoingPhase = snapshot.payload.string("code")
         if (outgoingPhase == "outgoingArmed" || outgoingPhase == "outgoingDispatched") {
             snapshot.payload.obj("lease")?.string("token")?.let { outgoingArms.remove("$it:$outgoingPhase")?.complete(true) }
+        }
+        if (outgoingPhase == "promptCurrent" || outgoingPhase == "promptChanged") {
+            snapshot.payload.obj("lease")?.string("token")?.let { promptAnswerChecks.remove(it)?.complete(outgoingPhase == "promptCurrent") }
         }
         val previous = mutableState.value
         when (snapshot.kind) {
@@ -1297,7 +1576,10 @@ class AgentCenterPresenter(
                             } }
                         }
                     }
-                    mutableState.value = mutableState.value.withThreadSnapshot(detail)
+                    synchronized(presentationHoldLock) {
+                        if (detail.row.key in presentationHolds) heldDetails[detail.row.key] = detail
+                        else mutableState.value = mutableState.value.withThreadSnapshot(detail)
+                    }
                     acceptedLifecycleSource?.let { restartMissingFirstRead(detail, it) }
                     settleNotSent(detail, agentNotSentEvidence(snapshot.payload.string("code")))
                     schedulePromptObservation(detail)
@@ -1337,9 +1619,13 @@ class AgentCenterPresenter(
                         pendingTextAction.retryDraftRemainder ?: draftAfterActionPlan(draftBeforePlan, sentText)
                     else draftAfterActionPlan(draftBeforePlan, sentText)
                 val draftCleared = sentText != null && token != null && draftAfterPlan != draftBeforePlan
+                // A held thread's plan waits with its other snapshots.
+                val held = synchronized(presentationHoldLock) {
+                    (detail.row.key in presentationHolds).also { if (it) heldDetails[detail.row.key] = detail }
+                }
                 mutableState.value = previous.copy(
-                    detail = if (previous.selectedThreadKey == detail.row.key) detail else previous.detail,
-                    projectedDetails = previous.projectedDetails + (detail.row.key to detail),
+                    detail = if (!held && previous.selectedThreadKey == detail.row.key) detail else previous.detail,
+                    projectedDetails = if (held) previous.projectedDetails else previous.projectedDetails + (detail.row.key to detail),
                     acceptedSend = if (sentText != null && token != null) AgentAcceptedSend(token, detail.row.key, sentText) else previous.acceptedSend,
                     drafts = if (sentText != null && token != null) previous.drafts +
                         (detail.row.key to draftAfterPlan) else previous.drafts,
@@ -1455,6 +1741,7 @@ class AgentCenterPresenter(
                 }
                 val selected = refreshed(state.detail)
                 val projected = refreshed(state.projectedDetails[key])
+                updateHeldDetail(key) { refreshed(it) }
                 if (selected != null || projected != null) mutableState.value = state.copy(
                     detail = selected ?: state.detail,
                     projectedDetails = if (projected == null) state.projectedDetails else state.projectedDetails + (key to projected))
@@ -1504,6 +1791,9 @@ class AgentCenterPresenter(
                 val state = mutableState.value
                 val current = state.detail?.takeIf { it.row.key == key && it.binding == proven && it.provenDirectories != directories }
                 val projected = state.projectedDetails[key]?.takeIf { it.binding == proven && it.provenDirectories != directories }
+                updateHeldDetail(key) { held ->
+                    held.takeIf { it.binding == proven && it.provenDirectories != directories }?.copy(provenDirectories = directories)
+                }
                 if (current == null && projected == null) return@launch
                 mutableState.value = state.copy(
                     detail = current?.copy(provenDirectories = directories) ?: state.detail,
@@ -1587,16 +1877,19 @@ class AgentCenterPresenter(
             val observed = (endpoint.inspect(binding) as? AgentEndpointResult.Success)?.value ?: return@withLock null
             if (!current() || !observed.binding.sameRouteAs(binding) || !observed.authoritative ||
                 observed.truncated || observed.captureWaitedForFrame) return@withLock null
-            val visible = bottomPromptRows(observed.visibleTail.decodeToString())
+            val visible = promptRows(observed)
             if (visible.isBlank()) return@withLock null
             val cursor = boundedPromptCursor(observed.currentCursorLine)
             val deferred = CompletableDeferred<FreshPromptRead>()
             val pending = PendingPromptObservation(threadKey, actionToken, displayed, providerID, deferred)
             pendingPromptObservation = pending
+            // A thread's capture is read as its card was: a dialog whose
+            // question scrolled off only through the call that names it.
+            val thread = if (actionToken.startsWith("candidate-")) null else threadKey.threadIDJson()
             try {
                 if (!forward(JSONObject().put("v", 1).put("kind", "promptObservation").put("promptObservation", JSONObject()
                         .put("providerID", providerID(providerID)).put("visibleText", visible).putOpt("currentCursorLine", cursor))
-                        .putOpt("promptAnswerPlan", planInput).put("promptRequestID", pending.requestID))) {
+                        .putOpt("threadID", thread).putOpt("promptAnswerPlan", planInput).put("promptRequestID", pending.requestID))) {
                     return@withLock null
                 }
                 deferred.await().takeIf { current() }
@@ -1749,6 +2042,31 @@ class AgentCenterPresenter(
             }
             delay(if (applicationForeground) ((nextOccupancyNanos - System.nanoTime()) / 1_000_000)
                 .coerceIn(1, TIER_A_REFRESH_MILLIS) else TIER_A_REFRESH_MILLIS)
+        }
+    }
+
+    internal suspend fun observeEndpointEvents(endpoint: AgentSessionEndpoint): Unit = coroutineScope {
+        launch {
+            endpoint.tmuxPaneRemovals.collect { scheduleOccupancySweeps(endpoint) }
+        }
+        endpoint.lifecycleFrames.collect { frame ->
+            val retained = endpoint.retainedLifecycleFrame(frame.binding)
+            if (retained != null && (!retained.binding.sameRouteAs(frame.binding) ||
+                    !retained.payload.contentEquals(frame.payload))) return@collect
+            val retryKey = endpoint.key to frame.binding.paneID
+            lifecycleProofRetries.cancel(retryKey)
+            if (consumeLifecycle(endpoint, frame)) {
+                lifecycleProofRetries.schedule(retryKey,
+                    isCurrent = {
+                        coordinator.directory.resolve(endpoint.key) === endpoint &&
+                            endpoint.isCurrentRoute(frame.binding) &&
+                            (endpoint.retainedLifecycleFrame(frame.binding)?.let { latest ->
+                                latest.binding.sameRouteAs(frame.binding) && latest.payload.contentEquals(frame.payload)
+                            } ?: true)
+                    },
+                    attempt = { consumeLifecycle(endpoint, frame) },
+                )
+            }
         }
     }
 
@@ -1941,13 +2259,81 @@ class AgentCenterPresenter(
         return tierCConformances[endpointKey]?.let { it.binding == binding && provider in it.providers } == true
     }
 
-    private fun teardownEndpointOwners(endpointKey: AgentSessionKey) {
-        threadOwners.entries.filter { it.value.endpointKey == endpointKey }.forEach { entry ->
-            // Core's retirement event names the token that actually left.
-            forward(JSONObject().put("v", 1).put("kind", "unbind").put("threadID", JSONObject(entry.value.threadID))
-                .put("bindingToken", entry.value.bindingToken))
+    /** Tears down endpoints whose keys left the directory. */
+    private fun retireEndpoints(keys: List<AgentSessionKey>) {
+        // Every vanished tab's inventory stops first: each retired owner asks
+        // a same-host tab for a pass, and one closing in the same update
+        // dropped the ask with it.
+        keys.forEach { key -> ingestionInventories.remove(key)?.cancel(); nativeInventoryRequests.remove(key) }
+        for (key in keys) {
+            occupancySweepJobs.remove(key)?.cancel()
+            occupancySweepLocks.remove(key)
+            ingestionHosts.filterKeys { it.session == key }.values.distinct().forEach(::discardNativeHost)
+            ingestionScopes.keys.removeIf { it.session == key }
+            endpointObservers.remove(key)?.cancel()
+            tierACandidateJobs.remove(key)?.cancel()
+            tierACandidateBindings.remove(key)?.let { old -> removeTierACandidates(key, old) }
+            tierCInventoryJobs.remove(key)?.cancel()
+            tierCInventoryBindings.remove(key)
+            tierCConformances.remove(key)
+            teardownEndpointOwners(key)
+            bindingTokens.keys.filter { it.startsWith("${key.liveSessionID.canonicalAgentUUID()}\u001f") }.forEach(bindingTokens::remove)
+            reconfigureTierCConformances()
         }
     }
+
+    private fun teardownEndpointOwners(endpointKey: AgentSessionKey) {
+        val (observed, routed) = threadOwners.entries.filter { it.value.endpointKey == endpointKey }
+            .map { it.key to it.value }
+            .partition { (key, owner) -> projectionSources[key]?.let { it.hostObservation && it.bindingToken == owner.bindingToken } == true }
+        routed.forEach { (_, owner) ->
+            // Core's retirement event names the token that actually left.
+            forward(JSONObject().put("v", 1).put("kind", "unbind").put("threadID", JSONObject(owner.threadID))
+                .put("bindingToken", owner.bindingToken))
+        }
+        retireObservations(observed)
+    }
+
+    /**
+     * Drops catalog observations without unbinding each one. Core answered
+     * every unbind with a thread and a list snapshot: thousands per reconnect
+     * to a host with thousands of stored conversations, and a live pane's new
+     * proof waited behind all of them, for a minute. An observation presents
+     * no row, and the next inventory replaces its token in Core.
+     */
+    private fun retireObservations(observed: List<Pair<String, ThreadOwner>>) {
+        val retired = observed.filter { (key, owner) -> threadOwners.remove(key, owner) }
+        if (retired.isEmpty()) return
+        val keys = retired.mapTo(hashSetOf()) { it.first }
+        val tokens = retired.mapTo(hashSetOf()) { it.second.bindingToken }
+        keys.forEach(::releaseOwnerWork)
+        bindingTokens.entries.removeIf { it.value in tokens }
+        retiredObservationTokens.addAll(tokens)
+        refreshPaneAgentProviders()
+        mutableState.value = mutableState.value.copy(loadingTranscriptThreads = mutableState.value.loadingTranscriptThreads - keys)
+        retireRevokedOwners(keys)
+        requestNativeInventory(retired)
+    }
+
+    /**
+     * A pass lists no row another owner holds, and its last page waits for a
+     * request. Once that owner leaves (a closed tab, a killed pane, an ended
+     * conversation), only another pass lists what it held. Any tab's pass
+     * lists the whole host: ask the owner's own tab, else one still open.
+     * A pass already listing covers what it has yet to reach.
+     */
+    private fun requestNativeInventory(owners: Collection<Pair<String, ThreadOwner>>) {
+        owners.groupBy { JSONObject(it.second.threadID).getString("hostID") }.forEach { (hostID, held) ->
+            val requests = held.firstNotNullOfOrNull { (_, owner) -> nativeInventoryRequests[owner.endpointKey]?.takeIf { it.worked } }
+                ?: hostLister(hostID) ?: return@forEach
+            if (requests.running?.leave(held.map { it.first }) != true) requests.passes.trySend(Unit)
+        }
+    }
+
+    /** The tab that lists a host: any one lists all of it, preferably one whose last pass worked. */
+    private fun hostLister(hostID: String): NativeInventoryRequests? =
+        nativeInventoryRequests.values.filter { it.endpoint.binding.value.hostID == hostID }
+            .let { tabs -> tabs.firstOrNull { it.worked } ?: tabs.firstOrNull() }
 
     private suspend fun reconcilePreviousOwner(threadKey: String, incoming: AgentEndpointBinding, agentPID: Int?): Boolean {
         val owner = threadOwners[threadKey] ?: return true
@@ -1975,9 +2361,9 @@ class AgentCenterPresenter(
     }
 
     /** Remove a revoked endpoint's local projection before Core's next list tick. */
-    private fun retireRevokedOwner(threadKey: String) {
+    private fun retireRevokedOwners(threadKeys: Set<String>) {
         val previous = mutableState.value
-        val rows = previous.threads.filterNot { it.key == threadKey }
+        val rows = previous.threads.filterNot { it.key in threadKeys }
         val retained = resolveAgentHistoricalSelection(
             previousSelection = previous.selectedThreadKey,
             cachedDetailKeys = previous.projectedDetails.keys,
@@ -1992,6 +2378,7 @@ class AgentCenterPresenter(
             detail = previous.detail?.takeIf { it.row.key == selected }
                 ?: selected?.let(projectedDetails::get),
             projectedDetails = projectedDetails,
+            searchLanding = previous.searchLanding?.takeIf { it.threadKey == selected },
         )
     }
 
@@ -2035,6 +2422,19 @@ class AgentCenterPresenter(
             clearHeldConversations(endpoint, frame, wire, provider, successorSessionID = null)?.let { return refuse(it) }
             return false
         }
+        // A conversation not held here may have written a transcript the
+        // inventory has not listed. One held here is listed, live or not, and
+        // its owner leaving asks again. Every hook of a working agent asking
+        // walked and resent the whole host catalog every 10 s, so it asks at
+        // its first hook and again when its first turn ends, when its
+        // transcript exists.
+        val unlisted = canonicalAgentThreadKey(frame.binding.hostID, provider, providerSessionID)
+        if (projectionSources[unlisted] == null) nativeInventoryRequests[endpoint.key]?.let { requests ->
+            if (requests.asked.size >= 1024) requests.asked.clear()
+            val first = requests.asked.add(unlisted)
+            val stop = wire.event in setOf("Stop", "StopFailure", "SessionEnd") && requests.asked.add("$unlisted:stop")
+            if (first || stop) requests.passes.trySend(Unit)
+        }
         if (provider == "kimi" && !tierCConforms(endpoint.key, frame.binding, AgentTierCProvider.Kimi)) {
             return refuse("kimi-not-conformant")
         }
@@ -2056,6 +2456,8 @@ class AgentCenterPresenter(
         val agentPID = wire.agentPID
         val id = threadID(frame.binding.hostID, provider, providerSessionID)
         val key = canonicalAgentThreadKey(frame.binding.hostID, provider, providerSessionID)
+        // Retiring the previous owner below may drop the source it read.
+        val heldSource = projectionSources[key]
         if (!reconcilePreviousOwner(key, frame.binding, agentPID)) return refuse("bind_liveElsewhere")
         // The OSC PID is only a claim. Upgrade the binding only after the
         // endpoint independently relates that process to this exact raw PTY or
@@ -2089,6 +2491,16 @@ class AgentCenterPresenter(
         // under the root's own session, which stays a root.
         if (!installThreadOwner(key, endpoint, id, binding.toString(), bindingToken, frame.binding.hostDisplayLabel,
                 child = wire.agentID != null && provider == "codex")) return refuse("core-bind-refused")
+        // The new owner reads the transcript this pane already named. A frame
+        // that names none (an older integration), or that Core then refuses,
+        // must not leave the source on the previous owner's token, where
+        // search and the inventory would read it as another owner's, nor
+        // leave none when Core retired that owner before this bind landed.
+        val currentSource = projectionSources[key]
+        val heldTranscript = (currentSource ?: heldSource)?.takeIf { !it.hostObservation &&
+                (currentSource == null || it.endpointKey != endpoint.key || it.bindingToken != bindingToken) }
+            ?.also { projectionSources[key] = it.copy(endpointKey = endpoint.key, binding = frame.binding, bindingToken = bindingToken) }
+            ?.transcriptRef
         val lifecycle = JSONObject()
             .put("version", version)
             .put("providerID", providerID(provider))
@@ -2102,6 +2514,8 @@ class AgentCenterPresenter(
             .putOpt("agentPID", agentPID)
             .putOpt("inputHint", wire.reason.takeIf { event in setOf("PreToolUse", "PostToolUse") &&
                 it in setOf("question", "deferred-question") })
+            // Core keeps it only beside a hint: the question call this boundary names.
+            .putOpt("toolUseID", wire.toolUseID)
             .put("eventSequence", arrivalSequence)
             .put("sourceTimestampNanoseconds", wire.timestampNanoseconds)
         // `threadID` is not optional here. Core's `.lifecycle` rule requires it
@@ -2114,10 +2528,10 @@ class AgentCenterPresenter(
             if (firstReadLifecycleSources.size < 256) firstReadLifecycleSources.add(lifecycleSource)
             else { firstReadLifecycleOrderReliable = false; firstReadLifecycleSources.clear() }
         }
-        if (!forward(
-                JSONObject().put("v", 1).put("kind", "lifecycle").put("threadID", id)
-                    .put("bindingToken", bindingToken).put("lifecycle", lifecycle),
-            )
+        if (!forwardQuestionInput(key) {
+                forward(JSONObject().put("v", 1).put("kind", "lifecycle").put("threadID", id)
+                    .put("bindingToken", bindingToken).put("lifecycle", lifecycle))
+            }
         ) {
             firstReadLifecycleSources.remove(lifecycleSource)
             return refuse("core-rejected")
@@ -2162,15 +2576,15 @@ class AgentCenterPresenter(
                 mutableState.value = mutableState.value.copy(notice = "Agent launched in ${frame.binding.paneID ?: "tmux"}")
             }
         }
-        if (transcriptRef != null) {
-            val source = ProjectionSource(endpoint.key, frame.binding, id.toString(), provider, transcriptRef, bindingToken)
+        (transcriptRef ?: heldTranscript)?.let { located ->
+            val source = ProjectionSource(endpoint.key, frame.binding, id.toString(), provider, located, bindingToken)
             val previousSource = projectionSources[key]
-            if (previousSource != null && previousSource.transcriptRef != transcriptRef) {
+            if (previousSource != null && previousSource.transcriptRef != located) {
                 cancelFirstProjectionRetry(key)
                 clearNativeReadStatus(key)
             }
             projectionSources[key] = source
-            scheduleProjection(endpoint, frame.binding, id, provider, transcriptRef, key, bindingToken)
+            scheduleProjection(endpoint, frame.binding, id, provider, located, key, bindingToken)
         }
         return false
     }
@@ -2242,6 +2656,7 @@ class AgentCenterPresenter(
                 withTimeoutOrNull(5_000) { pending.accepted.await() } != true) return@withLock false
             currentCoroutineContext().ensureActive()
         } finally { pendingOwners.remove(threadKey, pending) }
+        retiredObservationTokens.remove(bindingToken)
         val previous = threadOwners.put(threadKey, owner)
         retiredOwnerThreads.remove(threadKey)
         refreshPaneAgentProviders()
@@ -2255,7 +2670,9 @@ class AgentCenterPresenter(
             pendingHistoryRequests.remove(threadKey)
             pendingFillRequests.remove(threadKey)
             pendingLatestRequests.remove(threadKey)
+            pendingSeekRequests.remove(threadKey)
             projectionJobs.remove(threadKey)?.cancel()
+            abandonSearchLanding(threadKey)
             mutableState.value = mutableState.value.copy(loadingTranscriptThreads = mutableState.value.loadingTranscriptThreads - threadKey)
         }
         true
@@ -2299,7 +2716,7 @@ class AgentCenterPresenter(
                         )
                     },
                     inspect = { (endpoint.inspect(binding) as? AgentEndpointResult.Success)?.value },
-                    forward = { forward(it) },
+                    forward = { observation -> forwardQuestionScreen(key, observation) { forward(observation) } },
                 )
             } finally {
                 currentCoroutineContext()[Job]?.let { livePromptWatchJobs.remove(key, it) }
@@ -2321,8 +2738,29 @@ class AgentCenterPresenter(
     private fun retireThreadOwner(threadKey: String, owner: ThreadOwner, successor: String?): Boolean {
         if (!threadOwners.remove(threadKey, owner)) return false
         refreshPaneAgentProviders()
+        releaseOwnerWork(threadKey)
+        // A token replaced for the same thread leaves it held, once the
+        // successor binds. One that never does (a refused or superseded bind)
+        // left the conversation unlisted until something else asked.
+        if (successor != threadKey) requestNativeInventory(listOf(threadKey to owner))
+        else scope.launch {
+            delay(successorBindGraceMillis)
+            if (threadOwners[threadKey] == null) requestNativeInventory(listOf(threadKey to owner))
+        }
+        val followed = mutableState.value.selectedThreadKey == threadKey
+        mutableState.value = mutableState.value.copy(loadingTranscriptThreads = mutableState.value.loadingTranscriptThreads - threadKey)
+        retireRevokedOwners(setOf(threadKey))
+        if (followed && successor != null) select(successor)
+        return true
+    }
+
+    /** Stops the work a retired owner was doing for its thread; publishes no list. */
+    private fun releaseOwnerWork(threadKey: String) {
         if (sendAnywayCandidate?.threadKey == threadKey) invalidateSendAnyway()
         retiredOwnerThreads.add(threadKey)
+        // The owner's last screen goes with it; its count stays, so an answer
+        // still comparing it never sees a reset count match by chance.
+        synchronized(questionInputLock) { questionScreens.remove(threadKey) }
         cancelFirstProjectionRetry(threadKey)
         cancelInitialPrefetch(threadKey)
         clearNativeReadStatus(threadKey)
@@ -2334,13 +2772,10 @@ class AgentCenterPresenter(
         pendingHistoryRequests.remove(threadKey)
         pendingFillRequests.remove(threadKey)
         pendingLatestRequests.remove(threadKey)
+        pendingSeekRequests.remove(threadKey)
         projectionJobs.remove(threadKey)?.cancel()
+        abandonSearchLanding(threadKey)
         projectionSources.remove(threadKey)
-        val followed = mutableState.value.selectedThreadKey == threadKey
-        mutableState.value = mutableState.value.copy(loadingTranscriptThreads = mutableState.value.loadingTranscriptThreads - threadKey)
-        retireRevokedOwner(threadKey)
-        if (followed && successor != null) select(successor)
-        return true
     }
 
     private fun scheduleProjection(
@@ -2353,42 +2788,128 @@ class AgentCenterPresenter(
         bindingToken: String,
         cursor: String? = null,
         nativeDirection: String = "before",
+        seek: AgentSearchResultRow? = null,
     ) {
-        if (!enabled || !applicationForeground) return
+        val refused = { seek?.let { abandonSearchLanding(threadKey, it.recordID) }; Unit }
+        if (!enabled || !applicationForeground) return refused()
         if (cursor == null && nativeDirection != "bootstrap" &&
-            (mutableState.value.ingestionReadStatuses[threadKey]?.recovery == "manual" || readRetryJobs.containsKey(threadKey))) return
+            (mutableState.value.ingestionReadStatuses[threadKey]?.recovery == "manual" || readRetryJobs.containsKey(threadKey))) return refused()
         val owner = threadOwners[threadKey]
-        if (owner?.endpointKey != endpoint.key || owner.bindingToken != bindingToken) return
+        if (owner?.endpointKey != endpoint.key || owner.bindingToken != bindingToken) return refused()
         AgentTierCProvider.fromWire(provider)?.let { tierC ->
-            if (!tierCConforms(endpoint.key, binding, tierC)) return
+            if (!tierCConforms(endpoint.key, binding, tierC)) return refused()
         }
-        if (coalesceProjectionIfRunning(threadKey, cursor, nativeDirection)) return
+        if (coalesceProjectionIfRunning(threadKey, cursor, nativeDirection)) {
+            seek?.let { pendingSeekRequests[threadKey] = it }
+            return
+        }
         lateinit var job: Job
         job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 project(endpoint, binding, threadID, provider, transcriptRef, threadKey, cursor = cursor,
-                    bindingToken = bindingToken, nativeDirection = nativeDirection,
+                    bindingToken = bindingToken, nativeDirection = nativeDirection, seek = seek,
                     initialPagesRemaining = if (cursor == null && mutableState.value.projectedDetails[threadKey]?.cursor == null
                         && mutableState.value.projectedDetails[threadKey]?.live.isNullOrEmpty()) SharedAgentInitialLoadPolicy.initialPageCount - 1 else 0)
             } finally {
                 if (projectionJobs.remove(threadKey, job)) {
                     mutableState.value = mutableState.value.copy(loadingTranscriptThreads = mutableState.value.loadingTranscriptThreads - threadKey)
-                    if (pendingLatestRequests.remove(threadKey)) {
+                    val queuedSeek = pendingSeekRequests.remove(threadKey)
+                    // A read that ended short of the match opens at the newest
+                    // page, as does a queued match a cancelled read won't replay.
+                    listOfNotNull(seek.takeIf { queuedSeek == null }, queuedSeek.takeIf { job.isCancelled })
+                        .forEach { abandonSearchLanding(threadKey, it.recordID) }
+                    if (queuedSeek != null && !job.isCancelled) requestSeek(queuedSeek, replayed = true)
+                    // A match that needs no read leaves navigation queued
+                    // after it (the newest page chosen over it) to run.
+                    val idle = projectionJobs[threadKey]?.isActive != true && !pendingSeekRequests.containsKey(threadKey)
+                    val latest = idle && threadKey in pendingLatestRequests
+                    if (latest) {
                         pendingHistoryRequests.remove(threadKey)
                         pendingProjectionRefreshes.remove(threadKey)
-                        loadNewer(threadKey, latest = true)
-                    } else if (pendingHistoryRequests.remove(threadKey)) loadMore(threadKey)
-                    else if (pendingProjectionRefreshes.remove(threadKey)) scheduleExistingProjection(threadKey)
-                    else if (pendingFillRequests.remove(threadKey)) fillHistory(threadKey)
+                        // A thread left meanwhile reads it when chosen again.
+                        if (mutableState.value.selectedThreadKey == threadKey) {
+                            pendingLatestRequests.remove(threadKey)
+                            loadNewer(threadKey, latest = true)
+                        }
+                    } else if (idle && pendingHistoryRequests.remove(threadKey)) loadMore(threadKey)
+                    else if (idle && pendingProjectionRefreshes.remove(threadKey)) scheduleExistingProjection(threadKey)
+                    else if (idle && pendingFillRequests.remove(threadKey)) fillHistory(threadKey)
                 }
             }
         }
         projectionJobs[threadKey] = job
-        if (nativeDirection == "bootstrap" || cursor != null || mutableState.value.projectedDetails[threadKey]?.live.isNullOrEmpty()) {
+        if (nativeDirection == "bootstrap" || nativeDirection == "seek" || cursor != null ||
+            mutableState.value.projectedDetails[threadKey]?.live.isNullOrEmpty()) {
             mutableState.value = mutableState.value.copy(loadingTranscriptThreads = mutableState.value.loadingTranscriptThreads + threadKey)
         }
         job.start()
     }
+
+    /**
+     * Where a read that opens the selected thread on a connection with no
+     * window for it (the app came back, the connection dropped) opens a
+     * reader who was in history: the page around the row their detail
+     * starts at, landed there unmarked. A place kept from an interrupted read
+     * comes first ([readerPlaces]); Core knows it only until the newest page
+     * replaces its window, so it is asked only for a detail with a window
+     * that named a row. A reader following the newest page, or one the
+     * newest page or a match is already opening for, has none.
+     */
+    private suspend fun readerPlace(threadKey: String): AgentSearchResultRow? {
+        fun open() = enabled && applicationForeground && ingestionOpenDetail == threadKey &&
+            mutableState.value.selectedThreadKey == threadKey && mutableState.value.searchLanding?.threadKey != threadKey &&
+            threadKey !in pendingLatestRequests && threadKey !in readerPlacesGivenUp
+        if (!open()) return null
+        val place = readerPlaces[threadKey] ?: run {
+            if (mutableState.value.projectedDetails[threadKey]?.window == null || viewportAnchors[threadKey] == null) return null
+            val thread = threadKey.threadIDJson() ?: return null
+            val id = "place-${readerPlaceIDs.incrementAndGet()}"
+            val reply = kotlinx.coroutines.CompletableDeferred<AgentSearchResultRow?>()
+            readerPlaceChecks[id] = reply
+            try {
+                if (!forward(JSONObject().put("v", 1).put("kind", "readerPlace").put("threadID", thread).put("ingestionRequestID", id))) return null
+                withTimeoutOrNull(READER_PLACE_TIMEOUT_MILLIS) { reply.await() }.also {
+                    if (!reply.isCompleted) diagnostics?.invoke("agent_reader_place_timeout", mapOf("thread" to threadKey))
+                }
+            } finally { readerPlaceChecks.remove(id, reply) }
+        } ?: return null
+        currentCoroutineContext().ensureActive()
+        if (place.threadKey != threadKey || place.sequence?.seekOrder() == null || !open()) return null
+        readerPlaces[threadKey] = place
+        val current = mutableState.value
+        mutableState.value = current.copy(
+            searchLanding = AgentSearchLanding(threadKey, place.recordID, searchLandingIDs.incrementAndGet(), marked = false),
+            loadingTranscriptThreads = current.loadingTranscriptThreads + threadKey)
+        return place
+    }
+
+    /** How a seek ended: its page applied for the reader still waiting on it, refused or left, or cut off with its connection. */
+    private enum class SeekOutcome { LANDED, ENDED, INTERRUPTED }
+
+    /**
+     * Ends a held read (see [presentationHolds]) unless a later read holds the
+     * thread now. A read cut off opening a reader's place keeps the place,
+     * and the rows before, for the next read; any other end shows what it
+     * applied and settles the place. A place that did not land leaves no
+     * landing behind.
+     */
+    private fun settlePresentationHold(threadKey: String, hold: Any, place: AgentSearchResultRow?, outcome: SeekOutcome) {
+        val kept = place != null && outcome == SeekOutcome.INTERRUPTED
+        synchronized(presentationHoldLock) {
+            if (presentationHolds[threadKey] !== hold) return
+            presentationHolds.remove(threadKey)
+            val detail = heldDetails.remove(threadKey)
+            if (!kept && detail != null) mutableState.value = mutableState.value.withThreadSnapshot(detail)
+        }
+        if (place == null) return
+        if (!kept) readerPlaces.remove(threadKey, place)
+        if (outcome != SeekOutcome.LANDED) mutableState.value.searchLanding
+            ?.takeIf { it.threadKey == threadKey && !it.marked && it.recordID == place.recordID }?.let(::finishSearchLanding)
+    }
+
+    /** Applies [change] to the detail a held thread's read waits to show. */
+    private fun updateHeldDetail(threadKey: String, change: (AgentThreadDetail) -> AgentThreadDetail?) =
+        synchronized(presentationHoldLock) { heldDetails[threadKey]?.let(change)?.let { heldDetails[threadKey] = it } }
 
     internal fun coalesceProjectionIfRunning(threadKey: String, cursor: String?, direction: String): Boolean {
         if (projectionJobs[threadKey]?.isActive != true) return false
@@ -2437,9 +2958,23 @@ class AgentCenterPresenter(
         if (source.hostObservation) endpoint.isCurrentIngestion(source.binding) else endpoint.isCurrentRoute(source.binding)
 
     private fun startNativeInventory(endpoint: AgentSessionEndpoint) {
-        if (!enabled || !applicationForeground || ingestionInventories[endpoint.key]?.isActive == true) return
+        if (!enabled || !applicationForeground) return
+        // A finished pass waits for a request, so a job left by an endpoint
+        // re-registered under the same key would otherwise wait forever.
+        if (ingestionInventories[endpoint.key]?.isActive == true && nativeInventoryRequests[endpoint.key]?.endpoint === endpoint) return
+        ingestionInventories.remove(endpoint.key)?.cancel()
+        val requests = NativeInventoryRequests(endpoint)
+        nativeInventoryRequests[endpoint.key] = requests
         ingestionInventories[endpoint.key] = scope.launch {
+            var retriedIncomplete = false
             while (enabled && applicationForeground && coordinator.directory.resolve(endpoint.key) === endpoint) {
+                val started = System.nanoTime()
+                var completed = false
+                var refused = 0
+                var unbound = 0
+                // A request made before this pass lists is answered by it.
+                requests.passes.tryReceive()
+                val pass = InventoryPass().also { requests.running = it }
                 try {
                     val (host, connection) = nativeConnection(endpoint)
                     var cursor: String? = null
@@ -2455,13 +2990,18 @@ class AgentCenterPresenter(
                             require(path.startsWith("/") || (path.isEmpty() && provider in setOf("codex", "opencode") && row.optString("nativeSessionID") == session))
                             canonicalAgentThreadKey(connection.binding.hostID, provider, session) to row.getString("thread")
                         }
-                        require(claims.map { it.first }.distinct().size == claims.size)
-                        host.reserveHandles(claims)
+                        // Two rows for one thread (one rollout in two directories):
+                        // keep the first rather than fail every pass for good.
+                        val firstClaims = claims.distinctBy { it.first }
+                        host.reserveHandles(firstClaims)
+                        val claimed = firstClaims.toMap()
+                        var ownersReplaced = false
                         for (row in reply.inventory) {
                             val provider = row.getString("provider")
                             require(connection.supportsProvider(provider))
                             val session = row.getString("sessionID")
                             val key = canonicalAgentThreadKey(connection.binding.hostID, provider, session)
+                            if (claimed[key] != row.getString("thread")) continue
                             val handle = row.getString("thread")
                             claimNativeThread(key, host)
                             host.threads.putIfAbsent(key, NativeThread(handle))
@@ -2471,7 +3011,7 @@ class AgentCenterPresenter(
                             // owner, so sibling inventories cannot churn its
                             // token or downgrade a proved live pane.
                             val oldEndpoint = old?.let { coordinator.directory.resolve(it.endpointKey) }
-                            if (old != null && oldEndpoint != null && isProjectionSourceCurrent(oldEndpoint, old)) continue
+                            if (old != null && oldEndpoint != null && isProjectionSourceCurrent(oldEndpoint, old)) { pass.skip(key); continue }
                             val path = row.getString("transcriptRef")
                             require(path.startsWith("/") || (path.isEmpty() && provider in setOf("codex", "opencode") && row.optString("nativeSessionID") == session))
                             val locator = if (path.isEmpty()) "native:$session" else Base64.getUrlEncoder().withoutPadding().encodeToString(path.encodeToByteArray())
@@ -2483,14 +3023,29 @@ class AgentCenterPresenter(
                             // the observational binding suspends. The ABI refuses
                             // to revoke its live token; do not let that refusal
                             // abort discovery of the rest of this valid page.
-                            if (projectionSources[key] !== old) continue
-                            val issued = (issuance as? AgentEndpointResult.Success)?.value
-                                ?: error("inventory observation unavailable")
+                            if (projectionSources[key] !== old) { pass.skip(key); continue }
+                            val issued = when (issuance) {
+                                is AgentEndpointResult.Success -> issuance.value
+                                // Core refuses to observe a thread a live pane holds,
+                                // which already presents it. Refusing one row used to
+                                // end the pass, so later rows were never listed and
+                                // the whole pass repeated every 18 s.
+                                is AgentEndpointResult.Failed ->
+                                    if (issuance.code == "platform_binding_rejected") { refused++; pass.skip(key); continue }
+                                    // Core refuses the row's identity itself (a session
+                                    // ID no thread can carry): a retry gets the same
+                                    // answer, so list the rest and finish.
+                                    else { unbound++; continue }
+                                else -> error("staleBinding")
+                            }
                             require(!issued.actionable)
+                            // Core hands back a token it still holds for an identical
+                            // authority; its later retirement is a real one.
+                            retiredObservationTokens.remove(issued.bindingToken)
                             bindingTokens[issued.coreBinding.tokenKey(key)] = issued.bindingToken
                             val owner = ThreadOwner(endpoint.key, id.toString(), issued.coreBinding.toString(), issued.bindingToken, endpoint = endpoint)
                             val previousOwner = threadOwners.put(key, owner)
-                            refreshPaneAgentProviders()
+                            if (previousOwner != null) ownersReplaced = true
                             if (previousOwner?.bindingToken != owner.bindingToken) {
                                 previousOwner?.let { cancelUnwrittenActions(key, it.bindingToken) }
                                 cancelFirstProjectionRetry(key)
@@ -2502,11 +3057,25 @@ class AgentCenterPresenter(
                                 .put("bindingToken", issued.bindingToken).put("hostDisplayLabel", connection.binding.hostDisplayLabel.take(512))
                                 .put("inventoryModified", row.getLong("modified"))))
                         }
+                        // An observation has no pane, so only a replaced owner
+                        // can change the providers: once a page, not per row.
+                        if (ownersReplaced) refreshPaneAgentProviders()
                         // One shared list projection per page, no transcript
                         // bootstrap and no selection side effect per row.
                         forward(JSONObject().put("v", 1).put("kind", "filter").put("grouping", mutableState.value.grouping))
                         scheduleNativeInterests()
-                        if (!reply.end.getBoolean("hasMore")) break
+                        if (!reply.end.getBoolean("hasMore")) {
+                            requests.worked = true
+                            // The host skipped a source still being written: one
+                            // retry lists it once written. Only one: a source the
+                            // host cannot read while its agent keeps writing ends
+                            // every pass incomplete.
+                            val incomplete = reply.end.optBoolean("incomplete")
+                            completed = !incomplete || retriedIncomplete
+                            retriedIncomplete = incomplete && !retriedIncomplete
+                            if (!completed) diagnostics?.invoke("agent_native_inventory", mapOf("reason" to "incomplete"))
+                            break
+                        }
                         val next = reply.end.getString("cursor")
                         check(seen.add(next) && pageIndex < 163)
                         cursor = next
@@ -2516,8 +3085,23 @@ class AgentCenterPresenter(
                     // only cancellation of this inventory job ends discovery.
                     currentCoroutineContext().ensureActive()
                 }
-                catch (failure: Throwable) { diagnostics?.invoke("agent_native_inventory", mapOf("reason" to "inventory-failed", "errorType" to failure.javaClass.simpleName)) }
-                delay(10_000)
+                catch (failure: Throwable) {
+                    requests.worked = false
+                    diagnostics?.invoke("agent_native_inventory", AgentIngestionDiagnostics.failure(failure) + mapOf("reason" to "inventory-failed"))
+                }
+                finally {
+                    if (requests.running === pass) requests.running = null
+                    // An owner left a thread this pass skipped: list it again.
+                    if (pass.finish()) requests.passes.trySend(Unit)
+                }
+                if (refused > 0) diagnostics?.invoke("agent_native_inventory", mapOf("reason" to "live-threads-skipped", "count" to refused.toString()))
+                if (unbound > 0) diagnostics?.invoke("agent_native_inventory", mapOf("reason" to "threads-unbound", "count" to unbound.toString()))
+                // A complete pass is current until agent activity on this host
+                // asks again (as on iOS); a failed one retries. Either way passes
+                // start at most once per interval, since each one walks every
+                // transcript on the host.
+                if (completed) requests.passes.receive()
+                delay((nativeInventoryIntervalMillis - (System.nanoTime() - started) / 1_000_000).coerceAtLeast(0))
             }
         }
     }
@@ -2528,6 +3112,7 @@ class AgentCenterPresenter(
         readRetryRequests.clear()
         ingestionInterestJob?.cancel(); ingestionInterestJob = null
         ingestionInventories.values.forEach { it.cancel() }; ingestionInventories.clear()
+        nativeInventoryRequests.clear()
         ingestionHosts.values.distinct().forEach { it.close() }; ingestionHosts.clear()
         ingestionCommits.values.forEach { it.cancel() }; ingestionCommits.clear()
         // Preparation belongs to the retired read, not the conversation.
@@ -2759,7 +3344,7 @@ class AgentCenterPresenter(
     }
 
     private suspend fun commitNative(host: NativeHost, connection: AgentIngestionConnection, handle: String, reply: AgentIngestionConnection.Reply,
-                                     threadID: JSONObject, token: String): NativeCommit {
+                                     threadID: JSONObject, token: String, movesPrompt: Boolean = true): NativeCommit {
         // A successful request may resume after reader EOF, a foreground
         // boundary, or pool replacement. Core deliberately accepts a fresh
         // bootstrap epoch, so only this adapter can reject the retired owner.
@@ -2786,7 +3371,9 @@ class AgentCenterPresenter(
         val deferred = CompletableDeferred<NativeCommit>()
         check(ingestionCommits.size < 16 && ingestionCommits.putIfAbsent(id, deferred) == null)
         try {
-            val committed = if (!forwardEncoded(command)) NativeCommit(false, code = "commitNotForwarded")
+            val forwarded = forwardQuestionInput(
+                agentLeaseThreadKey(JSONObject().put("threadID", threadID)).takeIf { movesPrompt }) { forwardEncoded(command) }
+            val committed = if (!forwarded) NativeCommit(false, code = "commitNotForwarded")
                 else withTimeoutOrNull(15_000) { deferred.await() } ?: NativeCommit(false, code = "commitTimeout")
             currentCoroutineContext().ensureActive()
             requireCurrentNativeConnection(host, connection)
@@ -2849,7 +3436,7 @@ class AgentCenterPresenter(
         val owner = threadOwners[key] ?: return
         val endpoint = coordinator.directory.resolve(source.endpointKey) ?: return
         if (owner.bindingToken != source.bindingToken ||
-            detail.binding?.toJson()?.sameCoreBinding(JSONObject(owner.coreBindingJSON)) != true ||
+            !detail.binding.toJson().sameCoreBinding(JSONObject(owner.coreBindingJSON)) ||
             !isProjectionSourceCurrent(endpoint, source)) return
         cancelFirstProjectionRetry(key)
         clearNativeReadStatus(key)
@@ -3071,7 +3658,8 @@ class AgentCenterPresenter(
     private suspend fun projectNative(endpoint: AgentSessionEndpoint, binding: AgentEndpointBinding, threadID: JSONObject,
                                       provider: String, transcriptRef: String, key: String, token: String,
                                       cursor: String?, direction: String = "before",
-                                      prefetchConnection: AgentIngestionConnection? = null) {
+                                      prefetchConnection: AgentIngestionConnection? = null,
+                                      seek: AgentSearchResultRow? = null) {
         var stage = "binding"
         val started = System.nanoTime()
         try {
@@ -3099,113 +3687,8 @@ class AgentCenterPresenter(
         } else claimNativeThread(key, host)
         val selected = thread
         selected.operation.withLock {
-            if (prefetchConnection == null && (direction == "bootstrap" || cursor != null)) {
-                mutableState.value = mutableState.value.copy(ingestionCapacityThreads = mutableState.value.ingestionCapacityThreads - key)
-            }
-            if (selected.window != null && cursor == null && direction != "bootstrap") {
-                scheduleInitialPrefetch(host, connection, selected, key)
-                updateNativeInterests(host, connection)
-                return@withLock
-            }
-            selected.paused = true
-            try {
-                stage = "unsubscribe"
-                host.interests.withLock {
-                    connection.request(JSONObject().put("kind", "unsubscribe").put("thread", selected.handle)); selected.fast = null
-                }
-                suspend fun read(operation: String, anchor: String? = null) {
-                    var limit = 100
-                    while (true) {
-                        stage = "pageRead"
-                        val previousWindow = selected.window
-                        val reply = connection.request(JSONObject().put("kind", "window.read").put("operation", operation)
-                            .put("thread", selected.handle).putOpt("cursor", anchor).put("limit", limit)
-                            .put("windowVersion", if (operation == "bootstrap") 0 else checkNotNull(selected.window).getLong("version")))
-                        val source = checkNotNull(projectionSources[key])
-                        try {
-                            stage = "pageAuthority"
-                            check(enabled && applicationForeground) { "projectionInactive" }
-                            check(isNativeHostCurrent(host)) { "staleEpoch" }
-                            // Core leases contain terminal addresses, not host
-                            // display names. Compare every route field without
-                            // rejecting the same address's presentation label.
-                            check(source.binding.sameRouteAs(binding)) { "projectionRouteChanged" }
-                            check(source.bindingToken == token) { "projectionOwnerChanged" }
-                            check(isProjectionSourceCurrent(endpoint, source)) { "staleBinding" }
-                            if (prefetchConnection != null) check(selected.window === previousWindow) { "resyncRequired" }
-                            currentCoroutineContext().ensureActive()
-                            // Once Core accepts a page its remote lease must be
-                            // ACKed even if optional prefetch is cancelled in
-                            // that local commit interval. This never waits for
-                            // another history response or blocks Send's frontier.
-                            val commit = kotlinx.coroutines.withContext(if (prefetchConnection != null)
-                                kotlinx.coroutines.NonCancellable else currentCoroutineContext()) {
-                                stage = "pageCommit"
-                                val committed = commitNative(host, connection, selected.handle, reply, threadID, token)
-                                if (committed.accepted) {
-                                    val checkpoint = checkNotNull(committed.window)
-                                    stage = "pageAck"
-                                    connection.acknowledgeWindow(reply, checkpoint)
-                                    requireCurrentNativeConnection(host, connection)
-                                    if (prefetchConnection != null) check(selected.window === previousWindow) { "resyncRequired" }
-                                    selected.window = checkpoint; selected.liveCursor = checkpoint.getString("liveCursor")
-                                }
-                                committed
-                            }
-                            if (commit.accepted) {
-                                diagnostics?.invoke("agent_ingestion_window_read", mapOf(
-                                    "operation" to operation, "provider" to provider,
-                                    "transport" to binding.transport.name,
-                                    "request" to reply.end.getString("id"), "accepted" to "true"))
-                                return
-                            }
-                            connection.cancelWindow(reply.end.getString("id"), selected.handle)
-                            if (commit.code != "capacityExceeded" || limit == 1) error(commit.code ?: "ingestion rejected")
-                            limit = (limit / 2).coerceAtLeast(1)
-                        } catch (failure: Throwable) {
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                                connection.cancelWindow(reply.end.getString("id"), selected.handle)
-                            }
-                            throw failure
-                        }
-                    }
-                }
-                if (selected.window == null || direction == "bootstrap") {
-                    // A bootstrap sizes its new window from this connection's
-                    // hello. Legacy hosts are reported too, as four segments,
-                    // so a window never outgrows the host it acknowledges to.
-                    forward(JSONObject().put("v", 1).put("kind", "hostCapacity").put("threadID", threadID).put("hostWindowSegments",
-                        JSONObject().put(threadID.getString("hostID"), connection.maxWindowSegments)))
-                    read("bootstrap")
-                    if (threadOwners[key]?.bindingToken == token) {
-                        firstProjectionRetryTokens.putIfAbsent(key, token)
-                        if (mutableState.value.ingestionReadStatuses[key]?.code == "sourceMissing") clearNativeReadStatus(key)
-                    }
-                    selected.initialPrefetchStarted = false
-                    scheduleInitialPrefetch(host, connection, selected, key)
-                    // Optional title metadata cannot keep the first-page
-                    // spinner or the older-page prefetch waiting on its RTT.
-                    if (provider == "codex" && selected.metadataJob?.isActive != true) {
-                        val metadata = scope.launch(start = CoroutineStart.LAZY) {
-                            try {
-                                val summary = connection.request(JSONObject().put("kind", "summary").put("thread", selected.handle))
-                                commitNative(host, connection, selected.handle, summary, threadID, token)
-                            } catch (failure: CancellationException) { throw failure }
-                            catch (failure: Throwable) {
-                                diagnostics?.invoke("agent_ingestion_metadata_failed", AgentIngestionDiagnostics.failure(failure))
-                            } finally { selected.metadataJob = null }
-                        }
-                        selected.metadataJob = metadata
-                        metadata.start()
-                    }
-                }
-                else if (cursor != null) read(direction, cursor)
-            } finally {
-                selected.paused = false
-                // Subscription maintenance is independently coalesced; page
-                // loading never waits for every visible card's control ACK.
-                scheduleNativeInterests()
-            }
+            projectNativeLocked(endpoint, binding, threadID, provider, key, token, cursor, direction, prefetchConnection,
+                host, connection, selected, seek) { stage = it }
         }
         } catch (failure: Throwable) {
             val status = (failure as? AgentIngestionReadFailure)?.status ?: if (failure.message == "sourceMissing") {
@@ -3224,7 +3707,8 @@ class AgentCenterPresenter(
                 }
             }
             if (mutableState.value.ingestionReadStatuses[key]?.recovery == "retryRead") {
-                readRetryRequests[key] = cursor to direction
+                // A retried seek has lost its landing; it reads the newest page.
+                readRetryRequests[key] = cursor to if (direction == "seek") "before" else direction
             }
             // Normal background/route cancellation is not a loading error.
             if (failure !is kotlinx.coroutines.CancellationException || failure is kotlinx.coroutines.TimeoutCancellationException) {
@@ -3233,6 +3717,230 @@ class AgentCenterPresenter(
                     "thread" to key, "elapsedMs" to ((System.nanoTime() - started) / 1_000_000).toString()))
             }
             throw failure
+        }
+    }
+
+    /**
+     * [projectNative]'s reads of [selected], under its operation lock. [onStage]
+     * names each step as it starts, for the failure [projectNative] reports.
+     */
+    private suspend fun projectNativeLocked(
+        endpoint: AgentSessionEndpoint,
+        binding: AgentEndpointBinding,
+        threadID: JSONObject,
+        provider: String,
+        key: String,
+        token: String,
+        cursor: String?,
+        direction: String,
+        prefetchConnection: AgentIngestionConnection?,
+        host: NativeHost,
+        connection: AgentIngestionConnection,
+        selected: NativeThread,
+        seek: AgentSearchResultRow?,
+        onStage: (String) -> Unit,
+    ) {
+        if (prefetchConnection == null && (direction == "bootstrap" || cursor != null)) {
+            mutableState.value = mutableState.value.copy(ingestionCapacityThreads = mutableState.value.ingestionCapacityThreads - key)
+        }
+        // A host from before seeks reads no page around a match: the thread
+        // opens at its newest page, as for a refused seek.
+        val seeking = direction == "seek" && connection.supportsWindowSeek
+        if (selected.window != null && cursor == null && direction != "bootstrap" && !seeking) {
+            if (direction == "seek" && seek != null &&
+                mutableState.value.searchLanding?.let { it.threadKey == key && it.recordID == seek.recordID } == true &&
+                mutableState.value.projectedDetails[key]?.window?.atLiveHead == false) pendingLatestRequests.add(key)
+            scheduleInitialPrefetch(host, connection, selected, key)
+            updateNativeInterests(host, connection)
+            return
+        }
+        // An opening read ends a place a notification gave up, however it ends.
+        val opening = selected.window == null && prefetchConnection == null
+        // Any other read that opens the thread here opens a reader who was in
+        // history at their place instead ([readerPlace]).
+        val place = if (selected.window == null && seek == null && direction != "bootstrap" && prefetchConnection == null &&
+            // OpenCode orders count from wherever a read began: the host
+            // reads around no row there.
+            connection.supportsWindowSeek && provider != "opencode") readerPlace(key) else null
+        val target = seek ?: place
+        val seeks = seeking || place != null
+        // A seek that starts its window here keeps the rows on screen
+        // until it ends: the newest page it reads first never shows.
+        val hold = if (seeks && selected.window == null && prefetchConnection == null) Any() else null
+        if (hold != null) synchronized(presentationHoldLock) { presentationHolds[key] = hold }
+        var outcome = SeekOutcome.INTERRUPTED
+        selected.paused = true
+        try {
+            onStage("unsubscribe")
+            // A control abandoned in flight leaves the remote watch unknown,
+            // so the connection retires with every thread on it. Optional
+            // history is cancelled by any tap or selection; its unsubscribe
+            // runs to the reply.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                host.interests.withLock {
+                    connection.request(JSONObject().put("kind", "unsubscribe").put("thread", selected.handle)); selected.fast = null
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            suspend fun read(operation: String, anchor: String? = null, wanted: () -> Boolean = { true },
+                             fields: JSONObject.() -> Unit = {}): AgentIngestionConnection.Reply {
+                var limit = 100
+                while (true) {
+                    onStage("pageRead")
+                    val previousWindow = selected.window
+                    val reply = connection.request(JSONObject().put("kind", "window.read").put("operation", operation)
+                        .put("thread", selected.handle).putOpt("cursor", anchor).put("limit", limit)
+                        .put("windowVersion", if (operation == "bootstrap") 0 else checkNotNull(selected.window).getLong("version"))
+                        .apply(fields))
+                    val source = checkNotNull(projectionSources[key])
+                    try {
+                        onStage("pageAuthority")
+                        check(enabled && applicationForeground) { "projectionInactive" }
+                        check(isNativeHostCurrent(host)) { "staleEpoch" }
+                        // Core leases contain terminal addresses, not host
+                        // display names. Compare every route field without
+                        // rejecting the same address's presentation label.
+                        check(source.binding.sameRouteAs(binding)) { "projectionRouteChanged" }
+                        check(source.bindingToken == token) { "projectionOwnerChanged" }
+                        check(isProjectionSourceCurrent(endpoint, source)) { "staleBinding" }
+                        if (prefetchConnection != null) check(selected.window === previousWindow) { "resyncRequired" }
+                        check(wanted()) { "seekDropped" }
+                        currentCoroutineContext().ensureActive()
+                        // Once Core accepts a page its remote lease must be
+                        // ACKed even if optional prefetch is cancelled in
+                        // that local commit interval. This never waits for
+                        // another history response or blocks Send's frontier.
+                        val commit = kotlinx.coroutines.withContext(if (prefetchConnection != null)
+                            kotlinx.coroutines.NonCancellable else currentCoroutineContext()) {
+                            onStage("pageCommit")
+                            val committed = commitNative(host, connection, selected.handle, reply, threadID, token,
+                                movesPrompt = operation == "bootstrap")
+                            if (committed.accepted) {
+                                val checkpoint = checkNotNull(committed.window)
+                                onStage("pageAck")
+                                connection.acknowledgeWindow(reply, checkpoint)
+                                requireCurrentNativeConnection(host, connection)
+                                if (prefetchConnection != null) check(selected.window === previousWindow) { "resyncRequired" }
+                                selected.window = checkpoint; selected.liveCursor = checkpoint.getString("liveCursor")
+                            }
+                            committed
+                        }
+                        if (commit.accepted) {
+                            diagnostics?.invoke("agent_ingestion_window_read", mapOf(
+                                "operation" to operation, "provider" to provider,
+                                "transport" to binding.transport.name,
+                                "request" to reply.end.getString("id"), "accepted" to "true"))
+                            return reply
+                        }
+                        connection.cancelWindow(reply.end.getString("id"), selected.handle)
+                        if (commit.code != "capacityExceeded" || limit == 1) error(commit.code ?: "ingestion rejected")
+                        limit = (limit / 2).coerceAtLeast(1)
+                    } catch (failure: Throwable) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                            connection.cancelWindow(reply.end.getString("id"), selected.handle)
+                        }
+                        throw failure
+                    }
+                }
+            }
+            if (selected.window == null || direction == "bootstrap") {
+                // A bootstrap sizes its new window from this connection's
+                // hello. Legacy hosts are reported too, as four segments,
+                // so a window never outgrows the host it acknowledges to.
+                forward(JSONObject().put("v", 1).put("kind", "hostCapacity").put("threadID", threadID).put("hostWindowSegments",
+                    JSONObject().put(threadID.getString("hostID"), connection.maxWindowSegments)))
+                read("bootstrap")
+                if (threadOwners[key]?.bindingToken == token) {
+                    firstProjectionRetryTokens.putIfAbsent(key, token)
+                    if (mutableState.value.ingestionReadStatuses[key]?.code == "sourceMissing") clearNativeReadStatus(key)
+                }
+                selected.initialPrefetchStarted = false
+                if (!seeks) scheduleInitialPrefetch(host, connection, selected, key)
+                // Optional title metadata cannot keep the first-page
+                // spinner or the older-page prefetch waiting on its RTT.
+                if (provider == "codex" && selected.metadataJob?.isActive != true) {
+                    val metadata = scope.launch(start = CoroutineStart.LAZY) {
+                        try {
+                            val summary = connection.request(JSONObject().put("kind", "summary").put("thread", selected.handle))
+                            commitNative(host, connection, selected.handle, summary, threadID, token, movesPrompt = false)
+                        } catch (failure: CancellationException) { throw failure }
+                        catch (failure: Throwable) {
+                            diagnostics?.invoke("agent_ingestion_metadata_failed", AgentIngestionDiagnostics.failure(failure))
+                        } finally { selected.metadataJob = null }
+                    }
+                    selected.metadataJob = metadata
+                    metadata.start()
+                }
+            }
+            else if (cursor != null) read(direction, cursor)
+            // The page around a match, read from the live cursor into a
+            // viewport apart from the head. A refusal (the record moved, a
+            // source that cannot seek, a cursor the head moved past) opens
+            // the thread at its newest page.
+            val order = target?.sequence?.seekOrder()
+            val live = selected.liveCursor
+            // A reader who left the match (another thread, the newest page)
+            // keeps the window they chose.
+            var landingID = target?.recordID
+            val awaited = { mutableState.value.searchLanding?.let { it.threadKey == key && it.recordID == landingID } == true }
+            outcome = SeekOutcome.ENDED
+            if (seeks && target != null && order != null && live != null && awaited()) {
+                outcome = SeekOutcome.INTERRUPTED
+                try {
+                    val reply = read("seek", live, wanted = awaited) {
+                        // The record ID names the generation the order counts in.
+                        put("order", order).put("recordID", target.recordID)
+                        target.sourceOffset?.seekOrder()?.let { put("sourceOffset", it) }
+                        target.seekToken?.let { put("seekToken", it) }
+                    }
+                    // An index the host rebuilt since the search (its cache
+                    // evicted it) numbers the same record under a new ID.
+                    val landed = reply.recordIDs[order]
+                    if (landed != null && landed != landingID && retargetSearchLanding(key, target.recordID, landed)) landingID = landed
+                    // Core clears the anchor with the old viewport; a head
+                    // that rolls before the reader lands keeps the match. A
+                    // reader who left it while the page applied goes back to
+                    // the newest page; one who tapped another match here
+                    // lands there instead.
+                    outcome = if (awaited()) {
+                        viewportAnchor(key, checkNotNull(landingID))
+                        readerPlaces.remove(key)
+                        SeekOutcome.LANDED
+                    } else {
+                        if (mutableState.value.searchLanding?.threadKey != key) pendingLatestRequests.add(key)
+                        SeekOutcome.ENDED
+                    }
+                } catch (failure: CancellationException) {
+                    // A seek that timed out on a live connection ended there,
+                    // as on iOS: its newest page shows and the place settles.
+                    if (failure is kotlinx.coroutines.TimeoutCancellationException && !connection.isClosed &&
+                        isNativeHostCurrent(host)) outcome = SeekOutcome.ENDED
+                    throw failure
+                } catch (failure: Throwable) {
+                    val left = !awaited()
+                    diagnostics?.invoke(if (left) "agent_ingestion_seek_dropped" else "agent_ingestion_seek_refused",
+                        AgentIngestionDiagnostics.failure(failure) + mapOf("provider" to provider, "transport" to binding.transport.name))
+                    // The connection went, not the record: the next one tries again.
+                    if (!connection.isClosed && isNativeHostCurrent(host)) {
+                        outcome = SeekOutcome.ENDED
+                        // Even from another match's page; the read's end reads
+                        // it. A held detail still shows the rows before: Core's
+                        // window is the one the newest page would replace.
+                        val shown = synchronized(presentationHoldLock) { heldDetails[key] } ?: mutableState.value.projectedDetails[key]
+                        if (!left && shown?.window?.atLiveHead == false) pendingLatestRequests.add(key)
+                        // A newest page the refusal leaves pages older as any
+                        // newly opened thread's does.
+                        else if (!left && hold != null) scheduleInitialPrefetch(host, connection, selected, key)
+                    }
+                }
+            }
+        } finally {
+            if (hold != null) settlePresentationHold(key, hold, place, outcome)
+            if (opening) readerPlacesGivenUp.remove(key)
+            selected.paused = false
+            // Subscription maintenance is independently coalesced; page
+            // loading never waits for every visible card's control ACK.
+            scheduleNativeInterests()
         }
     }
 
@@ -3247,6 +3955,7 @@ class AgentCenterPresenter(
         bindingToken: String,
         initialPagesRemaining: Int = 0,
         nativeDirection: String = "before",
+        seek: AgentSearchResultRow? = null,
     ) {
         // Every exit below used to be a bare `return`. A transcript projection
         // is what supplies a row's title, status and model, so when it stopped
@@ -3266,7 +3975,7 @@ class AgentCenterPresenter(
         if (provider in setOf("codex", "claude", "pi", "opencode", "kimi")) {
             try {
                 projectNative(endpoint, binding, threadID, provider, transcriptRef, threadKey, bindingToken,
-                    cursor, direction = nativeDirection)
+                    cursor, direction = nativeDirection, seek = seek)
             } catch (failure: kotlinx.coroutines.CancellationException) { throw failure }
             catch (failure: Throwable) { refuse("native-ingestion-failed errorType=${failure.javaClass.simpleName}") }
             return
@@ -3321,7 +4030,9 @@ class AgentCenterPresenter(
                     .putOpt("summary", pageFrame.opt("summary"))
                     .put("hasMore", end.optBoolean("hasMore", false))
                 if (threadOwners[threadKey]?.bindingToken == bindingToken) {
-                    val sent = forward(JSONObject().put("v", 1).put("kind", "projection").put("threadID", threadID).put("bindingToken", bindingToken).put("projection", page))
+                    val sent = forwardQuestionInput(threadKey) {
+                        forward(JSONObject().put("v", 1).put("kind", "projection").put("threadID", threadID).put("bindingToken", bindingToken).put("projection", page))
+                    }
                     // A positive marker as well as the refusals: without it,
                     // "no projection diagnostic" is ambiguous between "never
                     // ran" and "ran and was accepted", which is the difference
@@ -3347,12 +4058,97 @@ class AgentCenterPresenter(
         }
     }
 
-    private suspend fun searchNativeProvider(endpoint: AgentSessionEndpoint, key: String, source: ProjectionSource, query: String): JSONArray = withTimeout(30_000) {
+    /** The agent process a thread's search connection is scoped to, read
+     * from its owner's Core binding: its PID and incarnation, or none. */
+    private fun searchContext(key: String): Pair<Int?, String> {
         val context = threadOwners[key]?.coreBindingJSON?.let(::JSONObject)
         val rawPID = context?.opt("agentPID")
         require(rawPID == null || rawPID == JSONObject.NULL || rawPID is Int || rawPID is Long)
         val contextPID = (rawPID as? Number)?.toLong()?.also { require(it in 2..Int.MAX_VALUE) }?.toInt()
-        val (host, connection) = nativeConnection(endpoint, contextPID, context?.optJSONObject("incarnation")?.optString("rawValue") ?: "")
+        return contextPID to (context?.optJSONObject("incarnation")?.optString("rawValue") ?: "")
+    }
+
+    /** The pooled connection [searchConnection] would use, keyed as
+     * [nativeConnection] keys it, so one failed open fences all its threads. */
+    private fun searchConnectionKey(endpoint: AgentSessionEndpoint, key: String): Pair<AgentSessionKey, String> =
+        endpoint.key to runCatching { searchContext(key) }.fold(
+            onSuccess = { (pid, incarnation) -> pid?.let { "$it:$incarnation" } ?: "default" },
+            onFailure = { "invalid:$key" },
+        )
+
+    private suspend fun searchConnection(endpoint: AgentSessionEndpoint, key: String): Pair<NativeHost, AgentIngestionConnection> {
+        val (contextPID, incarnation) = searchContext(key)
+        return nativeConnection(endpoint, contextPID, incarnation)
+    }
+
+    private fun isSearchSourceCurrent(endpoint: AgentSessionEndpoint, key: String, source: ProjectionSource): Boolean =
+        isProjectionSourceCurrent(endpoint, source) && projectionSources[key] === source && threadOwners[key]?.bindingToken == source.bindingToken
+
+    private class SearchSource(val key: String, val source: ProjectionSource, val endpoint: AgentSessionEndpoint)
+
+    /** One host's pass: its matches, the threads to page instead, and
+     * whether any thread was left not fully searched (the budget, a failed
+     * request, a changed source or matches the host could not send). */
+    private class HostSearch(val results: List<JSONObject>, val paged: List<SearchSource>, val incomplete: Boolean)
+
+    /** Searches every thread a host holds a handle for in a few host passes,
+     * a few hundred kilobytes a reply. The threads to page instead are those
+     * it has no handle for, those the host skipped as having no file to scan,
+     * and a batch the host refused outright. */
+    private suspend fun searchHost(group: List<SearchSource>, needle: String, admitted: Int, deadline: Long,
+                                   progress: suspend (List<JSONObject>) -> Unit): HostSearch {
+        val first = group.first()
+        val remaining = (deadline - System.nanoTime()) / 1_000_000
+        if (remaining <= 0) return HostSearch(emptyList(), emptyList(), incomplete = true)
+        val (host, connection) = withTimeout(remaining) { searchConnection(first.endpoint, first.key) }
+        if (!connection.supportsSearch) return HostSearch(emptyList(), group, incomplete = false)
+        val held = linkedMapOf<String, SearchSource>()
+        val paged = mutableListOf<SearchSource>()
+        for (entry in group) {
+            // As on iOS: a reader this host lacks is paged, and fails there,
+            // so its host reads as not fully searched rather than the thread
+            // silently matching nothing.
+            val handle = host.threads[entry.key]?.handle
+            if (connection.supportsProvider(entry.source.provider) && handle != null && handle !in held) held[handle] = entry
+            else paged += entry
+        }
+        if (held.isEmpty()) return HostSearch(emptyList(), paged, incomplete = false)
+        val handles = held.entries.associate { it.value.key to it.key }
+        val threadIDs = held.mapValues { JSONObject(it.value.source.threadID) }
+        val outcome = runAgentHostSearch(held.keys.toList(), needle, AGENT_SEARCH_HOST_RESULTS - admitted, deadline,
+            request = { fields, timeoutMillis ->
+                check(isNativeHostCurrent(host)) { "staleBinding" }
+                connection.request(fields, timeoutMillis).also { requireCurrentNativeConnection(host, connection) }
+            },
+            match = { reply, batch ->
+                val wire = checkNotNull(reply.wire)
+                val epoch = connection.epoch
+                val requestID = reply.end.getString("id")
+                val threads = batch.associateWith { threadIDs.getValue(it) }
+                // Decoding and matching a few hundred kilobytes of records
+                // stays off Main, like a large page's parse.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    SharedAgentHostSearch.matches(wire, epoch, requestID, needle, threads)
+                }
+            },
+            admit = { match ->
+                val id = match.getJSONObject("threadID")
+                val key = canonicalAgentThreadKey(id.getString("hostID"), id.getJSONObject("providerID").getString("rawValue"), id.getString("providerSessionID"))
+                val handle = handles[key]
+                val entry = handle?.let { held[it] }
+                if (entry != null && isSearchSourceCurrent(entry.endpoint, key, entry.source)) handle else null
+            },
+            handleOf = { match ->
+                val id = match.getJSONObject("threadID")
+                handles[canonicalAgentThreadKey(id.getString("hostID"), id.getJSONObject("providerID").getString("rawValue"), id.getString("providerSessionID"))]
+            },
+            progress = progress,
+        )
+        return HostSearch(outcome.results, paged + outcome.paged.map { held.getValue(it) }, outcome.incomplete)
+    }
+
+    private suspend fun searchNativeProvider(endpoint: AgentSessionEndpoint, key: String, source: ProjectionSource, query: String): JSONArray = withTimeout(30_000) {
+        val (host, connection) = searchConnection(endpoint, key)
         check(connection.supportsProvider(source.provider))
         val nativeLocator = source.provider in setOf("codex", "opencode") && source.transcriptRef.startsWith("native:")
         val resolved = connection.request(JSONObject().put("kind", "resolve").put("provider", source.provider)
@@ -3390,57 +4186,144 @@ class AgentCenterPresenter(
     }
 
     private suspend fun runRemoteSearch(query: String) {
-        if (query.isEmpty()) {
-            forward(JSONObject().put("v", 1).put("kind", "search")
-                .put("searchSnapshot", JSONObject().put("results", JSONArray()).put("unavailableHostIDs", JSONArray())))
-            return
-        }
+        // Hosts are searched once typing pauses: each keystroke's search
+        // would otherwise queue on the hosts ahead of transcript reads.
+        delay(300)
+        // The rows shown when the search starts stay while it runs, and each
+        // reply that finds more adds them; the end shows what it found.
+        val shown = presentedSearchResults
         val results = JSONArray()
         val unavailableHosts = linkedSetOf<String>()
         val resultCounts = mutableMapOf<String, Int>()
         val deadline = System.nanoTime() + 30_000_000_000L
-        for ((sourceKey, source) in projectionSources.entries.sortedBy { it.value.threadID }) {
+        // Each host connection searches all the threads it holds in one pass;
+        // only the threads it cannot scan are paged one by one. Open
+        // conversations go first, then inventory, as on iOS.
+        val groups = linkedMapOf<NativeHost, MutableList<SearchSource>>()
+        val paged = mutableListOf<SearchSource>()
+        // A connection that could not open stays failed for this search, so
+        // its other threads are not reopened one by one past the deadline.
+        val failedConnections = mutableSetOf<Pair<AgentSessionKey, String>>()
+        // Each connection is opened once a search: thousands of threads would
+        // otherwise each repeat its setup on Main.
+        val openConnections = mutableMapOf<Pair<AgentSessionKey, String>, NativeHost>()
+        var visited = 0
+        for ((sourceKey, source) in projectionSources.entries
+            .sortedWith(compareBy<Map.Entry<String, ProjectionSource>>({ it.value.hostObservation }, { it.value.threadID }))) {
+            currentCoroutineContext().ensureActive()
+            if (++visited % 64 == 0) kotlinx.coroutines.yield()
+            if (!enabled || !applicationForeground) return
+            val hostID = JSONObject(source.threadID).getString("hostID")
+            val owner = threadOwners[sourceKey]
+            // A thread another owner holds now is not searched from a source
+            // left on the old one: its host reads as not fully searched.
+            if (owner?.endpointKey != source.endpointKey || owner.bindingToken != source.bindingToken) {
+                hostID.takeIf(::isUUID)?.let(unavailableHosts::add)
+                continue
+            }
+            val endpoint = coordinator.directory.resolve(source.endpointKey)
+            if (endpoint == null) {
+                hostID.takeIf(::isUUID)?.let(unavailableHosts::add)
+                continue
+            }
+            val entry = SearchSource(sourceKey, source, endpoint)
+            val connectionKey = searchConnectionKey(endpoint, sourceKey)
+            val remaining = (deadline - System.nanoTime()) / 1_000_000
+            if (connectionKey in failedConnections || remaining <= 0) { unavailableHosts.add(hostID); continue }
+            try {
+                val host = openConnections[connectionKey]
+                    ?: withTimeout(remaining) { searchConnection(endpoint, sourceKey) }.first.also { openConnections[connectionKey] = it }
+                // A Tier-C reader is judged on the connection just opened,
+                // which proves its conformance; one that still does not
+                // conform is not read, and its host reads as not fully
+                // searched rather than the thread silently matching nothing.
+                val tierCProvider = AgentTierCProvider.fromWire(source.provider)
+                if (tierCProvider != null && !tierCConforms(source.endpointKey, source.binding, tierCProvider)) {
+                    unavailableHosts.add(hostID)
+                    continue
+                }
+                groups.getOrPut(host) { mutableListOf() } += entry
+            } catch (failure: Exception) {
+                // Only this search's own cancellation ends it; a nested
+                // timeout or a cancelled opening is a failed connection.
+                if (failure is CancellationException) currentCoroutineContext().ensureActive()
+                failedConnections += connectionKey
+                unavailableHosts.add(hostID)
+            }
+        }
+        for (group in groups.values) {
             currentCoroutineContext().ensureActive()
             if (!enabled || !applicationForeground) return
+            val hostID = JSONObject(group.first().source.threadID).getString("hostID")
+            if ((resultCounts[hostID] ?: 0) >= AGENT_SEARCH_HOST_RESULTS) continue
+            if (deadline - System.nanoTime() <= 0) { unavailableHosts.add(hostID); continue }
+            try {
+                val earlier = results.length()
+                val found = searchHost(group, query, resultCounts[hostID] ?: 0, deadline) { hostFound ->
+                    if (enabled && applicationForeground) {
+                        val sofar = JSONArray()
+                        for (index in 0 until earlier) sofar.put(results.get(index))
+                        hostFound.forEach(sofar::put)
+                        publishSearch(agentSearchMerged(shown, sofar), JSONArray())
+                    }
+                }
+                // What the host found before its budget ran out still shows;
+                // the host is reported incomplete, as a paged search that ran
+                // out of time is.
+                for (match in found.results) if ((resultCounts[hostID] ?: 0) < AGENT_SEARCH_HOST_RESULTS) {
+                    results.put(match)
+                    resultCounts[hostID] = (resultCounts[hostID] ?: 0) + 1
+                }
+                paged += found.paged
+                if (found.incomplete) unavailableHosts.add(hostID)
+            } catch (failure: Exception) {
+                if (failure is CancellationException) currentCoroutineContext().ensureActive()
+                unavailableHosts.add(hostID)
+            }
+        }
+        for (entry in paged) {
+            currentCoroutineContext().ensureActive()
+            if (!enabled || !applicationForeground) return
+            val sourceKey = entry.key; val source = entry.source; val endpoint = entry.endpoint
             val hostID = JSONObject(source.threadID).getString("hostID")
             if ((resultCounts[hostID] ?: 0) >= 100) continue
             val remaining = (deadline - System.nanoTime()) / 1_000_000
             if (remaining <= 0) { unavailableHosts.add(hostID); continue }
-            val owner = threadOwners[sourceKey]
-            if (owner?.endpointKey != source.endpointKey || owner.bindingToken != source.bindingToken) continue
-            val tierCProvider = AgentTierCProvider.fromWire(source.provider)
-            if (tierCProvider != null && !tierCConforms(source.endpointKey, source.binding, tierCProvider)) continue
-            val endpoint = coordinator.directory.resolve(source.endpointKey)
-            if (endpoint == null) {
-                JSONObject(source.threadID).optString("hostID").takeIf(::isUUID)?.let(unavailableHosts::add)
-                continue
-            }
             try {
                 val matches = withTimeout(remaining) { searchNativeProvider(endpoint, sourceKey, source, query) }
                 currentCoroutineContext().ensureActive()
-                if (isProjectionSourceCurrent(endpoint, source) && projectionSources[sourceKey] === source &&
-                    threadOwners[sourceKey]?.bindingToken == source.bindingToken) {
+                if (isSearchSourceCurrent(endpoint, sourceKey, source)) {
+                    val before = results.length()
                     for (index in 0 until matches.length()) if ((resultCounts[hostID] ?: 0) < 100) {
                         results.put(matches.getJSONObject(index))
                         resultCounts[hostID] = (resultCounts[hostID] ?: 0) + 1
                     }
+                    if (results.length() > before) publishSearch(agentSearchMerged(shown, results), JSONArray())
                 }
-            } catch (_: TimeoutCancellationException) { unavailableHosts.add(hostID) }
-            catch (error: CancellationException) { throw error }
-            catch (_: Exception) { unavailableHosts.add(hostID) }
+                // A thread whose route changed meanwhile shows nothing it
+                // found, and its host reads as not fully searched, as on iOS.
+                else unavailableHosts.add(hostID)
+            } catch (failure: Exception) {
+                // A closed connection cancels its waiting reads; that fails
+                // this source, not the whole search.
+                if (failure is CancellationException) currentCoroutineContext().ensureActive()
+                unavailableHosts.add(hostID)
+            }
         }
         currentCoroutineContext().ensureActive()
         if (!enabled || !applicationForeground) return
-        // A failed source does not make its whole host unavailable when another
-        // source on that host returned matches. Match AgentSearchSnapshot's
-        // canonical constructor: result hosts and unavailable hosts are disjoint.
-        val resultHosts = (0 until results.length()).mapNotNull { index ->
-            results.optJSONObject(index)?.optJSONObject("threadID")?.optString("hostID")
+        // A host that stopped early is reported even when it returned
+        // matches: they are partial. Core's AgentSearchSnapshot refuses more
+        // than four hosts in all, so both lists are bounded as its
+        // constructor bounds them.
+        val admittedResults = agentSearchResultsWithinHostCap(results)
+        val resultHosts = (0 until admittedResults.length()).mapNotNull { index ->
+            admittedResults.optJSONObject(index)?.optJSONObject("threadID")?.optString("hostID")
         }.toSet()
-        val fullyUnavailableHosts = agentSearchUnavailableHosts(unavailableHosts, resultHosts)
-        forward(JSONObject().put("v", 1).put("kind", "search").put("searchSnapshot", JSONObject()
-            .put("results", results).put("unavailableHostIDs", JSONArray(fullyUnavailableHosts))))
-        diagnostics?.invoke("agent_search_completed", mapOf("count" to results.length().toString(), "unavailableHosts" to fullyUnavailableHosts.size.toString()))
+        val incompleteHosts = agentSearchUnavailableHosts(unavailableHosts, resultHosts)
+        publishSearch(admittedResults, JSONArray(incompleteHosts))
+        diagnostics?.invoke("agent_search_completed", mapOf("count" to admittedResults.length().toString(),
+            "unavailableHosts" to incompleteHosts.size.toString(), "paged" to paged.size.toString()))
     }
 
     private suspend fun executeLaunchPlan(snapshot: SharedAgentSnapshot) {
@@ -3543,7 +4426,7 @@ class AgentCenterPresenter(
             }
             AgentEndpointResult.StaleBinding -> failLaunch("Terminal binding is stale")
             is AgentEndpointResult.Unavailable -> failLaunch(result.reason)
-            is AgentEndpointResult.Failed -> failLaunch(result.code.replace('_', ' '))
+            is AgentEndpointResult.Failed -> failLaunch("Launch failed: ${result.code.replace('_', ' ')}")
         }
     }
 
@@ -3685,297 +4568,35 @@ class AgentCenterPresenter(
                 inputCapable = currentCapabilities.verifiedInput && currentCapabilities.semanticKeys)
         }
         suspend fun currentInputTarget(): Boolean = currentInputTargetProof() == AgentInputTargetProof.PROVEN
-        suspend fun inspectInputSurface(): com.bambouville.tessera.agent.platform.AgentTerminalObservation? {
-            val first = (endpoint.inspect(leasedBinding) as? AgentEndpointResult.Success)?.value ?: return null
-            if (!first.captureWaitedForFrame) return first
-            // Frame readiness can outlive a process. Refresh authority, then
-            // accept only an immediate capture; do not age that proof again.
-            if (!currentInputTarget()) return null
-            val fresh = (endpoint.inspect(leasedBinding) as? AgentEndpointResult.Success)?.value ?: return null
-            return fresh.takeUnless { it.captureWaitedForFrame }
-        }
         val capability = endpoint.capabilities.value
         if (!capability.verifiedInput || !capability.semanticKeys) {
             refuse("unavailable", AgentNotSentReason.INPUT_UNAVAILABLE)
             return
         }
         val result = when (pending.kind) {
-            "send", "queue" -> {
-                val planned = actionPayload?.optJSONObject("text")
-                val text = planned?.optString("text")?.takeIf { it == pending.text }
-                    ?: return refuse("verificationFailed", AgentNotSentReason.PLAN_MISMATCH)
-                if (planned.optBoolean("queueWhenWorking") != (pending.kind == "queue") ||
-                    planned.optString("composerVerification", "required") !=
-                        (if (pending.bypassComposerVerification) "userOverride" else "required")) {
-                    return refuse("verificationFailed", AgentNotSentReason.PLAN_MISMATCH)
-                }
-                // Known provider editors accept bracketed-paste events. Raw
-                // newlines must never be sent as separate terminal commands.
-                if (!text.isSafeTerminalInsert() || ('\n' in text && leaseProvider !in setOf("codex", "claude"))) {
-                    return refuse("unsupported_multiline_input", AgentNotSentReason.UNSUPPORTED_INPUT)
-                }
-                val source = projectionSources[detail.row.key]
-                if (source != null && (source.endpointKey != endpoint.key || !source.binding.sameRouteAs(leasedBinding) || source.provider != leaseProvider)) {
-                    return refuse("staleBinding", AgentNotSentReason.ROUTE_CHANGED)
-                }
-                suspend fun outgoingPhase(kind: String, frontier: JSONObject? = null) {
-                    val replyCode = if (kind == "armOutgoing") "outgoingArmed" else "outgoingDispatched"
-                    val key = "${lease.getString("token")}:$replyCode"
-                    val accepted = kotlinx.coroutines.CompletableDeferred<Boolean>()
-                    outgoingArms[key] = accepted
-                    try {
-                        check(forward(JSONObject().put("v", 1).put("kind", kind).put("lease", lease)
-                            .put("bindingToken", freshBindingToken).putOpt("frontier", frontier)) &&
-                            withTimeoutOrNull(2_000) { accepted.await() } == true) { "receipt_baseline_unavailable" }
-                    } finally { outgoingArms.remove(key)?.cancel() }
-                }
-                // Source observation is independent of selected.operation,
-                // bootstrap, history prefetch, and native index preparation.
-                // A missing/slow observer does not prevent guarded delivery.
-                val leaseThread = lease.getJSONObject("threadID")
-                val unavailable = JSONObject().put("version", 1).put("actionID", lease.getString("token"))
-                    .put("provider", leaseProvider).put("providerSessionID", leaseThread.getString("providerSessionID"))
-                    .put("consistency", "unavailable")
-                // A foreign cancellation (closing the ingestion connection
-                // cancels its pending requests) is an unavailable frontier,
-                // exactly as a missed read is; only the action's own propagates.
-                val frontier = agentOptionalRead(unavailable = { failure ->
-                    diagnostics?.invoke("agent_send_frontier_unavailable", AgentIngestionDiagnostics.failure(failure))
-                    unavailable
-                }) {
-                    withTimeoutOrNull(2_000) {
-                        if (source == null) return@withTimeoutOrNull unavailable
-                        val context = freshAuthority.coreBinding
-                        val (host, connection) = nativeConnection(endpoint, context.optInt("agentPID", -1).takeIf { it > 1 },
-                            context.optJSONObject("incarnation")?.optString("rawValue") ?: "")
-                        val existing = host.threads[detail.row.key]?.handle
-                        val handle = existing ?: run {
-                            val nativeLocator = source.provider in setOf("codex", "opencode") && source.transcriptRef.startsWith("native:")
-                            val resolved = connection.request(JSONObject().put("kind", "resolve").put("provider", source.provider)
-                                .put(if (nativeLocator) "nativeSessionID" else "transcriptRef",
-                                    if (nativeLocator) source.transcriptRef.removePrefix("native:") else source.transcriptRef))
-                            check(resolved.end.optString("provider") == leaseProvider &&
-                                resolved.end.optString("sessionID") == leaseThread.getString("providerSessionID")) { "contextIdentityConflict" }
-                            resolved.end.getString("thread")
-                        }
-                        val reply = connection.request(JSONObject().put("kind", "receipt.frontier").put("thread", handle)
-                            .put("actionID", lease.getString("token")), timeoutMillis = 2_000)
-                        requireCurrentNativeConnection(host, connection)
-                        val observed = reply.end.getJSONObject("frontier")
-                        check(observed.optString("actionID").equals(lease.getString("token"), ignoreCase = true) &&
-                            observed.optString("serviceEpoch") == connection.epoch && observed.optString("provider") == leaseProvider &&
-                            observed.optString("providerSessionID") == leaseThread.getString("providerSessionID")) { "staleBinding" }
-                        observed
-                    } ?: unavailable
-                }
-                // Arming precedes the final process/composer proof so a fast
-                // receipt cannot be missed; nothing has been written yet, so a
-                // baseline that cannot be armed is a clean refusal.
-                val armed = try {
-                    outgoingPhase("armOutgoing", frontier)
-                    outgoingPhase("outgoingDispatched")
-                    true
-                } catch (failure: Exception) {
-                    if (agentThrowIsCancellation(failure, currentCoroutineContext().isActive)) throw failure
-                    false
-                }
-                if (!armed) return refuse("receipt_baseline_unavailable", AgentNotSentReason.RECEIPT_UNAVAILABLE)
-                sendTiming("receipt_ready")
-                fun composer(observation: com.bambouville.tessera.agent.platform.AgentTerminalObservation, requireEmpty: Boolean = false, literalImagePathsOnly: Boolean = false) =
-                    SharedAgentComposerEvidence.assess(
-                        leaseProvider, observation.visibleTail.decodeToString(), observation.currentCursorLine, text, pending.kind == "queue",
-                        cursorRow = observation.cursorRow,
-                        safetyOnly = leaseProvider in setOf("codex", "claude"), requireEmpty = requireEmpty, cursorVisible = observation.cursorVisible,
-                        cursorColumn = observation.cursorColumn,
-                        screen = observation.screenEvidence, literalImagePathsOnly = literalImagePathsOnly,
-                    )
-                val ready = setOf(Assessment.RETURN, Assessment.TAB)
-                var targetProvenOnce = false
-                val delivery = deliverAgentGuardedText(object : AgentTextDeliveryPort {
-                    override suspend fun ensureActive() = ensureActionActive()
-                    override suspend fun proveInputTarget(timeoutMillis: Long) = currentInputTargetProof(timeoutMillis).also { proof ->
-                        if (proof == AgentInputTargetProof.PROVEN && !targetProvenOnce) { targetProvenOnce = true; sendTiming("text_target_proven") }
-                    }
-                    override suspend fun inspect(timeoutMillis: Long) =
-                        (withTimeoutOrNull(timeoutMillis) { endpoint.inspect(leasedBinding) } as? AgentEndpointResult.Success)?.value
-                    override fun assessEmptyComposer(observation: com.bambouville.tessera.agent.platform.AgentTerminalObservation) =
-                        composer(observation, requireEmpty = true)
-                    override fun insertion() = SharedAgentComposerEvidence.insertion(leaseProvider, text)
-                    override fun writeRefusal() = preWriteRefusal()?.also { refusal ->
-                        diagnostics?.invoke("agent_composer_guard_refused", mapOf("stage" to "before_insert",
-                            "reason" to refusal.code, "written" to "false"))
-                    }
-                    override suspend fun write(input: ByteArray) = endpoint.sendInput(leasedBinding, input).also {
-                        if (it is AgentEndpointResult.Success) sendTiming("text_write_ack")
-                    }
-                    override suspend fun submit(): AgentEndpointResult<Unit> {
-                        if (pending.bypassComposerVerification) {
-                            // Give image paths time to become attachments without refusing an explicit override.
-                            if (leaseProvider in setOf("claude", "codex") && agentDraftAttachesImages(text)) {
-                                awaitObservation(endpoint, leasedBinding, attempts = if (leaseProvider == "claude") 40 else 20,
-                                    budgetMillis = AGENT_OVERRIDE_IMAGE_WAIT_MILLIS, beforeInspect = { currentInputTarget() }) {
-                                    it.authoritative && !it.truncated && composer(it) in ready
-                                }
-                            }
-                            // The explicit choice bypasses composer recognition only;
-                            // the route, process and transport gate still precede the key.
-                            if (!currentInputTarget()) return AgentEndpointResult.Failed("staleBinding")
-                            ensureActionActive()
-                            preWriteFailure()?.let { return it }
-                            val key = if (leaseProvider == "codex" && pending.kind == "queue") AgentSemanticKey.TAB else AgentSemanticKey.RETURN
-                            return endpoint.sendSemanticKey(leasedBinding, key).also {
-                                if (it is AgentEndpointResult.Success) sendTiming("submit_key_ack")
-                            }
-                        }
-                        // Claude reads each attached image before it shows the marker.
-                        val claudeImages = leaseProvider == "claude" && agentDraftAttachesImages(text)
-                        var literalImagePathsOnly = false
-                        var observed = awaitObservation(endpoint, leasedBinding, attempts = if (claudeImages) 40 else 20, beforeInspect = {
-                            currentInputTarget().also { if (it) sendTiming("key_target_proven") }
-                        }) { it.authoritative && !it.truncated && composer(it) in ready }
-                        if (observed == null && claudeImages) {
-                            // The full upload wait is exhausted. Only an unchanged
-                            // literal draft earns the shared plain-text fallback.
-                            observed = awaitObservation(endpoint, leasedBinding, attempts = 1,
-                                beforeInspect = { currentInputTarget() }) {
-                                it.authoritative && !it.truncated && composer(it, literalImagePathsOnly = true) in ready
-                            }
-                            literalImagePathsOnly = observed != null
-                        }
-                        val safeAfter = observed?.let { composer(it, literalImagePathsOnly = literalImagePathsOnly) }
-                        if (observed == null || !observed.authoritative || observed.truncated || safeAfter !in ready) {
-                            diagnostics?.invoke("agent_composer_guard_refused", mapOf("stage" to "before_submit",
-                                "reason" to (safeAfter?.name?.lowercase() ?: "capture_unavailable"), "written" to "true"))
-                            return AgentEndpointResult.Failed("terminal_input_not_ready")
-                        }
-                        val key = if (safeAfter == Assessment.TAB) AgentSemanticKey.TAB else AgentSemanticKey.RETURN
-                        ensureActionActive()
-                        preWriteFailure()?.let { return it }
-                        val sent = endpoint.sendSemanticKey(leasedBinding, key)
-                        if (sent !is AgentEndpointResult.Success) return sent
-                        sendTiming("submit_key_ack")
-                        // Claude can swallow Return while reading an image.
-                        // Shared presence recognizes the rendered markers too.
-                        if (claudeImages && !literalImagePathsOnly && awaitObservation(endpoint, leasedBinding,
-                                attempts = 40, beforeInspect = { currentInputTarget() }) { after ->
-                                agentComposerDeparted(after, SharedAgentComposerEvidence.assess(leaseProvider,
-                                    after.visibleTail.decodeToString(), after.currentCursorLine, text, pending.kind == "queue",
-                                    cursorRow = after.cursorRow))
-                            } == null) return AgentEndpointResult.Failed("verificationFailed")
-                        return sent
-                    }
-                }, writes, knownEditor = leaseProvider in setOf("codex", "claude"), policy = refresh.remainingPolicy(preflightPolicy),
-                    bypassComposerVerification = pending.bypassComposerVerification)
-                when (delivery) {
-                    is AgentTextDeliveryResult.NotSent -> {
-                        if (delivery.reason == AgentNotSentReason.INPUT_NOT_READY || delivery.reason == AgentNotSentReason.TERMINAL_DRAFT ||
-                            delivery.last == AgentInputSurfaceSample.TargetUnproven) {
-                            diagnostics?.invoke("agent_composer_guard_refused", agentComposerGuardFields(delivery.last, delivery.attempts))
-                        }
-                        return refuse(when (delivery.reason) {
-                            AgentNotSentReason.ROUTE_CHANGED -> "staleBinding"
-                            AgentNotSentReason.TERMINAL_DRAFT -> "terminal_has_unsent_draft"
-                            AgentNotSentReason.UNSUPPORTED_INPUT -> "invalid_input"
-                            else -> "terminal_input_not_ready"
-                        }, delivery.reason, delivery.attempts, composerRefusal = delivery.canSkipComposerVerification(leaseProvider))
-                    }
-                    is AgentTextDeliveryResult.Attempted -> {
-                        if (delivery.attempts > 1) {
-                            diagnostics?.invoke("agent_send_input_settled", mapOf("attempts" to delivery.attempts.toString()))
-                        }
-                        delivery.result
-                    }
-                }
-            }
-            "interrupt" -> {
-                if (actionPayload?.optJSONObject("targetBinding")?.sameCoreBinding(lease.optJSONObject("binding")) != true) {
-                    return finishAction(lease, "verificationFailed")
-                }
-                if (!currentInputTarget()) return finishAction(lease, "staleBinding")
-                // A blank baseline would make any later frame "different":
-                // settle one with text first, or send no Escape at all.
-                val before = agentSettledBaseline { budget -> withTimeoutOrNull(budget) { inspectInputSurface() } }
-                    ?: return finishAction(lease, "verificationFailed")
-                if (!currentInputTarget()) return finishAction(lease, "staleBinding")
-                ensureActionActive()
-                preWriteFailure()?.let { return finishAction(lease, it.code) }
-                val sent = writes.attempt { endpoint.sendSemanticKey(leasedBinding, AgentSemanticKey.ESCAPE) }
-                if (sent !is AgentEndpointResult.Success) sent
-                else if (awaitObservation(endpoint, leasedBinding) { agentInterruptObserved(before, it) } == null
-                ) AgentEndpointResult.Failed("verification_failed")
-                else AgentEndpointResult.Success(Unit)
-            }
-            "answerPrompt" -> {
-                val planned = actionPayload?.optJSONObject("promptAnswer")
-                    ?: return finishAction(lease, "verificationFailed")
-                val token = pending.actionToken ?: return finishAction(lease, "verificationFailed")
-                val optionID = pending.optionID ?: return finishAction(lease, "verificationFailed")
-                val signature = pending.promptSignature ?: return finishAction(lease, "verificationFailed")
-                if (planned.optJSONObject("actionToken")?.optString("rawValue") != token || planned.optString("optionID") != optionID ||
-                    planned.optString("expectedSignature") != signature ||
-                    planned.optString("text").takeIf { planned.has("text") } != pending.promptText ||
-                    planned.optString("control").takeIf { planned.has("control") } != pending.control ||
-                    planned.optJSONObject("binding")?.sameCoreBinding(lease.optJSONObject("binding")) != true
-                ) return finishAction(lease, "verificationFailed")
-                val provider = detail.row.providerID
-                val display = detail.prompt?.takeIf { it.actionToken == token }?.options
-                    ?: return finishAction(lease, "verificationFailed")
-                if (!currentInputTarget()) return finishAction(lease, "staleBinding")
-                val goal = when {
-                    pending.control != null -> JSONObject().put("kind", "control").put("control", pending.control)
-                    pending.promptText != null -> JSONObject().put("kind", "text").put("text", pending.promptText)
-                    else -> JSONObject().put("kind", "option").put("optionID", optionID)
-                }
-                var anchor: JSONObject? = null
-                val history = mutableListOf<String>()
-                var outcome: AgentEndpointResult<Unit> = AgentEndpointResult.Failed("verification_failed")
-                for (stepIndex in 0..24) {
-                    val input = JSONObject().put("goal", goal).put("expectedSignature", signature)
-                        .putOpt("anchor", anchor).put("history", JSONArray(history))
-                    val read = settledFreshPrompt(endpoint, leasedBinding, detail.row.key, token, provider, display, input)
-                    if (read == null) {
-                        // The readiness window already retried unavailable captures.
-                        // Exhaustion must settle the lease, including after a write;
-                        // only a parsed planner wait may extend the answer sequence.
-                        outcome = AgentEndpointResult.Failed("verification_failed")
-                        break
-                    }
-                    val step = read.plan
-                    if (step == null) {
-                        outcome = AgentEndpointResult.Failed("verification_failed")
-                        break
-                    }
-                    anchor = step.anchor?.toJson()
-                    when (step.action) {
-                        "done" -> { outcome = AgentEndpointResult.Success(Unit); break }
-                        "refuse" -> { outcome = AgentEndpointResult.Failed(promptPlanRefusalCode(step.refusal)); break }
-                        "wait" -> history += "wait"
-                        "send" -> {
-                            val bytes = step.bytes
-                            val phase = step.phase
-                            if (bytes.isNullOrEmpty() || phase == null ||
-                                phase !in setOf("select", "confirm", "focus", "navigate", "type", "submit", "control")) {
-                                outcome = AgentEndpointResult.Failed("verification_failed")
-                                break
-                            }
-                            // Proven after the capture this step was planned on and
-                            // Core's reply: an agent that exited meanwhile leaves
-                            // its shell in the pane, which must not get the keys.
-                            if (!currentInputTarget()) { outcome = AgentEndpointResult.StaleBinding; break }
-                            ensureActionActive()
-                            val refusal = preWriteFailure()
-                            if (refusal != null) { outcome = refusal; break }
-                            val sent = writes.attempt { sendAgentPromptStep(endpoint, leasedBinding, bytes, step.semanticKey) }
-                            if (sent !is AgentEndpointResult.Success) { outcome = sent; break }
-                            history += phase
-                        }
-                        else -> { outcome = AgentEndpointResult.Failed("verification_failed"); break }
-                    }
-                    if (stepIndex == 24) break
-                    delay(120)
-                }
-                outcome
-            }
+            "send", "queue" -> executeTextAction(
+                lease, detail, pending, actionPayload, endpoint, leasedBinding, leaseProvider, freshAuthority,
+                freshBindingToken, writes, refresh, preflightPolicy,
+                refuse = { legacyCode, reason, attempts, composerRefusal ->
+                    refuse(legacyCode, reason, attempts, composerRefusal)
+                    null
+                },
+                sendTiming = ::sendTiming,
+                currentInputTargetProof = { currentInputTargetProof(it) },
+                currentInputTarget = { currentInputTarget() },
+                preWriteRefusal = ::preWriteRefusal,
+                preWriteFailure = ::preWriteFailure,
+            ) ?: return
+            "interrupt" -> executeInterruptAction(
+                lease, actionPayload, endpoint, leasedBinding, writes,
+                currentInputTarget = { currentInputTarget() },
+                preWriteFailure = ::preWriteFailure,
+            ) ?: return
+            "answerPrompt" -> executePromptAnswerAction(
+                lease, detail, pending, actionPayload, endpoint, leasedBinding, freshBindingToken, writes,
+                currentInputTarget = { currentInputTarget() },
+                preWriteFailure = ::preWriteFailure,
+            ) ?: return
             "openTerminal" -> {
                 if (actionPayload?.optJSONObject("targetBinding")?.sameCoreBinding(lease.optJSONObject("binding")) != true) {
                     return finishAction(lease, "verificationFailed")
@@ -3992,6 +4613,373 @@ class AgentCenterPresenter(
             is AgentEndpointResult.Failed -> result.code
         }
         finishAction(lease, code, freshBindingToken)
+    }
+
+    /**
+     * A send or queue lease: arms the receipt, then delivers the planned text
+     * behind the composer guard. Null once [refuse] has finished the lease.
+     */
+    private suspend fun executeTextAction(
+        lease: JSONObject,
+        detail: AgentThreadDetail,
+        pending: PendingAction,
+        actionPayload: JSONObject?,
+        endpoint: AgentSessionEndpoint,
+        leasedBinding: AgentEndpointBinding,
+        leaseProvider: String,
+        freshAuthority: AgentIssuedBinding,
+        freshBindingToken: String,
+        writes: AgentTerminalWriteLatch,
+        refresh: AgentRouteBindingRefresh<*>,
+        preflightPolicy: AgentSendPreflightPolicy,
+        refuse: (legacyCode: String, reason: AgentNotSentReason, attempts: Int?, composerRefusal: Boolean) -> Nothing?,
+        sendTiming: (String) -> Unit,
+        currentInputTargetProof: suspend (timeoutMillis: Long) -> AgentInputTargetProof,
+        currentInputTarget: suspend () -> Boolean,
+        preWriteRefusal: () -> AgentNotSentReason?,
+        preWriteFailure: () -> AgentEndpointResult.Failed?,
+    ): AgentEndpointResult<Unit>? {
+        val planned = actionPayload?.optJSONObject("text")
+        val text = planned?.optString("text")?.takeIf { it == pending.text }
+            ?: return refuse("verificationFailed", AgentNotSentReason.PLAN_MISMATCH, null, false)
+        if (planned.optBoolean("queueWhenWorking") != (pending.kind == "queue") ||
+            planned.optString("composerVerification", "required") !=
+                (if (pending.bypassComposerVerification) "userOverride" else "required")) {
+            return refuse("verificationFailed", AgentNotSentReason.PLAN_MISMATCH, null, false)
+        }
+        // Known provider editors accept bracketed-paste events. Raw
+        // newlines must never be sent as separate terminal commands.
+        if (!text.isSafeTerminalInsert() || ('\n' in text && leaseProvider !in setOf("codex", "claude"))) {
+            return refuse("unsupported_multiline_input", AgentNotSentReason.UNSUPPORTED_INPUT, null, false)
+        }
+        val source = projectionSources[detail.row.key]
+        if (source != null && (source.endpointKey != endpoint.key || !source.binding.sameRouteAs(leasedBinding) || source.provider != leaseProvider)) {
+            return refuse("staleBinding", AgentNotSentReason.ROUTE_CHANGED, null, false)
+        }
+        suspend fun outgoingPhase(kind: String, frontier: JSONObject? = null) {
+            val replyCode = if (kind == "armOutgoing") "outgoingArmed" else "outgoingDispatched"
+            val key = "${lease.getString("token")}:$replyCode"
+            val accepted = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            outgoingArms[key] = accepted
+            try {
+                check(forward(JSONObject().put("v", 1).put("kind", kind).put("lease", lease)
+                    .put("bindingToken", freshBindingToken).putOpt("frontier", frontier)) &&
+                    withTimeoutOrNull(2_000) { accepted.await() } == true) { "receipt_baseline_unavailable" }
+            } finally { outgoingArms.remove(key)?.cancel() }
+        }
+        // Source observation is independent of selected.operation,
+        // bootstrap, history prefetch, and native index preparation.
+        // A missing/slow observer does not prevent guarded delivery.
+        val leaseThread = lease.getJSONObject("threadID")
+        val unavailable = JSONObject().put("version", 1).put("actionID", lease.getString("token"))
+            .put("provider", leaseProvider).put("providerSessionID", leaseThread.getString("providerSessionID"))
+            .put("consistency", "unavailable")
+        // A foreign cancellation (closing the ingestion connection
+        // cancels its pending requests) is an unavailable frontier,
+        // exactly as a missed read is; only the action's own propagates.
+        val frontier = agentOptionalRead(unavailable = { failure ->
+            diagnostics?.invoke("agent_send_frontier_unavailable", AgentIngestionDiagnostics.failure(failure))
+            unavailable
+        }) {
+            withTimeoutOrNull(2_000) {
+                if (source == null) return@withTimeoutOrNull unavailable
+                val context = freshAuthority.coreBinding
+                val (host, connection) = nativeConnection(endpoint, context.optInt("agentPID", -1).takeIf { it > 1 },
+                    context.optJSONObject("incarnation")?.optString("rawValue") ?: "")
+                val existing = host.threads[detail.row.key]?.handle
+                val handle = existing ?: run {
+                    val nativeLocator = source.provider in setOf("codex", "opencode") && source.transcriptRef.startsWith("native:")
+                    val resolved = connection.request(JSONObject().put("kind", "resolve").put("provider", source.provider)
+                        .put(if (nativeLocator) "nativeSessionID" else "transcriptRef",
+                            if (nativeLocator) source.transcriptRef.removePrefix("native:") else source.transcriptRef))
+                    check(resolved.end.optString("provider") == leaseProvider &&
+                        resolved.end.optString("sessionID") == leaseThread.getString("providerSessionID")) { "contextIdentityConflict" }
+                    resolved.end.getString("thread")
+                }
+                val reply = connection.request(JSONObject().put("kind", "receipt.frontier").put("thread", handle)
+                    .put("actionID", lease.getString("token")), timeoutMillis = 2_000)
+                requireCurrentNativeConnection(host, connection)
+                val observed = reply.end.getJSONObject("frontier")
+                check(observed.optString("actionID").equals(lease.getString("token"), ignoreCase = true) &&
+                    observed.optString("serviceEpoch") == connection.epoch && observed.optString("provider") == leaseProvider &&
+                    observed.optString("providerSessionID") == leaseThread.getString("providerSessionID")) { "staleBinding" }
+                observed
+            } ?: unavailable
+        }
+        // Arming precedes the final process/composer proof so a fast
+        // receipt cannot be missed; nothing has been written yet, so a
+        // baseline that cannot be armed is a clean refusal.
+        val armed = try {
+            outgoingPhase("armOutgoing", frontier)
+            outgoingPhase("outgoingDispatched")
+            true
+        } catch (failure: Exception) {
+            if (agentThrowIsCancellation(failure, currentCoroutineContext().isActive)) throw failure
+            false
+        }
+        if (!armed) return refuse("receipt_baseline_unavailable", AgentNotSentReason.RECEIPT_UNAVAILABLE, null, false)
+        sendTiming("receipt_ready")
+        fun composer(observation: com.bambouville.tessera.agent.platform.AgentTerminalObservation, requireEmpty: Boolean = false, literalImagePathsOnly: Boolean = false) =
+            SharedAgentComposerEvidence.assess(
+                leaseProvider, observation.visibleTail.decodeToString(), observation.currentCursorLine, text, pending.kind == "queue",
+                cursorRow = observation.cursorRow,
+                safetyOnly = leaseProvider in setOf("codex", "claude"), requireEmpty = requireEmpty, cursorVisible = observation.cursorVisible,
+                cursorColumn = observation.cursorColumn,
+                screen = observation.screenEvidence, literalImagePathsOnly = literalImagePathsOnly,
+            )
+        val ready = setOf(Assessment.RETURN, Assessment.TAB)
+        var targetProvenOnce = false
+        val delivery = deliverAgentGuardedText(object : AgentTextDeliveryPort {
+            override suspend fun ensureActive() = ensureActionActive()
+            override suspend fun proveInputTarget(timeoutMillis: Long) = currentInputTargetProof(timeoutMillis).also { proof ->
+                if (proof == AgentInputTargetProof.PROVEN && !targetProvenOnce) { targetProvenOnce = true; sendTiming("text_target_proven") }
+            }
+            override suspend fun inspect(timeoutMillis: Long) =
+                (withTimeoutOrNull(timeoutMillis) { endpoint.inspect(leasedBinding) } as? AgentEndpointResult.Success)?.value
+            override fun assessEmptyComposer(observation: com.bambouville.tessera.agent.platform.AgentTerminalObservation) =
+                composer(observation, requireEmpty = true)
+            override fun insertion() = SharedAgentComposerEvidence.insertion(leaseProvider, text)
+            override fun writeRefusal() = preWriteRefusal()?.also { refusal ->
+                diagnostics?.invoke("agent_composer_guard_refused", mapOf("stage" to "before_insert",
+                    "reason" to refusal.code, "written" to "false"))
+            }
+            override suspend fun write(input: ByteArray) = endpoint.sendInput(leasedBinding, input).also {
+                if (it is AgentEndpointResult.Success) sendTiming("text_write_ack")
+            }
+            override suspend fun submit(): AgentEndpointResult<Unit> {
+                if (pending.bypassComposerVerification) {
+                    // Give image paths time to become attachments without refusing an explicit override.
+                    if (leaseProvider in setOf("claude", "codex") && agentDraftAttachesImages(text)) {
+                        awaitObservation(endpoint, leasedBinding, attempts = if (leaseProvider == "claude") 40 else 20,
+                            budgetMillis = AGENT_OVERRIDE_IMAGE_WAIT_MILLIS, beforeInspect = { currentInputTarget() }) {
+                            it.authoritative && !it.truncated && composer(it) in ready
+                        }
+                    }
+                    // The explicit choice bypasses composer recognition only;
+                    // the route, process and transport gate still precede the key.
+                    if (!currentInputTarget()) return AgentEndpointResult.Failed("staleBinding")
+                    ensureActionActive()
+                    preWriteFailure()?.let { return it }
+                    val key = if (leaseProvider == "codex" && pending.kind == "queue") AgentSemanticKey.TAB else AgentSemanticKey.RETURN
+                    return endpoint.sendSemanticKey(leasedBinding, key).also {
+                        if (it is AgentEndpointResult.Success) sendTiming("submit_key_ack")
+                    }
+                }
+                // Claude reads each attached image before it shows the marker.
+                val claudeImages = leaseProvider == "claude" && agentDraftAttachesImages(text)
+                var literalImagePathsOnly = false
+                var observed = awaitObservation(endpoint, leasedBinding, attempts = if (claudeImages) 40 else 20, beforeInspect = {
+                    currentInputTarget().also { if (it) sendTiming("key_target_proven") }
+                }) { it.authoritative && !it.truncated && composer(it) in ready }
+                if (observed == null && claudeImages) {
+                    // The full upload wait is exhausted. Only an unchanged
+                    // literal draft earns the shared plain-text fallback.
+                    observed = awaitObservation(endpoint, leasedBinding, attempts = 1,
+                        beforeInspect = { currentInputTarget() }) {
+                        it.authoritative && !it.truncated && composer(it, literalImagePathsOnly = true) in ready
+                    }
+                    literalImagePathsOnly = observed != null
+                }
+                val safeAfter = observed?.let { composer(it, literalImagePathsOnly = literalImagePathsOnly) }
+                if (observed == null || !observed.authoritative || observed.truncated || safeAfter !in ready) {
+                    diagnostics?.invoke("agent_composer_guard_refused", mapOf("stage" to "before_submit",
+                        "reason" to (safeAfter?.name?.lowercase() ?: "capture_unavailable"), "written" to "true"))
+                    return AgentEndpointResult.Failed("terminal_input_not_ready")
+                }
+                val key = if (safeAfter == Assessment.TAB) AgentSemanticKey.TAB else AgentSemanticKey.RETURN
+                ensureActionActive()
+                preWriteFailure()?.let { return it }
+                val sent = endpoint.sendSemanticKey(leasedBinding, key)
+                if (sent !is AgentEndpointResult.Success) return sent
+                sendTiming("submit_key_ack")
+                // Claude can swallow Return while reading an image.
+                // Shared presence recognizes the rendered markers too.
+                if (claudeImages && !literalImagePathsOnly && awaitObservation(endpoint, leasedBinding,
+                        attempts = 40, beforeInspect = { currentInputTarget() }) { after ->
+                        agentComposerDeparted(after, SharedAgentComposerEvidence.assess(leaseProvider,
+                            after.visibleTail.decodeToString(), after.currentCursorLine, text, pending.kind == "queue",
+                            cursorRow = after.cursorRow))
+                    } == null) return AgentEndpointResult.Failed("verificationFailed")
+                return sent
+            }
+        }, writes, knownEditor = leaseProvider in setOf("codex", "claude"), policy = refresh.remainingPolicy(preflightPolicy),
+            bypassComposerVerification = pending.bypassComposerVerification)
+        return when (delivery) {
+            is AgentTextDeliveryResult.NotSent -> {
+                if (delivery.reason == AgentNotSentReason.INPUT_NOT_READY || delivery.reason == AgentNotSentReason.TERMINAL_DRAFT ||
+                    delivery.last == AgentInputSurfaceSample.TargetUnproven) {
+                    diagnostics?.invoke("agent_composer_guard_refused", agentComposerGuardFields(delivery.last, delivery.attempts))
+                }
+                return refuse(when (delivery.reason) {
+                    AgentNotSentReason.ROUTE_CHANGED -> "staleBinding"
+                    AgentNotSentReason.TERMINAL_DRAFT -> "terminal_has_unsent_draft"
+                    AgentNotSentReason.UNSUPPORTED_INPUT -> "invalid_input"
+                    else -> "terminal_input_not_ready"
+                }, delivery.reason, delivery.attempts, delivery.canSkipComposerVerification(leaseProvider))
+            }
+            is AgentTextDeliveryResult.Attempted -> {
+                if (delivery.attempts > 1) {
+                    diagnostics?.invoke("agent_send_input_settled", mapOf("attempts" to delivery.attempts.toString()))
+                }
+                delivery.result
+            }
+        }
+    }
+
+    /** An interrupt lease: Escape against a settled baseline. Null once the lease is finished. */
+    private suspend fun executeInterruptAction(
+        lease: JSONObject,
+        actionPayload: JSONObject?,
+        endpoint: AgentSessionEndpoint,
+        leasedBinding: AgentEndpointBinding,
+        writes: AgentTerminalWriteLatch,
+        currentInputTarget: suspend () -> Boolean,
+        preWriteFailure: () -> AgentEndpointResult.Failed?,
+    ): AgentEndpointResult<Unit>? {
+        suspend fun inspectInputSurface(): com.bambouville.tessera.agent.platform.AgentTerminalObservation? {
+            val first = (endpoint.inspect(leasedBinding) as? AgentEndpointResult.Success)?.value ?: return null
+            if (!first.captureWaitedForFrame) return first
+            // Frame readiness can outlive a process. Refresh authority, then
+            // accept only an immediate capture; do not age that proof again.
+            if (!currentInputTarget()) return null
+            val fresh = (endpoint.inspect(leasedBinding) as? AgentEndpointResult.Success)?.value ?: return null
+            return fresh.takeUnless { it.captureWaitedForFrame }
+        }
+        if (actionPayload?.optJSONObject("targetBinding")?.sameCoreBinding(lease.optJSONObject("binding")) != true) {
+            return finishActionEarly(lease, "verificationFailed")
+        }
+        if (!currentInputTarget()) return finishActionEarly(lease, "staleBinding")
+        // A blank baseline would make any later frame "different":
+        // settle one with text first, or send no Escape at all.
+        val before = agentSettledBaseline { budget -> withTimeoutOrNull(budget) { inspectInputSurface() } }
+            ?: return finishActionEarly(lease, "verificationFailed")
+        if (!currentInputTarget()) return finishActionEarly(lease, "staleBinding")
+        ensureActionActive()
+        preWriteFailure()?.let { return finishActionEarly(lease, it.code) }
+        val sent = writes.attempt { endpoint.sendSemanticKey(leasedBinding, AgentSemanticKey.ESCAPE) }
+        return if (sent !is AgentEndpointResult.Success) sent
+        else if (awaitObservation(endpoint, leasedBinding) { agentInterruptObserved(before, it) } == null
+        ) AgentEndpointResult.Failed("verification_failed")
+        else AgentEndpointResult.Success(Unit)
+    }
+
+    /** An answerPrompt lease: Core's planner steps, each checked before its write. Null once the lease is finished. */
+    private suspend fun executePromptAnswerAction(
+        lease: JSONObject,
+        detail: AgentThreadDetail,
+        pending: PendingAction,
+        actionPayload: JSONObject?,
+        endpoint: AgentSessionEndpoint,
+        leasedBinding: AgentEndpointBinding,
+        freshBindingToken: String,
+        writes: AgentTerminalWriteLatch,
+        currentInputTarget: suspend () -> Boolean,
+        preWriteFailure: () -> AgentEndpointResult.Failed?,
+    ): AgentEndpointResult<Unit>? {
+        val planned = actionPayload?.optJSONObject("promptAnswer")
+            ?: return finishActionEarly(lease, "verificationFailed")
+        val token = pending.actionToken ?: return finishActionEarly(lease, "verificationFailed")
+        val optionID = pending.optionID ?: return finishActionEarly(lease, "verificationFailed")
+        val signature = pending.promptSignature ?: return finishActionEarly(lease, "verificationFailed")
+        if (planned.optJSONObject("actionToken")?.optString("rawValue") != token || planned.optString("optionID") != optionID ||
+            planned.optString("expectedSignature") != signature ||
+            planned.optString("text").takeIf { planned.has("text") } != pending.promptText ||
+            planned.optString("control").takeIf { planned.has("control") } != pending.control ||
+            planned.optJSONObject("binding")?.sameCoreBinding(lease.optJSONObject("binding")) != true
+        ) return finishActionEarly(lease, "verificationFailed")
+        val provider = detail.row.providerID
+        val display = detail.prompt?.takeIf { it.actionToken == token }?.options
+            ?: return finishActionEarly(lease, "verificationFailed")
+        if (!currentInputTarget()) return finishActionEarly(lease, "staleBinding")
+        val goal = when {
+            pending.control != null -> JSONObject().put("kind", "control").put("control", pending.control)
+            pending.promptText != null -> JSONObject().put("kind", "text").put("text", pending.promptText)
+            else -> JSONObject().put("kind", "option").put("optionID", optionID)
+        }
+        // The plan was made for the prompt that waited when Core granted
+        // this lease. A transition accepted since (that question closed,
+        // the next one asked, the turn over) means the bytes would answer
+        // another. Core is asked before each write; its reply carries the
+        // question input count it was asked at, or null for a refusal.
+        val threadKey = detail.row.key
+        suspend fun promptCheck(): Long? {
+            val token = lease.getString("token")
+            val reply = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            promptAnswerChecks[token] = reply
+            return try {
+                val askedAt = synchronized(questionInputLock) {
+                    if (!forward(JSONObject().put("v", 1).put("kind", "promptAnswerCurrent").put("lease", lease)
+                            .put("bindingToken", freshBindingToken))) null
+                    else questionInputs[threadKey] ?: 0L
+                } ?: return null
+                askedAt.takeIf { withTimeoutOrNull(2_000) { reply.await() } == true }
+            } finally { promptAnswerChecks.remove(token, reply) }
+        }
+        var anchor: JSONObject? = null
+        val history = mutableListOf<String>()
+        var outcome: AgentEndpointResult<Unit> = AgentEndpointResult.Failed("verification_failed")
+        for (stepIndex in 0..24) {
+            val input = JSONObject().put("goal", goal).put("expectedSignature", signature)
+                .putOpt("anchor", anchor).put("history", JSONArray(history))
+            val read = settledFreshPrompt(endpoint, leasedBinding, detail.row.key, token, provider, display, input)
+            if (read == null) {
+                // The readiness window already retried unavailable captures.
+                // Exhaustion must settle the lease, including after a write;
+                // only a parsed planner wait may extend the answer sequence.
+                outcome = AgentEndpointResult.Failed("verification_failed")
+                break
+            }
+            val step = read.plan
+            if (step == null) {
+                outcome = AgentEndpointResult.Failed("verification_failed")
+                break
+            }
+            anchor = step.anchor?.toJson()
+            when (step.action) {
+                "done" -> { outcome = AgentEndpointResult.Success(Unit); break }
+                "refuse" -> { outcome = AgentEndpointResult.Failed(promptPlanRefusalCode(step.refusal)); break }
+                "wait" -> history += "wait"
+                "send" -> {
+                    val bytes = step.bytes
+                    val phase = step.phase
+                    if (bytes.isNullOrEmpty() || phase == null ||
+                        phase !in setOf("select", "confirm", "focus", "navigate", "type", "submit", "control")) {
+                        outcome = AgentEndpointResult.Failed("verification_failed")
+                        break
+                    }
+                    // Proven after the capture this step was planned on: an
+                    // agent that exited meanwhile leaves its shell in the
+                    // pane, which must not get the keys. Core is asked
+                    // last, so only its local reply sits between the count
+                    // and the write; question input that arrived during it
+                    // is behind the check in Core's queue: ask again.
+                    var admitted: Boolean? = false
+                    for (attempt in 0 until 3) {
+                        if (!currentInputTarget()) { admitted = null; break }
+                        ensureActionActive()
+                        val askedAt = promptCheck() ?: break
+                        if (questionInputCount(threadKey) == askedAt) { admitted = true; break }
+                    }
+                    if (admitted == null) { outcome = AgentEndpointResult.StaleBinding; break }
+                    if (admitted == false) { outcome = AgentEndpointResult.Failed("stalePrompt"); break }
+                    val refusal = preWriteFailure()
+                    if (refusal != null) { outcome = refusal; break }
+                    val sent = writes.attempt { sendAgentPromptStep(endpoint, leasedBinding, bytes, step.semanticKey) }
+                    if (sent !is AgentEndpointResult.Success) { outcome = sent; break }
+                    history += phase
+                }
+                else -> { outcome = AgentEndpointResult.Failed("verification_failed"); break }
+            }
+            if (stepIndex == 24) break
+            delay(120)
+        }
+        return outcome
+    }
+
+    /** [finishAction] for a lease a per-kind step settles before it has a result. */
+    private fun finishActionEarly(lease: JSONObject, code: String): Nothing? {
+        finishAction(lease, code)
+        return null
     }
 
     private suspend fun ensureActionActive() {
@@ -4223,6 +5211,8 @@ class AgentCenterPresenter(
         pendingHistoryRequests.clear()
         pendingFillRequests.clear()
         pendingLatestRequests.clear()
+        pendingSeekRequests.clear()
+        dropSearchLanding()
         // Retire ownership first: a cancellation finally block must not drain
         // old demand or remove a replacement job installed after foregrounding.
         val retired = projectionJobs.values.toList()
@@ -4246,6 +5236,11 @@ class AgentCenterPresenter(
         composerRefusals.clear()
         notSentClocks.values.forEach(Job::cancel); notSentClocks.clear()
         outgoingArms.values.forEach { it.cancel() }; outgoingArms.clear()
+        promptAnswerChecks.values.forEach { it.cancel() }; promptAnswerChecks.clear()
+        readerPlaceChecks.values.forEach { it.cancel() }; readerPlaceChecks.clear()
+        readerPlaces.clear(); viewportAnchors.clear()
+        synchronized(presentationHoldLock) { presentationHolds.clear(); heldDetails.clear() }
+        synchronized(questionInputLock) { questionInputs.clear(); questionScreens.clear() }
         observer?.cancel(); observer = null
         sessionObserver?.cancel(); sessionObserver = null
         integrationEventObserver?.cancel(); integrationEventObserver = null
@@ -4256,6 +5251,7 @@ class AgentCenterPresenter(
         pendingOwners.values.forEach { it.accepted.cancel() }; pendingOwners.clear(); ownerBindingLocks.clear()
         firstProjectionRetryJobs.values.forEach(Job::cancel); firstProjectionRetryJobs.clear(); firstProjectionRetryTokens.clear()
         retiredOwnerThreads.clear()
+        retiredObservationTokens.clear()
         endedConversations.clear()
         endpointObservers.values.forEach(Job::cancel); endpointObservers.clear()
         tierACandidateJobs.values.forEach(Job::cancel); tierACandidateJobs.clear()
@@ -4267,6 +5263,7 @@ class AgentCenterPresenter(
         pendingTerminalReads.clear()
         directoryProofs.clear(); acknowledgedRecords.clear(); persistedCompletionKeys.clear(); acknowledgedCompletionEpochs.clear()
         searchJob?.cancel(); searchJob = null; projectionSources.clear()
+        presentedSearchNeedle = ""; presentedSearchResults = JSONArray()
         bindingTokens.clear(); threadOwners.clear(); pendingActions.clear(); pendingActionRequests.clear(); actionBindingTokens.clear()
         actionRequestOrderReliable.set(true); lastRuntimeEventGeneration = 0L
         candidateActionsInFlight.clear(); deliveredAttention.clear(); runtime = null
@@ -4395,11 +5392,238 @@ private val TIER_C_PROVIDER_IDS = setOf("opencode", "pi", "kimi")
 private const val MAX_TIER_C_INVENTORY_PAGES = 32
 private const val MAX_PROJECTOR_OUTPUT_BYTES = 262_144
 private const val PROJECTOR_STREAM_TIMEOUT_MILLIS = 5_000L
+/** Core answers in a turn; its events queue behind any snapshot the app is still mapping. */
+private const val READER_PLACE_TIMEOUT_MILLIS = 3_000L
 
+/**
+ * The hosts a search reports as not fully searched (unreachable, out of time,
+ * or stopped early), including hosts whose matches are therefore partial.
+ * Host IDs compare case-insensitively, as Core's UUIDs do. A result host
+ * already holds one of [AGENT_SEARCH_HOSTS] slots; any other host needs a
+ * free one, so the union stays within Core's snapshot bound.
+ */
 internal fun agentSearchUnavailableHosts(unavailable: Set<String>, resultHosts: Set<String>): List<String> {
-    val successful = resultHosts.map { it.lowercase(java.util.Locale.ROOT) }.toSet()
-    return unavailable.distinctBy { it.lowercase(java.util.Locale.ROOT) }
-        .filterNot { it.lowercase(java.util.Locale.ROOT) in successful }
+    val withResults = resultHosts.map { it.lowercase(java.util.Locale.ROOT) }.toSet()
+    var resultless = 0
+    return unavailable.distinctBy { it.lowercase(java.util.Locale.ROOT) }.filter { host ->
+        if (host.lowercase(java.util.Locale.ROOT) in withResults) return@filter true
+        (withResults.size + resultless < AGENT_SEARCH_HOSTS).also { if (it) resultless++ }
+    }
+}
+
+/**
+ * The matches of the first [AGENT_SEARCH_HOSTS] hosts that have any, in
+ * order, as Core's AgentSearchSnapshot constructor keeps them: its decoder
+ * refuses a snapshot holding more, which would drop the whole search.
+ */
+internal fun agentSearchResultsWithinHostCap(results: JSONArray): JSONArray {
+    val hosts = hashSetOf<String>()
+    val admitted = JSONArray()
+    for (index in 0 until results.length()) {
+        val result = results.optJSONObject(index) ?: continue
+        val host = result.optJSONObject("threadID")?.optString("hostID")?.lowercase(java.util.Locale.ROOT) ?: continue
+        if (host !in hosts && hosts.size >= AGENT_SEARCH_HOSTS) continue
+        hosts += host
+        admitted.put(result)
+    }
+    return admitted
+}
+
+/**
+ * The rows shown first, then what a search found, each record once and
+ * within Core's per-host and host bounds: a running search only adds rows.
+ */
+internal fun agentSearchMerged(shown: JSONArray, found: JSONArray): JSONArray {
+    val seen = hashMapOf<String, Int>()
+    val perHost = mutableMapOf<String, Int>()
+    val merged = JSONArray()
+    for (list in listOf(shown, found)) for (index in 0 until list.length()) {
+        val result = list.optJSONObject(index) ?: continue
+        val id = result.optJSONObject("threadID") ?: continue
+        // Host IDs compare case-insensitively, as Core's UUIDs do.
+        val host = id.optString("hostID").lowercase(java.util.Locale.ROOT)
+        val thread = canonicalAgentThreadKey(host,
+            id.optJSONObject("providerID")?.optString("rawValue") ?: "", id.optString("providerSessionID"))
+        val key = thread + "\u0000" + result.optString("recordID")
+        val kept = seen[key]
+        if (kept != null) {
+            // The first copy keeps its place and excerpt; a later one places
+            // a record the first could not, or proves it with a token (see
+            // `AgentSearchResult.merging`), never splitting a position.
+            val first = merged.getJSONObject(kept)
+            if (result.has("sequence") && (!first.has("sequence") || (!first.has("seekToken") && result.has("seekToken")))) {
+                merged.put(kept, JSONObject(first.toString()).apply { remove("sourceOffset"); remove("seekToken") }
+                    .put("sequence", result.get("sequence")).putOpt("sourceOffset", result.opt("sourceOffset"))
+                    .putOpt("seekToken", result.opt("seekToken")))
+            }
+            continue
+        }
+        if ((perHost[host] ?: 0) >= AGENT_SEARCH_HOST_RESULTS) continue
+        seen[key] = merged.length()
+        perHost[host] = (perHost[host] ?: 0) + 1
+        merged.put(result)
+    }
+    return agentSearchResultsWithinHostCap(merged)
+}
+
+/** UTF-8 bytes a search needle may hold: the Agent Host refuses more. */
+internal const val AGENT_SEARCH_NEEDLE_BYTES = 512
+/** Exact matches one thread contributes to a search, host or paged. */
+internal const val AGENT_SEARCH_THREAD_RESULTS = 25
+/** Matches one host contributes to a search. */
+internal const val AGENT_SEARCH_HOST_RESULTS = 100
+/** Hosts one search reports, with results or not fully searched
+ * (Core's `AgentSearchSnapshot.maximumHosts`). */
+internal const val AGENT_SEARCH_HOSTS = 4
+/** One connection request waits at most this long (`request`'s bound). */
+private const val AGENT_SEARCH_REQUEST_MILLIS = 15_000L
+
+/**
+ * The needle a search runs: the trimmed query, cut on a character (grapheme)
+ * boundary to at most [AGENT_SEARCH_NEEDLE_BYTES] UTF-8 bytes. The host
+ * request, paged search and Core's exact re-match all use this same needle,
+ * so a long multibyte query is neither refused by the host nor matched
+ * differently on either side.
+ */
+internal fun agentSearchNeedle(query: String): String {
+    val trimmed = query.trim()
+    val clusters = java.text.BreakIterator.getCharacterInstance(java.util.Locale.ROOT)
+    clusters.setText(trimmed)
+    var bytes = 0
+    var cut = 0
+    var end = clusters.next()
+    while (end != java.text.BreakIterator.DONE) {
+        val size = trimmed.substring(cut, end).encodeToByteArray().size
+        if (bytes + size > AGENT_SEARCH_NEEDLE_BYTES) break
+        bytes += size; cut = end
+        end = clusters.next()
+    }
+    return trimmed.substring(0, cut).trim()
+}
+
+/**
+ * Splits the handles one host holds into searches whose request frame stays
+ * well under the 64 KiB frame limit: at most [maxHandles] handles and
+ * [maxBytes] of encoded `threads` each, in the given order. (A single 4,096
+ * handle request is about 143 KiB, which no frame can carry.)
+ */
+internal fun agentSearchBatches(handles: List<String>, maxHandles: Int = 1_000, maxBytes: Int = 48 * 1024): List<List<String>> {
+    val batches = mutableListOf<List<String>>()
+    var batch = mutableListOf<String>()
+    var bytes = 2 // The brackets.
+    for (handle in handles) {
+        val size = JSONObject.quote(handle).encodeToByteArray().size + 1 // And its comma.
+        if (batch.isNotEmpty() && (batch.size >= maxHandles || bytes + size > maxBytes)) {
+            batches += batch
+            batch = mutableListOf()
+            bytes = 2
+        }
+        batch += handle
+        bytes += size
+    }
+    if (batch.isNotEmpty()) batches += batch
+    return batches
+}
+
+/** One host's `search.v1` pass: matches in host order, the handles to page
+ * instead, and whether any thread was left not fully searched. */
+internal class AgentHostSearchOutcome(val results: List<JSONObject>, val paged: List<String>, val incomplete: Boolean)
+
+/**
+ * Searches [handles] on one Agent Host. Each batch is its own search with its
+ * own cursor chain; the pass stops at [room] matches. [match] re-matches one
+ * reply exactly (shared Core) for that batch's handles. [handleOf] names the
+ * handle a match counts against, and [admit] repeats it only while its source
+ * is current; a thread's caps apply first, as on iOS. A thread holding 25 matches is sent back as `satisfied` with every
+ * later cursor of its batch, so the host stops reading it.
+ *
+ * The budget running out, a request timing out or failing, a match [admit]
+ * refuses, or matches the host left out as oversized, keeps every match found
+ * so far and reports the pass `incomplete`. A host refusal of a batch's
+ * first request (invalidRequest, busy, cursorExpired, …) pages that batch
+ * instead: the host never read it, so nothing is found twice.
+ */
+internal suspend fun runAgentHostSearch(
+    handles: List<String>,
+    needle: String,
+    room: Int,
+    deadlineNanos: Long,
+    request: suspend (fields: JSONObject, timeoutMillis: Long) -> AgentIngestionConnection.Reply,
+    match: suspend (reply: AgentIngestionConnection.Reply, batch: List<String>) -> SharedAgentHostSearch.Reply,
+    admit: (match: JSONObject) -> String?,
+    handleOf: (match: JSONObject) -> String?,
+    nanoTime: () -> Long = System::nanoTime,
+    progress: suspend (results: List<JSONObject>) -> Unit = {},
+): AgentHostSearchOutcome {
+    val results = mutableListOf<JSONObject>()
+    val paged = mutableListOf<String>()
+    val pagedHandles = mutableSetOf<String>()
+    val found = mutableMapOf<String, Int>()
+    var incomplete = false
+    batches@ for (batch in agentSearchBatches(handles)) {
+        if (results.size >= room) break
+        val members = batch.toSet()
+        val satisfied = linkedSetOf<String>()
+        var cursor: String? = null
+        do {
+            currentCoroutineContext().ensureActive()
+            val left = (deadlineNanos - nanoTime()) / 1_000_000
+            if (left <= 0) { incomplete = true; break@batches }
+            // No `limit`: the host reads each thread until the app reports
+            // it satisfied or its transcript ends.
+            val fields = JSONObject().put("kind", "search")
+            if (cursor == null) fields.put("query", needle).put("threads", JSONArray(batch))
+            else {
+                fields.put("cursor", cursor)
+                if (satisfied.isNotEmpty()) fields.put("satisfied", JSONArray(satisfied.toList()))
+            }
+            val reply = try {
+                match(request(fields, left.coerceIn(1L, AGENT_SEARCH_REQUEST_MILLIS)), batch)
+            } catch (failure: Exception) {
+                // Only this search's own cancellation ends it. A nested
+                // timeout or a closed connection is a failed request.
+                if (failure is CancellationException) currentCoroutineContext().ensureActive()
+                if (cursor == null && (failure is AgentIngestionRemoteError || failure is AgentIngestionReadFailure)) {
+                    for (handle in batch) if (pagedHandles.add(handle)) paged += handle
+                    continue@batches
+                }
+                incomplete = true
+                break@batches
+            }
+            val before = results.size
+            for (index in 0 until reply.results.length()) {
+                if (results.size >= room) break
+                val result = reply.results.getJSONObject(index)
+                val handle = handleOf(result)?.takeIf { it in members } ?: continue
+                val count = found[handle] ?: 0
+                if (count >= AGENT_SEARCH_THREAD_RESULTS) continue
+                // A thread whose source changed meanwhile shows nothing it
+                // found, and the host reads as incomplete, as on iOS.
+                if (admit(result) == null) { incomplete = true; continue }
+                results += result
+                found[handle] = count + 1
+                if (count + 1 == AGENT_SEARCH_THREAD_RESULTS) satisfied += handle
+            }
+            if (results.size > before) progress(results.toList())
+            // Matches the host left out as too large to send leave the host
+            // incomplete; what it did send stands.
+            if (reply.oversizedRecords > 0) incomplete = true
+            // A thread the host could not scan itself is paged, unless it
+            // already has host matches that paging would repeat.
+            for (skipped in reply.skipped) {
+                if (skipped.thread !in members) continue
+                if (skipped.pagedFallback && skipped.thread !in found) {
+                    if (pagedHandles.add(skipped.thread)) paged += skipped.thread
+                }
+                // Not read to its end (its source changed mid-search, or
+                // paging would repeat what it gave): what it gave stands,
+                // and the host reads as incomplete.
+                else incomplete = true
+            }
+            cursor = reply.cursor
+        } while (cursor != null && results.size < room)
+    }
+    return AgentHostSearchOutcome(results, paged, incomplete)
 }
 private const val TIER_A_REFRESH_MILLIS = 2_000L
 private const val OCCUPANCY_REFRESH_MILLIS = 5_000L
@@ -4550,6 +5774,10 @@ private fun JSONObject.matches(request: AgentLaunchRequest, sourceThreadID: JSON
 }
 
 internal fun AgentThreadRow.threadIDJson(): JSONObject = threadID(hostID, providerID, providerSessionID)
+
+/** A host order or source offset: a UInt64, which a Long cannot hold whole. */
+private fun String.seekOrder(): java.math.BigInteger? =
+    toBigIntegerOrNull()?.takeIf { it.signum() >= 0 && it.bitLength() <= 64 }
 
 private fun String.threadIDJson(): JSONObject? {
     val parts = split(":", limit = 3)
@@ -4744,7 +5972,7 @@ internal suspend fun watchAgentLivePrompt(
         val after = current() ?: return
         if (!after.shouldWatch(nanoTime())) return
         if (observed != null && observed.authoritative && !observed.truncated && !observed.captureWaitedForFrame) {
-            val visible = bottomPromptRows(observed.visibleTail.decodeToString())
+            val visible = promptRows(observed)
             if (visible.isNotBlank()) {
                 forward(JSONObject().put("v", 1).put("kind", "livePromptObservation")
                     .put("threadID", threadID).put("bindingToken", bindingToken)
@@ -4755,7 +5983,14 @@ internal suspend fun watchAgentLivePrompt(
                         .putOpt("currentCursorLine", boundedPromptCursor(observed.currentCursorLine))))
             }
         }
-        pause(if (elapsed < 2_000) 250 else 1_000)
+        // Check for a newer frame every fast tick even in the slow phase, so
+        // that frame restarts the cadence at once, as on iOS.
+        var ticks = if (elapsed < 2_000) 1 else 4
+        while (ticks-- > 0) {
+            pause(250)
+            val now = current() ?: return
+            if (now.lifecycleNanos != before.lifecycleNanos || now.lifecycleSequence != before.lifecycleSequence) break
+        }
     }
 }
 

@@ -27,6 +27,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.bambouville.tessera.design.LocalTesseraTokens
 import com.bambouville.tessera.design.TesseraHairline
@@ -47,7 +48,8 @@ class RemoteFileTextPreviewActivity : ComponentActivity() {
             finish()
             return
         }
-        val displayName = intent.getStringExtra(EXTRA_DISPLAY_NAME).orEmpty().ifBlank { "remote file" }
+        val displayName = intent.getStringExtra(EXTRA_DISPLAY_NAME).orEmpty()
+            .ifBlank { getString(R.string.files_preview_default_name) }
         enableEdgeToEdge()
         setContent {
             TesseraTheme {
@@ -76,7 +78,7 @@ class RemoteFileTextPreviewActivity : ComponentActivity() {
             source = buffer.decodeToString(endIndex = shown),
             limited = total > MAX_PREVIEW_BYTES,
         )
-    } ?: error("The staged remote file is unavailable")
+    } ?: throw FilesLocalFileUnavailableException(FilesLocalFileUnavailableException.Reason.Staged)
 
     companion object {
         const val EXTRA_IMAGES = "com.bambouville.tessera.files.IMAGES"
@@ -85,10 +87,8 @@ class RemoteFileTextPreviewActivity : ComponentActivity() {
     }
 }
 
-private const val PREVIEW_LIMIT_NOTICE = "… preview limited to 2 MiB"
-
 private data class RemoteFilePreviewContent(val source: String, val limited: Boolean) {
-    val rawText: String get() = source + if (limited) "\n\n$PREVIEW_LIMIT_NOTICE" else ""
+    fun rawText(limitNotice: String): String = source + if (limited) "\n\n$limitNotice" else ""
 }
 
 @Composable
@@ -123,6 +123,7 @@ private fun RemoteFileTextPreview(
         }
     }
     val tokens = LocalTesseraTokens.current
+    val limitNotice = stringResource(R.string.files_preview_limited)
     val isMarkdown = RemoteFileQuickView.isMarkdown(displayName)
     var showSource by rememberSaveable(displayName) { mutableStateOf(false) }
     // Paint the page: this activity has its own window, and a rendered Markdown
@@ -132,13 +133,15 @@ private fun RemoteFileTextPreview(
         TesseraSubPageHeader(
             title = displayName,
             onBack = onBack,
-            backContentDescription = "Close preview",
+            backContentDescription = stringResource(R.string.files_preview_close),
             modifier = Modifier.statusBarsPadding(),
             trailing = {
                 if (isMarkdown) {
                     TesseraIconButton(
                         icon = TesseraIcons.File,
-                        contentDescription = if (showSource) "Show rendered Markdown" else "Show Markdown source",
+                        contentDescription = stringResource(
+                            if (showSource) R.string.files_preview_show_rendered else R.string.files_preview_show_source,
+                        ),
                         selected = showSource,
                         onClick = { showSource = !showSource },
                     )
@@ -160,7 +163,7 @@ private fun RemoteFileTextPreview(
                 // shared parser's own bounds cannot swallow it.
                 if (preview.limited) {
                     Text(
-                        PREVIEW_LIMIT_NOTICE,
+                        limitNotice,
                         modifier = Modifier.padding(top = 16.dp),
                         style = TesseraType.code,
                         color = tokens.fg,
@@ -168,11 +171,22 @@ private fun RemoteFileTextPreview(
                 }
             }
         } else {
+            val result = content
+            val failure = result?.exceptionOrNull()
             Text(
-                text = content?.fold(
-                    onSuccess = { it.rawText.ifEmpty { "Empty file" } },
-                    onFailure = { "Unable to preview this file: ${it.message ?: it.javaClass.simpleName}" },
-                ) ?: "Loading…",
+                text = when {
+                    result == null -> stringResource(R.string.files_preview_loading)
+                    failure is FilesLocalFileUnavailableException -> stringResource(
+                        R.string.files_preview_failed,
+                        stringResource(R.string.files_staged_unavailable),
+                    )
+                    failure != null -> stringResource(
+                        R.string.files_preview_failed,
+                        failure.message ?: failure.javaClass.simpleName,
+                    )
+                    else -> result.getOrThrow().rawText(limitNotice)
+                        .ifEmpty { stringResource(R.string.files_preview_empty) }
+                },
                 modifier = contentModifier,
                 style = TesseraType.code,
                 color = tokens.fg,
@@ -186,6 +200,10 @@ private fun RemoteMarkdownImage(bitmap: androidx.compose.ui.graphics.ImageBitmap
     if (bitmap != null) {
         Image(bitmap, contentDescription = alt, modifier = Modifier.fillMaxWidth().aspectRatio(bitmap.width.toFloat() / bitmap.height), contentScale = ContentScale.Fit)
     } else {
-        Text("[image: $alt]", style = TesseraType.body, color = LocalTesseraTokens.current.fgDim)
+        Text(
+            stringResource(R.string.files_preview_image_placeholder, alt),
+            style = TesseraType.body,
+            color = LocalTesseraTokens.current.fgDim,
+        )
     }
 }

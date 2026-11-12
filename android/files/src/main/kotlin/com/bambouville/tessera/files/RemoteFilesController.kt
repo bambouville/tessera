@@ -1,10 +1,18 @@
 package com.bambouville.tessera.files
 
+import android.annotation.SuppressLint
 import android.content.ContentResolver
 import android.content.Context
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.database.Cursor
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.bambouville.tessera.design.ArtifactOpenOrigin
+import com.bambouville.tessera.design.ArtifactOpener
+import com.bambouville.tessera.design.DisplayText
+import com.bambouville.tessera.forwarding.PortForwardRule
+import com.bambouville.tessera.forwarding.PortForwardingLease
 import com.bambouville.tessera.networking.AndroidSshBackend
 import com.bambouville.tessera.networking.SshFileConnection
 import com.bambouville.tessera.networking.SshHostKeyPolicy
@@ -31,6 +39,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +48,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import net.schmizz.sshj.sftp.Response
+import net.schmizz.sshj.sftp.SFTPException
 
 class RemoteFilesController(
     context: Context,
@@ -51,8 +63,19 @@ class RemoteFilesController(
     private val recordDiagnostic: (String, Map<String, String>) -> Unit = { _, _ -> },
     /** Days a `paste-` temp upload survives on the host. 0 disables the reaper. */
     private val reaperDays: Int = RemoteFilesConstants.DEFAULT_REAPER_DAYS,
-) : RemoteFilesPresenter, AutoCloseable {
-    private val resolver = context.applicationContext.contentResolver
+    private val hostId: String? = null,
+    private val sessionHint: String? = null,
+    /** Read at the action, so a retained controller follows the current app root. */
+    private val artifactOpener: () -> ArtifactOpener? = { null },
+) : RemoteFilesPresenter, ArtifactLiveFiles, AutoCloseable {
+    private val appContext = context.applicationContext
+    private val resolver = appContext.contentResolver
+    /**
+     * For words that leave Files as data rather than as UI: Agent Center keeps
+     * a selection miss English and translates it where it is shown, and an
+     * attachment's failure becomes an exception message.
+     */
+    private val englishResources: Resources by lazy { createEnglishResources(appContext) }
     private val presentationCache = RemoteFilePresentationCache(context.applicationContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     /**
@@ -131,7 +154,7 @@ class RemoteFilesController(
             } catch (failure: Throwable) {
                 if (failure !is CancellationException) {
                     val detail = safeMessage(failure)
-                    mutableState.update { it.copy(loading = false, error = detail) }
+                    mutableState.update { it.copy(loading = false, error = shownMessage(failure)) }
                     recordDiagnostic("files_open_failed", mapOf("detail" to detail))
                 }
             }
@@ -145,6 +168,43 @@ class RemoteFilesController(
     override fun navigate(path: String) {
         setFollowEnabled(false)
         open(path)
+    }
+
+    /** Quick Open accepts a literal path, including spaces, rather than a terminal token. */
+    fun quickOpenPath(path: String) {
+        if (artifactOpener() == null || hostId.isNullOrBlank()) {
+            navigate(path)
+            return
+        }
+        openJob?.cancel()
+        openJob = scope.launch {
+            try {
+                val bridge = connected()
+                val home = mutableState.value.homePath ?: bridge.realPath(".")
+                mutableState.update { it.copy(homePath = home, loading = false, error = null) }
+                val absolute = RemoteSelectionPathResolver.expand(path, home, mutableState.value.currentPath ?: home)
+                    ?: return@launch selectedPathFailure(DisplayText.Resource(R.string.files_selection_cannot_resolve, listOf(path))) {}
+                val resolved = statOrNull(bridge, absolute)
+                    ?: return@launch selectedPathFailure(DisplayText.Resource(R.string.files_selection_not_found, listOf(absolute))) {}
+                val (canonical, stat) = resolved
+                when (stat.kind) {
+                    SshRemoteEntryKind.DIRECTORY -> navigate(canonical)
+                    SshRemoteEntryKind.FILE -> present(
+                        RemoteFileEntry(stat.name, canonical, RemoteFileKind.FILE, stat.size,
+                            stat.modifiedEpochSeconds?.let(Instant::ofEpochSecond), stat.permissions),
+                        RemoteFilePresentationAction.OPEN,
+                        ArtifactOpenOrigin.Files,
+                    ) {}
+                    SshRemoteEntryKind.SYMLINK, SshRemoteEntryKind.OTHER ->
+                        selectedPathFailure(DisplayText.Resource(R.string.files_selection_unsupported_type, listOf(canonical))) {}
+                }
+            } catch (failure: Throwable) {
+                if (failure !is CancellationException) {
+                    mutableState.update { it.copy(loading = false) }
+                    selectedPathFailure(shownMessage(failure)) {}
+                }
+            }
+        }
     }
 
     override fun parent() {
@@ -191,7 +251,7 @@ class RemoteFilesController(
      * returns null when it holds none. It deliberately never dials: a follow
      * poll must not authenticate a route on its own — only a real browse does.
      */
-    suspend fun probeOnLiveChannel(command: String): String? {
+    override suspend fun probeOnLiveChannel(command: String): String? {
         val live = connection.currentOrNull ?: return null
         return try {
             val transcript = live.executeBoundedCommand(command)
@@ -205,6 +265,68 @@ class RemoteFilesController(
             null
         }
     }
+
+    override val hasLiveArtifactChannel: Boolean get() = connection.currentOrNull != null
+    override val canOpenArtifactChannel: Boolean get() = liveConnection != null && !hasLiveArtifactChannel
+    override val artifactConnectionGeneration: Long get() = connection.generation
+    override val artifactHome: String? get() = state.value.homePath
+    override val artifactDirectory: String? get() = state.value.currentPath
+
+    override suspend fun openArtifactChannel() {
+        if (liveConnection == null) throw FilesConnectionUnavailableException()
+        connected()
+    }
+
+    override suspend fun acquireForwardingLeaseOnLiveChannel(rule: PortForwardRule): PortForwardingLease? =
+        connection.acquireArtifactForwardingLease(rule) { it.createForwardingRuntime() }
+
+    override suspend fun realPathArtifactOnLiveChannel(path: String): String? {
+        val live = connection.currentOrNull ?: return null
+        val resolved = live.realPath(path)
+        return resolved.takeIf { connection.currentOrNull === live }
+    }
+
+    override suspend fun statArtifactOnLiveChannel(path: String): ArtifactRemoteStat? {
+        val live = connection.currentOrNull ?: return null
+        require(path.startsWith('/') && path.none(Char::isISOControl))
+        val value = try { live.stat(path) }
+        catch (failure: SFTPException) {
+            if (failure.statusCode != Response.StatusCode.NO_SUCH_FILE && failure.statusCode != Response.StatusCode.NO_SUCH_PATH) throw failure
+            throw java.io.FileNotFoundException(path).apply { initCause(failure) }
+        }
+        return ArtifactRemoteStat(path, value.size, value.modifiedEpochSeconds?.times(1_000), value.kind == SshRemoteEntryKind.DIRECTORY)
+    }
+
+    override suspend fun readArtifactOnLiveChannel(
+        path: String,
+        output: java.io.OutputStream,
+        maxBytes: Long,
+    ): ArtifactRemoteStat? = readArtifactFromHeldChannel(null, path, output, maxBytes)
+
+    override suspend fun readArtifactPageOnLiveChannel(
+        allowedRoot: String,
+        path: String,
+        output: java.io.OutputStream,
+        maxBytes: Long,
+    ): ArtifactRemoteStat? = readArtifactFromHeldChannel(allowedRoot, path, output, maxBytes)
+
+    private suspend fun readArtifactFromHeldChannel(
+        allowedRoot: String?,
+        path: String,
+        output: java.io.OutputStream,
+        maxBytes: Long,
+    ): ArtifactRemoteStat? = connection.readArtifactOnHeldChannel(
+        allowedRoot, path, output, maxBytes,
+        // SshFileConnection.realPath uses this held SFTPClient.canonicalize.
+        canonicalize = { live, value -> live.realPath(value) },
+        stat = { live, value ->
+            if (!live.exists(value)) throw java.io.FileNotFoundException(value)
+            val stat = live.stat(value)
+            if (stat.kind != SshRemoteEntryKind.FILE) throw java.io.FileNotFoundException(value)
+            ArtifactRemoteStat(value, stat.size, stat.modifiedEpochSeconds?.times(1_000), directory = false)
+        },
+        download = { live, value, bounded -> live.download(value, bounded) { _, _ -> } },
+    )
 
     private fun setFollowEnabled(enabled: Boolean) {
         if (mutableState.value.followEnabled == enabled) return
@@ -237,7 +359,8 @@ class RemoteFilesController(
             totalBytes = entry.size,
         )
         enqueue(item) { current ->
-            val output = resolver.openOutputStream(destination, "wt") ?: error("Local destination is unavailable")
+            val output = resolver.openOutputStream(destination, "wt")
+                ?: throw FilesLocalFileUnavailableException(FilesLocalFileUnavailableException.Reason.Destination)
             output.use { stream ->
                 connected().download(entry.path, stream) { transferred, total ->
                     updateTransfer(current.id) { value ->
@@ -252,8 +375,16 @@ class RemoteFilesController(
         entry: RemoteFileEntry,
         action: RemoteFilePresentationAction,
         onPresentationLaunched: () -> Unit,
+    ) = present(entry, action, ArtifactOpenOrigin.Files, onPresentationLaunched)
+
+    private fun present(
+        entry: RemoteFileEntry,
+        action: RemoteFilePresentationAction,
+        origin: ArtifactOpenOrigin,
+        onPresentationLaunched: () -> Unit,
     ) {
         require(entry.kind == RemoteFileKind.FILE) { "Only files can be opened or shared" }
+        if (RemoteFilesBrowser.openArtifact(entry, action, hostId, artifactOpener(), origin, sessionHint)) return
         if (action == RemoteFilePresentationAction.SHARE && mutableTransfers.value.any {
             it.remotePath == entry.path && RemoteFilesBrowser.isPreparingPresentation(it)
         }) return
@@ -300,18 +431,45 @@ class RemoteFilesController(
         onFailure: (String) -> Unit,
     ) {
         resolveSelectedPath(selection, terminalDirectory, onFailure) { resolved ->
-            val directory = when (resolved.kind) {
-                RemoteFileKind.DIRECTORY -> resolved.path
-                RemoteFileKind.FILE -> resolved.path.substringBeforeLast('/').ifBlank { "/" }
-                RemoteFileKind.SYMLINK, RemoteFileKind.OTHER -> error("unreachable")
-            }
-            // Publish the target before mounting RemoteFilesScreen. Its normal
-            // initial `open()` then observes this same directory instead of
-            // racing the reveal with a stale/default location.
-            mutableState.update { it.copy(currentPath = directory, error = null) }
-            onRevealRequested()
-            navigate(directory)
+            revealResolved(resolved, onRevealRequested)
         }
+    }
+
+    override fun openTranscriptSelectedPath(
+        selection: String,
+        paneDirectory: String?,
+        intent: SelectedPathIntent,
+        onRevealRequested: () -> Unit,
+        onPresentationLaunched: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) {
+        resolveSelectedPath(
+            selection, paneDirectory, onFailure,
+            browserDirectoryFallback = false,
+            // The miss becomes an Agent Center notice.
+            failureResources = englishResources,
+        ) { resolved ->
+            if (intent == SelectedPathIntent.OPEN_IN_ARTIFACTS && resolved.kind == RemoteFileKind.FILE) {
+                present(resolved, RemoteFilePresentationAction.OPEN, ArtifactOpenOrigin.TerminalSelection, onPresentationLaunched)
+            } else {
+                revealResolved(resolved, onRevealRequested)
+            }
+        }
+    }
+
+    /** Files at the resolved directory, or at a resolved file's parent. */
+    private fun revealResolved(resolved: RemoteFileEntry, onRevealRequested: () -> Unit) {
+        val directory = when (resolved.kind) {
+            RemoteFileKind.DIRECTORY -> resolved.path
+            RemoteFileKind.FILE -> resolved.path.substringBeforeLast('/').ifBlank { "/" }
+            RemoteFileKind.SYMLINK, RemoteFileKind.OTHER -> error("unreachable")
+        }
+        // Publish the target before mounting RemoteFilesScreen. Its normal
+        // initial `open()` then observes this same directory instead of
+        // racing the reveal with a stale/default location.
+        mutableState.update { it.copy(currentPath = directory, error = null) }
+        onRevealRequested()
+        navigate(directory)
     }
 
     override fun quickOpenSelectedFile(
@@ -322,10 +480,10 @@ class RemoteFilesController(
     ) {
         resolveSelectedPath(selection, terminalDirectory, onFailure) { resolved ->
             if (resolved.kind != RemoteFileKind.FILE) {
-                selectedPathFailure("The selected path is not a regular file.", onFailure)
+                selectedPathFailure(DisplayText.Resource(R.string.files_selection_not_regular_file), onFailure = onFailure)
                 return@resolveSelectedPath
             }
-            present(resolved, RemoteFilePresentationAction.OPEN, onPresentationLaunched)
+            present(resolved, RemoteFilePresentationAction.OPEN, ArtifactOpenOrigin.TerminalSelection, onPresentationLaunched)
         }
     }
 
@@ -364,7 +522,7 @@ class RemoteFilesController(
                             nameOverride = null,
                             replaceExisting = replaceExisting,
                             onUploaded = onUploaded,
-                            onFailed = { detail -> onFailed(ShareUploadFailure.Message(detail)) },
+                            onFailed = { detail -> onFailed(ShareUploadFailure.Message(detail.resolve(appContext.resources))) },
                         )
                     }
                     ShareUploadDestination.Temp -> {
@@ -385,7 +543,7 @@ class RemoteFilesController(
                             // protects a user-named upload has nothing to do.
                             replaceExisting = false,
                             onUploaded = onUploaded,
-                            onFailed = { detail -> onFailed(ShareUploadFailure.Message(detail)) },
+                            onFailed = { detail -> onFailed(ShareUploadFailure.Message(detail.resolve(appContext.resources))) },
                         )
                     }
                 }
@@ -393,7 +551,7 @@ class RemoteFilesController(
                 if (failure !is CancellationException) {
                     val detail = safeMessage(failure)
                     recordDiagnostic("files_share_upload_failed", mapOf("detail" to detail))
-                    onFailed(ShareUploadFailure.Message(detail))
+                    onFailed(ShareUploadFailure.Message(shownMessage(failure).resolve(appContext.resources)))
                 }
             }
         }
@@ -421,7 +579,7 @@ class RemoteFilesController(
                 ),
                 replaceExisting = false,
                 onUploaded = { completion.complete(it) },
-                onFailed = { completion.completeExceptionally(IllegalStateException(it)) },
+                onFailed = { completion.completeExceptionally(IllegalStateException(it.resolve(englishResources))) },
             )
             transfer.invokeOnCompletion { failure ->
                 if (failure != null) completion.completeExceptionally(failure)
@@ -499,7 +657,7 @@ class RemoteFilesController(
         nameOverride: String?,
         replaceExisting: Boolean,
         onUploaded: (String) -> Unit = {},
-        onFailed: (String) -> Unit = {},
+        onFailed: (DisplayText) -> Unit = {},
     ): Job {
         val metadata = resolver.metadata(source)
         val uploadName = nameOverride ?: safeUploadName(metadata.name)
@@ -517,7 +675,8 @@ class RemoteFilesController(
             // reach the host after close() has detached it from new work.
             val bridge = connected()
             stagedUpload.upload(bridge.uploadFiles(), remotePath, current.id, replaceExisting) { staging ->
-                val input = resolver.openInputStream(source) ?: error("Local source is unavailable")
+                val input = resolver.openInputStream(source)
+                    ?: throw FilesLocalFileUnavailableException(FilesLocalFileUnavailableException.Reason.Source)
                 input.use { stream ->
                     bridge.upload(stream, staging, metadata.size) { transferred, total ->
                         updateTransfer(current.id) { value ->
@@ -575,6 +734,7 @@ class RemoteFilesController(
     override fun close() {
         scope.cancel()
         connection.close(drain = scope.coroutineContext[Job])
+        ArtifactLiveFilesRegistry.changed()
     }
 
     /** Stop attachment work immediately on disposal; its owner awaits cleanup. */
@@ -591,6 +751,7 @@ class RemoteFilesController(
         withContext(NonCancellable) {
             scope.coroutineContext[Job]?.join()
             connection.closeAndJoin()
+            ArtifactLiveFilesRegistry.changed()
         }
     }
 
@@ -605,7 +766,7 @@ class RemoteFilesController(
             } catch (failure: Throwable) {
                 if (failure !is CancellationException) {
                     val detail = safeMessage(failure)
-                    mutableState.update { it.copy(loading = false, error = detail) }
+                    mutableState.update { it.copy(loading = false, error = shownMessage(failure)) }
                     recordDiagnostic(
                         "files_mutation_failed",
                         mapOf("command" to command, "detail" to detail),
@@ -618,7 +779,7 @@ class RemoteFilesController(
     private fun enqueue(
         item: TransferItem,
         onCompleted: () -> Unit = {},
-        onFailed: (String) -> Unit = {},
+        onFailed: (DisplayText) -> Unit = {},
         operation: suspend (TransferItem) -> Unit,
     ): Job {
         mutableTransfers.update { it + item }
@@ -637,12 +798,13 @@ class RemoteFilesController(
             } catch (_: CancellationException) {
                 updateTransfer(item.id) { it.copy(phase = TransferPhase.CANCELLED) }
                 recordTransfer("transfer_cancelled", item)
-                onFailed(CANCELLED_DETAIL)
+                onFailed(DisplayText.Resource(R.string.files_upload_cancelled))
             } catch (failure: Throwable) {
                 val detail = safeMessage(failure)
-                updateTransfer(item.id) { it.copy(phase = TransferPhase.FAILED, error = detail) }
+                val shown = shownMessage(failure)
+                updateTransfer(item.id) { it.copy(phase = TransferPhase.FAILED, error = shown) }
                 recordTransfer("transfer_failed", item, detail)
-                onFailed(detail)
+                onFailed(shown)
             } finally {
                 jobs.remove(item.id)
             }
@@ -663,7 +825,7 @@ class RemoteFilesController(
             // staging files and moved-aside originals of interrupted uploads.
             scope.launch { stagedUpload.retryPending(opened.uploadFiles()) }
         }
-    }
+    }.also { ArtifactLiveFilesRegistry.changed() }
 
     private fun SshFileConnection.uploadFiles(): RemoteUploadFiles {
         val connection = this
@@ -685,6 +847,10 @@ class RemoteFilesController(
         selection: String,
         terminalDirectory: String?,
         onFailure: (String) -> Unit,
+        /** False: only [terminalDirectory] anchors a relative path, never the browser's location. */
+        browserDirectoryFallback: Boolean = true,
+        /** The language [onFailure] receives a miss in; Files shows it in the current one. */
+        failureResources: Resources = appContext.resources,
         onResolved: (RemoteFileEntry) -> Unit,
     ) {
         scope.launch {
@@ -694,7 +860,11 @@ class RemoteFilesController(
                 // TUI output broke across rows.
                 val candidates = RemoteSelectionPathResolver.pathCandidates(selection)
                 val candidate = candidates.firstOrNull()
-                    ?: return@launch selectedPathFailure("Selection doesn't look like a path.", onFailure)
+                    ?: return@launch selectedPathFailure(
+                        DisplayText.Resource(R.string.files_selection_not_a_path),
+                        failureResources,
+                        onFailure,
+                    )
                 val bridge = connected()
                 val home = mutableState.value.homePath ?: bridge.realPath(".")
                 if (mutableState.value.homePath != home) {
@@ -704,17 +874,23 @@ class RemoteFilesController(
                     RemoteSelectionPathResolver.expand(
                         it,
                         homePath = home,
-                        currentDirectory = terminalDirectory ?: mutableState.value.currentPath,
+                        currentDirectory = terminalDirectory
+                            ?: mutableState.value.currentPath.takeIf { browserDirectoryFallback },
                     )
                 }
                 if (absolutes.isEmpty()) {
                     return@launch selectedPathFailure(
-                        "Can't resolve $candidate — no terminal directory is available for a relative path.",
+                        DisplayText.Resource(R.string.files_selection_no_directory, listOf(candidate)),
+                        failureResources,
                         onFailure,
                     )
                 }
                 val resolved = resolveRemotePath(bridge, absolutes)
-                    ?: return@launch selectedPathFailure("Not found: ${absolutes.first()}", onFailure)
+                    ?: return@launch selectedPathFailure(
+                        DisplayText.Resource(R.string.files_selection_not_found, listOf(absolutes.first())),
+                        failureResources,
+                        onFailure,
+                    )
                 val canonical = resolved.first
                 val stat = resolved.second
                 val kind = when (stat.kind) {
@@ -724,7 +900,8 @@ class RemoteFilesController(
                     // reports one, fail closed rather than presenting an
                     // ambiguous target selected from terminal text.
                     SshRemoteEntryKind.SYMLINK, SshRemoteEntryKind.OTHER -> return@launch selectedPathFailure(
-                        "Unsupported remote file type: $canonical",
+                        DisplayText.Resource(R.string.files_selection_unsupported_type, listOf(canonical)),
+                        failureResources,
                         onFailure,
                     )
                 }
@@ -739,7 +916,15 @@ class RemoteFilesController(
                     ),
                 )
             } catch (failure: Throwable) {
-                if (failure !is CancellationException) selectedPathFailure(safeMessage(failure), onFailure)
+                if (failure is AmbiguousRemotePathException) {
+                    selectedPathFailure(
+                        DisplayText.Resource(R.string.files_selection_ambiguous, listOf(failure.absolute)),
+                        failureResources,
+                        onFailure,
+                    )
+                } else if (failure !is CancellationException) {
+                    selectedPathFailure(shownMessage(failure), failureResources, onFailure)
+                }
             }
         }
     }
@@ -787,10 +972,15 @@ class RemoteFilesController(
         null
     }
 
-    private fun selectedPathFailure(message: String, onFailure: (String) -> Unit) {
+    /** Files shows [message]; [onFailure] receives it in [failureResources]' language. */
+    private fun selectedPathFailure(
+        message: DisplayText,
+        failureResources: Resources = appContext.resources,
+        onFailure: (String) -> Unit,
+    ) {
         mutableState.update { it.copy(error = message) }
         recordDiagnostic("files_selected_path_failed", emptyMap())
-        onFailure(message)
+        onFailure(message.resolve(failureResources))
     }
 
     private fun updateTransfer(id: UUID, transform: (TransferItem) -> TransferItem) {
@@ -825,8 +1015,8 @@ class RemoteFilesController(
         getColumnIndex(column).takeIf { it >= 0 && !isNull(it) }?.let(::getLong)
 
     private fun requireValidName(name: String) {
-        require(name.isNotBlank() && name != "." && name != ".." && '/' !in name && name.none(Char::isISOControl)) {
-            "Enter a valid file name"
+        if (!(name.isNotBlank() && name != "." && name != ".." && '/' !in name && name.none(Char::isISOControl))) {
+            throw FilesInvalidNameException()
         }
     }
 
@@ -842,6 +1032,26 @@ class RemoteFilesController(
             ?: "upload-${UUID.randomUUID()}"
     }
 
+    /** What the screen shows for [failure]; diagnostics keep [safeMessage]. */
+    private fun shownMessage(failure: Throwable): DisplayText = when (failure) {
+        is FilesRouteUnavailableException -> DisplayText.Resource(
+            when (failure.reason) {
+                FilesRouteUnavailableException.Reason.NotConnected -> R.string.files_terminal_not_connected
+                FilesRouteUnavailableException.Reason.RouteUnavailable -> R.string.files_route_unavailable
+            },
+        )
+        is FilesConnectionUnavailableException -> DisplayText.Resource(R.string.files_connection_unavailable)
+        is FilesLocalFileUnavailableException -> DisplayText.Resource(
+            when (failure.reason) {
+                FilesLocalFileUnavailableException.Reason.Destination -> R.string.files_local_destination_unavailable
+                FilesLocalFileUnavailableException.Reason.Source -> R.string.files_local_source_unavailable
+                FilesLocalFileUnavailableException.Reason.Staged -> R.string.files_staged_unavailable
+            },
+        )
+        is FilesInvalidNameException -> DisplayText.Resource(R.string.files_invalid_name)
+        else -> DisplayText.Verbatim(safeMessage(failure))
+    }
+
     private fun safeMessage(failure: Throwable): String =
         failure.message
             ?.replace(Regex("(?i)(password|passphrase|secret|token)[=:][^ ]+"), "$1=<redacted>")
@@ -849,8 +1059,82 @@ class RemoteFilesController(
             ?: failure::class.java.simpleName
 
     private data class LocalMetadata(val name: String, val size: Long?)
+}
 
-    private companion object {
-        const val CANCELLED_DETAIL = "The upload was cancelled."
+/**
+ * A local file a transfer needs is unavailable: a download's destination, an
+ * upload's source, or the staged copy an open or share hands over. The
+ * message stays English for diagnostics; the Files screen shows its own
+ * translated text for each reason.
+ */
+internal class FilesLocalFileUnavailableException(val reason: Reason) : IllegalStateException(reason.message) {
+    enum class Reason(val message: String) {
+        Destination("Local destination is unavailable"),
+        Source("Local source is unavailable"),
+        Staged("The staged remote file is unavailable"),
     }
+}
+
+/** A name Files will not create or rename to; English for diagnostics, translated on screen. */
+internal class FilesInvalidNameException : IllegalArgumentException("Enter a valid file name")
+
+// English resolves to the unqualified `values/` (no module has `values-en`),
+// which the base APK always carries: no language split can be missing.
+@SuppressLint("AppBundleLocaleChanges")
+private fun createEnglishResources(context: Context): Resources {
+    val english = Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }
+    return context.createConfigurationContext(english).resources
+}
+
+/** Uses one captured, held channel for REALPATH, the containment check, and the read. */
+internal suspend fun <C : AutoCloseable> RemoteFilesConnectionSlot<C>.readArtifactOnHeldChannel(
+    allowedRoot: String?,
+    path: String,
+    output: java.io.OutputStream,
+    maxBytes: Long,
+    canonicalize: suspend (C, String) -> String,
+    stat: suspend (C, String) -> ArtifactRemoteStat,
+    download: suspend (C, String, java.io.OutputStream) -> Unit,
+): ArtifactRemoteStat? {
+    require(maxBytes in 1..64L * 1024 * 1024)
+    require(path.startsWith('/') && path.none(Char::isISOControl))
+    require(allowedRoot == null || allowedRoot.startsWith('/') && allowedRoot.none(Char::isISOControl))
+    val live = currentOrNull ?: return null
+    currentCoroutineContext().ensureActive()
+    val canonicalPath = if (allowedRoot == null) path else {
+        suspend fun canonical(value: String): String = try {
+            canonicalize(live, value).also { resolved ->
+                if (!resolved.startsWith('/') || resolved.any(Char::isISOControl) ||
+                    resolved.split('/').any { it == "." || it == ".." }
+                ) throw java.io.FileNotFoundException(value)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            throw java.io.FileNotFoundException(value)
+        }
+        val root = canonical(allowedRoot).trimEnd('/').ifEmpty { "/" }
+        currentCoroutineContext().ensureActive()
+        val resolved = canonical(path)
+        if (root != "/" && resolved != root && !resolved.startsWith("$root/")) throw java.io.FileNotFoundException(path)
+        resolved
+    }
+    currentCoroutineContext().ensureActive()
+    val value = stat(live, canonicalPath)
+    if (value.directory) throw java.io.FileNotFoundException(canonicalPath)
+    if ((value.size ?: 0) > maxBytes) throw ArtifactSizeLimitExceeded(checkNotNull(value.size))
+    var written = 0L
+    val readContext = currentCoroutineContext()
+    val bounded = object : java.io.OutputStream() {
+        override fun write(value: Int) = write(byteArrayOf(value.toByte()), 0, 1)
+        override fun write(bytes: ByteArray, offset: Int, length: Int) {
+            readContext.ensureActive()
+            if (length.toLong() > maxBytes - written) throw ArtifactSizeLimitExceeded(written + length)
+            output.write(bytes, offset, length)
+            written += length
+        }
+    }
+    currentCoroutineContext().ensureActive()
+    download(live, canonicalPath, bounded)
+    return value.copy(path = canonicalPath, size = written)
 }

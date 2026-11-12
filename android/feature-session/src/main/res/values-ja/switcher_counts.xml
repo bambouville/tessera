@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="switcher_window_count">
+        <item quantity="other">%d 個のウインドウ</item>
+    </plurals>
+    <plurals name="switcher_session_count">
+        <item quantity="other">%d 個のセッション</item>
+    </plurals>
+    <plurals name="session_switcher_panes_open_full_screen">
+        <item quantity="other">%d 個のペイン · それぞれ全画面で開きます</item>
+    </plurals>
+</resources>

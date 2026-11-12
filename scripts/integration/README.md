@@ -268,9 +268,9 @@ lines of a row or command that wraps, as in iPhone portrait), contiguous
 outside plain mosh, and both returns must show
 the fixture's last row. The reader must hold its rows through the burst; on
 SSH and SSH+tmux only after the burst's lines reached the terminal (its line
-count grew). Plain mosh relays only screens, without synchronized frames, and
-its terminal follows scrolling output to the tail as it does under a
-trackpad, so there the held rows are only recorded. tmux panes must hold the
+count grew). Plain mosh relays only screens, without synchronized frames,
+and its reader must hold too: output leaves any reader in history on their
+rows, however they got there. tmux panes must hold the
 fixture rows (`pane-history.txt`) and stay out of copy mode; on mosh+tmux the
 app's verbose diagnostics must show output freezing the page, then an
 anchored deepen with `dropped` and `expected` equal to the burst and
@@ -446,6 +446,22 @@ TESSERA_RUN_AGENT_PROMPT_TUI=1 TESSERA_AGENT_PROMPT_TUI_PROVIDERS=kimi \
   ./scripts/integration/run-agent-prompt-tui-tests.sh
 ```
 
+Current Codex TUIs attach to one shared background app-server, which runs
+every thread's hooks with the first TUI's environment. The shared-server lane
+starts two installed Codex TUIs on one server, in a private tmux server, HOME
+and CODEX_HOME, against the scripted Responses API, with the production hooks
+installed. Each pane must carry its own thread under its own TUI PID; an idle
+`/new` must clear the pane, a thread named afterwards must be adopted, and a
+thread resumed idle through the shim in a third window must be adopted from
+its title, all without a hook event. Cleanup signals only processes whose environment carries
+the run's CODEX_HOME. Screens, mock prompts and lifecycle diagnostics go to
+the optional evidence path.
+
+```sh
+TESSERA_RUN_CODEX_SHARED_SERVER=1 ./scripts/integration/run-codex-shared-server-tests.sh \
+  .build/codex-shared-server/manual-run
+```
+
 ```sh
 # Separate explicit Mac-host authorization is required for these opt-in gates.
 # Two pinned loopback SSH clients attach to one owned helper; only new,
@@ -557,6 +573,7 @@ case fails review validation.
 | R1 | visual + deterministic | A host-free production-controller capture proves that an impossible zero-row inline viewport preserves the established terminal and visibly recovers on retry. Package tests apply the same required-grid policy to inline shared, inline split-pane, and mosh+tmux side-channel captures while preserving optional alternate saved-primary semantics. |
 | P2 | live + visual + deterministic | The native four-transport render-isolation test creates a fresh window, splits it horizontally and vertically, types into the new pane, switches away/back, zooms/unzooms and collapses the split on SSH+tmux and mosh+tmux. Plain SSH/mosh retain passthrough behavior. `p2-split-notification-batch.sh` captures production iPad pane surfaces after coalesced focus/layout notifications and after window return. Package regressions cover separate reads, cooperative ingestion, nested newer layouts, pane closure and window-details replies. |
 | K1, K5 | transport boundary + host-free UIKit focus | SSH and mosh PTYs preserve an exact multi-KiB payload containing bracketed-paste, SGR mouse, alternate-screen, newline, and printable-byte sequences; the remote SHA-256 oracle verifies every byte. `run-hardware-keyboard-tests.sh RUN_DIR` additionally exercises background-terminal cleanup, mouse focus-only taps, three Home/activate cycles, local text ownership, live input-lock permission, and modifier bytes using real UIKit key presses. K1 aggregate visual captures cover iPad and iPhone landscape; physical cover sleep/attachment and OS eviction remain device-only. |
+| K6 | host-free HID + visual | `k6-shortcut-cheat-sheet.sh` holds ⌘ with AXe simulator HID (it reaches GCKeyboard like a hardware keyboard) on the shared iPad and a disposable iPhone, both landscape. Each liquid glass, frosted, solid and light-mode hold must log its own `[cheat-sheet] show` then `hide: command released` in a fresh, pid-fenced launch; a 0.3 s tap and a ⌘ hold interrupted by ⇧ must log no show, and a hold after them must still work. DEBUG `TESSERA_SHORTCUT_CHEAT_SHEET_PREVIEW=1` pins the sheet for steady-state material captures. ⌘⇧A open/close captures check Agent Center arriving with the sidebar collapsed. Magic Keyboard feel, iPadOS 18's system ⌘ overlay, Stage Manager and iPhone portrait remain manual. |
 | S1 | live visual + wiring | One continuous recording per transport drives real primary scrollback on SSH, SSH+tmux, mosh, and mosh+tmux; external Metal-aware screenshots prove tail → older numbered history → tail. A deterministic precheck (`primary_motion_precheck` in each `transport.json`) requires the first primary gesture to change at least a quarter of the screen's horizontal bands (a row-aligned reveal only changes row numbers, so raw pixel counts are not used); a frozen reveal fails the capture before review, the attempt is retried once, and every attempt keeps its in-app diagnostics log under `visual/diagnostics/` (failed attempts keep their full artifact set under `visual/failed-attempts/`, outside the reviewed cases). The host-free surface remains a fast offset/wiring assertion. Physical trackpad feel remains manual. |
 | S6 | live visual + touch wiring | The same four live sessions grade htop mouse-wheel scrolling in both directions. SSH, SSH+tmux, and mosh+tmux also grade Vim `mouse=a` wheel forwarding; plain-mosh Vim is diagnostic-only because the fixture cannot reliably advance real htop while it owns that PTY. A host-free iPhone harness separately synthesizes a direct finger swipe in alternate-screen + SGR mouse mode and requires a terminal wheel event, covering the touch recognizer path that indirect-pointer tests cannot exercise; on a primary screen it requires UIScrollView's own finger frames, through the glide and a pull past the oldest row, to reach the host hook that feeds the SSH+tmux history gate. `run-scroll-harness-tests.sh` requires the exact number of passing tests and no skips in each result bundle. A 3x3 evidence sheet per transport is evaluated in the one aggregate review. Plain-mosh Vim and physical feel remain manual. |
 | S9 | correctness oracle | Real `RepaintAssembly` bytes feed a headless SwiftTerm with 36 deep colored row pairs at two widths; every retained short row must end in default background, not a BCE-colored tail. |

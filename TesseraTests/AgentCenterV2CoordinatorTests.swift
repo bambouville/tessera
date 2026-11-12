@@ -2,6 +2,7 @@ import XCTest
 import ImageIO
 import UniformTypeIdentifiers
 import Observation
+import os
 import TesseraCore
 import TmuxControl
 @testable import Tessera
@@ -564,10 +565,10 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
             XCTAssertTrue(coordinator.sessionAttention(sessionID: fixture.sessionID).hasAgent, transport)
             XCTAssertEqual(coordinator.sessionAttention(sessionID: fixture.sessionID).total, 1, transport)
 
-            var redrawn = false
-            withObservationTracking { _ = coordinator.sessionAttention(sessionID: fixture.sessionID) } onChange: { redrawn = true }
+            let redrawn = OSAllocatedUnfairLock(initialState: false)
+            withObservationTracking { _ = coordinator.sessionAttention(sessionID: fixture.sessionID) } onChange: { redrawn.withLock { $0 = true } }
             await coordinator.synchronizePresentation(refreshLaunchSuggestions: false)
-            XCTAssertFalse(redrawn, "an unchanged publish must not redraw terminal chrome (\(transport))")
+            XCTAssertFalse(redrawn.withLock { $0 }, "an unchanged publish must not redraw terminal chrome (\(transport))")
             coordinator.unregisterSessionSource(sessionID: fixture.sessionID, registrationID: fixture.registrationID)
             await coordinator.setExperimentEnabled(false)
             let attention = coordinator.sessionAttention(sessionID: fixture.sessionID)
@@ -674,20 +675,20 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.paneAgentProvider(sessionID: UUID(), paneID: paneID))
         XCTAssertNil(coordinator.paneAgentProvider(sessionID: fixture.sessionID, paneID: paneID + 1))
 
-        var redrawn = false
+        let redrawn = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking {
             _ = coordinator.paneAgentProvider(sessionID: fixture.sessionID, paneID: paneID)
-        } onChange: { redrawn = true }
+        } onChange: { redrawn.withLock { $0 = true } }
         let snapshot = try XCTUnwrap(coordinator.presentation.threadSnapshots[fixture.threadID])
         var summary = snapshot.summary
         summary.preview = "New transcript preview"
         coordinator.presentation.apply(thread: .init(summary: summary, messages: snapshot.messages,
             cursor: snapshot.cursor, hasMore: snapshot.hasMore, binding: snapshot.binding))
         await coordinator.synchronizePresentation(refreshLaunchSuggestions: false)
-        XCTAssertFalse(redrawn, "transcript changes and an unchanged provider index must not redraw chrome")
+        XCTAssertFalse(redrawn.withLock { $0 }, "transcript changes and an unchanged provider index must not redraw chrome")
         coordinator.unregisterSessionSource(sessionID: fixture.sessionID, registrationID: fixture.registrationID)
         XCTAssertNil(coordinator.paneAgentProvider(sessionID: fixture.sessionID, paneID: paneID))
-        XCTAssertTrue(redrawn, "retiring the registration must clear the observed provider immediately")
+        XCTAssertTrue(redrawn.withLock { $0 }, "retiring the registration must clear the observed provider immediately")
         await coordinator.setExperimentEnabled(false)
     }
 
@@ -786,14 +787,14 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
         let model = AgentCenterV2Fixture.makeModel()
         let list = model.listSnapshot
         let thread = model.selectedThread!
-        var changed = false
+        let changed = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking {
             _ = model.listSnapshot
             _ = model.threadSnapshots
-        } onChange: { changed = true }
+        } onChange: { changed.withLock { $0 = true } }
         model.apply(list: list)
         model.apply(thread: thread)
-        XCTAssertFalse(changed, "unchanged discovery must not repaint the native transcript")
+        XCTAssertFalse(changed.withLock { $0 }, "unchanged discovery must not repaint the native transcript")
     }
 
     func testSelectedTranscriptIgnoresOtherThreadsPublishes() throws {
@@ -813,10 +814,10 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
         XCTAssertEqual(model.selectedThread?.messages.count, 50)
 
         func invalidates(_ change: () -> Void) -> Bool {
-            var fired = false
-            withObservationTracking { _ = model.selectedThread } onChange: { fired = true }
+            let fired = OSAllocatedUnfairLock(initialState: false)
+            withObservationTracking { _ = model.selectedThread } onChange: { fired.withLock { $0 = true } }
             change()
-            return fired
+            return fired.withLock { $0 }
         }
         XCTAssertFalse(invalidates {
             siblingSummary.preview = "working"
@@ -834,10 +835,10 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
         // A lifecycle hook republishes activity and list stamps the detail
         // never shows: the detail's copy holds, the exact snapshot moves.
         func invalidatesDetail(_ change: () -> Void) -> Bool {
-            var fired = false
-            withObservationTracking { _ = model.selectedThreadForDetail } onChange: { fired = true }
+            let fired = OSAllocatedUnfairLock(initialState: false)
+            withObservationTracking { _ = model.selectedThreadForDetail } onChange: { fired.withLock { $0 = true } }
             change()
-            return fired
+            return fired.withLock { $0 }
         }
         XCTAssertFalse(invalidatesDetail {
             selectedSummary.lastActivity = Date(timeIntervalSince1970: 1_000)
@@ -2322,6 +2323,197 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
         }
     }
 
+    func testCoreSuccessionIsAvailableBeforeSelectionAndBeforeTheFirstSnapshot() async throws {
+        let model = AgentCenterV2PresentationModel()
+        let first = makeThreadID()
+        let successor = try XCTUnwrap(AgentThreadID(hostID: first.hostID, providerID: first.providerID, providerSessionID: "successor"))
+        let firstSummary = AgentThreadSummary(id: first, providerName: "Claude Code",
+            availability: .init(content: true, status: true, actions: false, spawn: false, fork: false, search: true))
+        model.apply(list: .init(threads: [firstSummary]), changed: [], removed: [])
+        model.select(first)
+        var selectedWithOrigin = false
+        model.onAction = { action in
+            if case .select(let id) = action, id == successor {
+                selectedWithOrigin = model.succession.replacements[model.succession.source(for: successor)]?.predecessors.map(\.threadID) == [first]
+            }
+        }
+        let originsChanged = expectation(description: "Core succession invalidates the root")
+        withObservationTracking { _ = model.succession } onChange: { originsChanged.fulfill() }
+        model.apply(list: .init(threads: []), changed: [], removed: [first], successors: [first: successor])
+        XCTAssertTrue(selectedWithOrigin, "the first selected render must already have its origin")
+        await fulfillment(of: [originsChanged], timeout: 1)
+        XCTAssertEqual(model.succession.replacements[model.succession.source(for: successor)]?.predecessors.map(\.threadID), [first])
+        XCTAssertEqual(model.selectedThreadID, successor)
+        XCTAssertNil(model.selectedThreadForDetail)
+        XCTAssertNil(model.threadSnapshots[successor])
+        XCTAssertTrue(model.listSnapshot.threads.isEmpty)
+    }
+
+    func testCoreSuccessionKeepsImmediateEdgesAndPrunesAfterMigration() throws {
+        let model = AgentCenterV2PresentationModel()
+        let first = makeThreadID()
+        func id(_ name: String) -> AgentThreadID {
+            AgentThreadID(hostID: first.hostID, providerID: first.providerID, providerSessionID: name)!
+        }
+        let middle = id("middle"), last = id("last"), next = id("next"), other = id("other")
+        let list = AgentCenterListSnapshot(threads: [AgentThreadSummary(id: other, providerName: "Claude Code",
+            availability: .init(content: true, status: true, actions: false, spawn: false, fork: false, search: true))])
+        model.select(first)
+        model.apply(list: list, changed: [], removed: [first], successors: [first: middle, middle: last])
+        XCTAssertEqual(model.succession.replacements.count, 2)
+        XCTAssertEqual(model.succession.replacements[model.succession.source(for: last)]?.predecessors.map(\.threadID), [middle])
+        XCTAssertEqual(model.selectedThreadID, last)
+        let unchanged = model.succession
+        for _ in 0..<20 { model.apply(list: list, changed: [], removed: []) }
+        XCTAssertEqual(model.succession, unchanged)
+
+        model.select(other)
+        model.apply(list: list, changed: [], removed: [last], successors: [last: next])
+        XCTAssertEqual(model.succession.replacements.count, 3)
+        XCTAssertEqual(model.selectedThreadID, other, "recording succession must not change explicit navigation")
+        model.didMigrateSuccession(unchanged)
+        XCTAssertEqual(model.succession.replacements.count, 3, "an obsolete acknowledgment cannot discard newer edges")
+        model.didMigrateSuccession(model.succession)
+        XCTAssertTrue(model.succession.replacements.isEmpty)
+        XCTAssertTrue(model.succession.sources.isEmpty)
+        XCTAssertEqual(model.succession.pendingThreadIDs, [next])
+        model.apply(list: list, changed: [], removed: [next])
+        XCTAssertTrue(model.succession.pendingThreadIDs.isEmpty)
+        model.clearForExperimentDisable()
+        XCTAssertEqual(model.succession.recordCount, 0)
+    }
+
+    func testCoreSuccessionFollowsTheSelectedPredecessorRegardlessOfDictionaryOrder() throws {
+        let hostID = UUID()
+        func id(_ name: String) -> AgentThreadID {
+            AgentThreadID(hostID: hostID, providerID: .codex, providerSessionID: name)!
+        }
+        let root = id("root"), child = id("child"), next = id("next")
+        for _ in 0..<100 {
+            for reversed in [false, true] {
+                for followed in [root, child] {
+                    let model = AgentCenterV2PresentationModel()
+                    var states = AgentRailThreadStateStore()
+                    states[root].selection = .tab("P")
+                    if followed == child { states[child].selection = .tab("R") }
+                    model.select(followed)
+                    let pairs = reversed ? [(child, next), (root, next)] : [(root, next), (child, next)]
+                    model.apply(list: .init(threads: []), changed: [], removed: [root, child],
+                                successors: Dictionary(uniqueKeysWithValues: pairs))
+                    XCTAssertEqual(model.selectedThreadID, next)
+                    let expected = followed == root ? DuoContextSelection.tab("P") : .tab("R")
+                    XCTAssertEqual(states[next, inheriting: model.succession].selection, expected)
+                    states.prune(retaining: [], inheriting: model.succession)
+                    model.didMigrateSuccession(model.succession)
+                    XCTAssertEqual(states[next, inheriting: model.succession].selection, expected)
+                }
+            }
+        }
+    }
+
+    func testCoreSuccessionChainPrefersThePredecessorTheReaderFollows() {
+        let first = makeThreadID()
+        func id(_ name: String) -> AgentThreadID {
+            AgentThreadID(hostID: first.hostID, providerID: first.providerID, providerSessionID: name)!
+        }
+        let middle = id("middle"), child = id("child"), last = id("last")
+        let model = AgentCenterV2PresentationModel()
+        var states = AgentRailThreadStateStore()
+        states[first].selection = .tab("P")
+        states[child].selection = .tab("R")
+        model.select(first)
+        model.apply(list: .init(threads: []), changed: [], removed: [first, middle, child],
+                    successors: [first: middle, middle: last, child: last])
+        XCTAssertEqual(model.selectedThreadID, last)
+        XCTAssertEqual(states[last, inheriting: model.succession].selection, .tab("P"))
+    }
+
+    func testCoreSuccessionRoundTripAndResumedBranchesUseImmediateState() {
+        let first = makeThreadID()
+        func id(_ name: String) -> AgentThreadID {
+            AgentThreadID(hostID: first.hostID, providerID: first.providerID, providerSessionID: name)!
+        }
+        func list(_ ids: [AgentThreadID]) -> AgentCenterListSnapshot {
+            .init(threads: ids.map { AgentThreadSummary(id: $0, providerName: "Claude Code",
+                availability: .init(content: true, status: true, actions: false, spawn: false, fork: false, search: true)) })
+        }
+        let middle = id("middle"), last = id("last")
+        for page in ["P", "Q"] {
+            let model = AgentCenterV2PresentationModel()
+            var states = AgentRailThreadStateStore()
+            states[first].selection = .tab("P")
+            model.select(first)
+            model.apply(list: list([middle]), changed: [], removed: [first], successors: [first: middle])
+            states.prune(retaining: [middle], inheriting: model.succession)
+            model.didMigrateSuccession(model.succession)
+            states[middle, inheriting: model.succession].selection = .tab(page)
+            model.apply(list: .init(threads: []), changed: [], removed: [middle], successors: [middle: first])
+            XCTAssertEqual(model.selectedThreadID, first)
+            XCTAssertEqual(states[first, inheriting: model.succession].selection, .tab(page))
+            states.prune(retaining: [], inheriting: model.succession)
+            model.didMigrateSuccession(model.succession)
+            XCTAssertEqual(states[first, inheriting: model.succession].selection, .tab(page))
+        }
+
+        let model = AgentCenterV2PresentationModel()
+        var states = AgentRailThreadStateStore()
+        states[first].selection = .tab("P")
+        model.select(first)
+        model.apply(list: list([middle]), changed: [], removed: [first], successors: [first: middle])
+        states.prune(retaining: [middle], inheriting: model.succession)
+        model.didMigrateSuccession(model.succession)
+        model.apply(list: list([first, middle]), changed: [], removed: [])
+        model.select(first)
+        states.prune(retaining: [first, middle], inheriting: model.succession)
+        states[first, inheriting: model.succession].selection = .tab("Q")
+        model.apply(list: list([middle]), changed: [], removed: [first], successors: [first: last])
+        XCTAssertEqual(states[last, inheriting: model.succession].selection, .tab("Q"))
+        XCTAssertEqual(states[middle, inheriting: model.succession].selection, .tab("P"))
+    }
+
+    func testThousandCoreReplacementsLeaveOnlyCurrentStateAfterEachMigration() {
+        let model = AgentCenterV2PresentationModel()
+        var states = AgentRailThreadStateStore()
+        var current = makeThreadID()
+        states[current].selection = .tab("P")
+        model.select(current)
+        for index in 0..<1_000 {
+            let next = AgentThreadID(hostID: current.hostID, providerID: current.providerID, providerSessionID: "next-\(index)")!
+            model.apply(list: .init(threads: []), changed: [], removed: [current], successors: [current: next])
+            XCTAssertEqual(states[next, inheriting: model.succession].selection, .tab("P"))
+            XCTAssertLessThanOrEqual(model.succession.recordCount, AgentThreadSuccession.maximumRecords)
+            states.prune(retaining: [], inheriting: model.succession)
+            model.didMigrateSuccession(model.succession)
+            XCTAssertEqual(states[next, inheriting: model.succession].selection, .tab("P"))
+            XCTAssertEqual(states.recordCount, 1)
+            XCTAssertEqual(model.succession.recordCount, 1, "only the not-yet-listed successor remains")
+            current = next
+        }
+        model.clearForExperimentDisable()
+        XCTAssertEqual(states[current, inheriting: model.succession].selection, .extra("files"))
+        states.prune(retaining: [], inheriting: model.succession)
+        XCTAssertEqual(states.recordCount, 0)
+    }
+
+    func testUnmigratedCoreSuccessionHasAHardCapAndDoesNotPublishOrdinaryUpdates() async {
+        let model = AgentCenterV2PresentationModel()
+        var current = makeThreadID()
+        model.select(current)
+        for index in 0..<1_000 {
+            let next = AgentThreadID(hostID: current.hostID, providerID: current.providerID, providerSessionID: "next-\(index)")!
+            model.apply(list: .init(threads: []), changed: [], removed: [current], successors: [current: next])
+            XCTAssertLessThanOrEqual(model.succession.recordCount, AgentThreadSuccession.maximumRecords)
+            current = next
+        }
+        let unchanged = expectation(description: "ordinary updates do not publish lineage")
+        unchanged.isInverted = true
+        withObservationTracking { _ = model.succession } onChange: { unchanged.fulfill() }
+        for _ in 0..<20 { model.apply(list: .init(threads: []), changed: [], removed: []) }
+        await fulfillment(of: [unchanged], timeout: 0.05)
+        model.apply(list: .init(threads: []), changed: [], removed: [current])
+        XCTAssertTrue(model.succession.replacements.isEmpty)
+    }
+
     func testHistoricalSearchSelectionSurvivesLiveOnlyListRefresh() {
         let model = AgentCenterV2PresentationModel()
         let historical = makeThreadID()
@@ -2643,22 +2835,22 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
         let probing = await waitUntil { releaseProbe != nil }
         XCTAssertTrue(probing)
 
-        var settled = false
+        let settled = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking {
             _ = coordinator.integrationState(sessionID: sessionID)
-        } onChange: { settled = true }
+        } onChange: { settled.withLock { $0 = true } }
         releaseProbe?.resume()
         let resolved = await waitUntil { coordinator.integrationState(sessionID: sessionID)?.kind == .notInstalled }
         XCTAssertTrue(resolved)
-        XCTAssertTrue(settled, "session chrome must re-render when its integration check settles")
+        XCTAssertTrue(settled.withLock { $0 }, "session chrome must re-render when its integration check settles")
 
-        var cleared = false
+        let cleared = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking {
             _ = coordinator.integrationState(sessionID: sessionID)
-        } onChange: { cleared = true }
+        } onChange: { cleared.withLock { $0 = true } }
         coordinator.unregisterSessionSource(sessionID: sessionID, registrationID: source.registrationID)
         XCTAssertNil(coordinator.integrationState(sessionID: sessionID))
-        XCTAssertTrue(cleared, "a retired session's warning must clear from its chrome")
+        XCTAssertTrue(cleared.withLock { $0 }, "a retired session's warning must clear from its chrome")
         await coordinator.setExperimentEnabled(false)
     }
 
@@ -2788,6 +2980,57 @@ final class AgentCenterV2CoordinatorTests: XCTestCase {
         XCTAssertTrue(probed)
         XCTAssertEqual(manualProbes, 0)
         await coordinator.setExperimentEnabled(false)
+    }
+
+    /// mosh-server forwards no lifecycle escape and plain mosh has no pane
+    /// option, so a quiet Claude or Codex there is shown by its process and
+    /// never as "not yet confirmed". Plain SSH carries the escape, so the
+    /// same silence still warns there.
+    func testPlainMoshAgentIsNeverUnconfirmedButPlainSSHStillWarns() async {
+        let host = Host(name: "fixture", address: "192.0.2.1", port: 22, user: "fixture")
+        let session = SSHSession(host: host)
+        for (transport, deliverable) in [("mosh", false), ("ssh", true)] {
+            for agent in ["claude", "codex"] {
+                let source = AgentSessionSourceFactory.make(
+                    sessionID: UUID(), hostName: "fixture", baseTransportLabel: transport,
+                    tmux: TmuxController(controlPath: .sideChannel),
+                    terminalBox: TerminalBox(traceLabel: "plain-lifecycle-test"),
+                    tmuxSessionName: { nil }, profiles: { [] },
+                    rawProcessProvider: { .init(processNames: ["zsh", agent], processIDs: [7, 42]) },
+                    sessionCommands: AppleSessionCommandFacade(session: session), rawSend: { _ in }
+                )
+                let target = await source.inspectCurrentIntegration?()
+                XCTAssertEqual(target?.foreground, .agent, "\(transport) \(agent)")
+                XCTAssertEqual(target?.agentLifecycleDeliverable, deliverable, "\(transport) \(agent)")
+                guard let target else { continue }
+                let state = AgentIntegrationWarningState.resolved(installation: .current, target: target)
+                XCTAssertEqual(state.kind, deliverable ? .insideAgent : .ready, "\(transport) \(agent)")
+                XCTAssertEqual(state.showsWarning, deliverable, "\(transport) \(agent)")
+                // Missing helpers are still offered there, files only, and
+                // never with a promise that relaunching enables status.
+                let missing = AgentIntegrationWarningState.resolved(installation: .missing, target: target)
+                XCTAssertEqual(missing.kind, .notInstalled, "\(transport) \(agent)")
+                XCTAssertEqual(String(localized: missing.message).contains("Plain mosh"), !deliverable, "\(transport) \(agent)")
+                XCTAssertEqual(String(localized: missing.message).contains("relaunch"), deliverable, "\(transport) \(agent)")
+            }
+            // A shell there is never asked to enable what cannot report.
+            let source = AgentSessionSourceFactory.make(
+                sessionID: UUID(), hostName: "fixture", baseTransportLabel: transport,
+                tmux: TmuxController(controlPath: .sideChannel),
+                terminalBox: TerminalBox(traceLabel: "plain-lifecycle-shell-test"),
+                tmuxSessionName: { nil }, profiles: { [] },
+                rawProcessProvider: { .init(processNames: ["zsh"], processIDs: [7]) },
+                probeShellIntegration: { _, _ in false },
+                sessionCommands: AppleSessionCommandFacade(session: session), rawSend: { _ in }
+            )
+            guard let shell = await source.inspectCurrentIntegration?() else { XCTFail(transport); continue }
+            XCTAssertEqual(shell.foreground, .shell, transport)
+            XCTAssertEqual(AgentIntegrationWarningState.resolved(installation: .current, target: shell).kind,
+                           deliverable ? .inactiveShell : .ready, transport)
+            let missing = AgentIntegrationWarningState.resolved(installation: .missing, target: shell)
+            XCTAssertEqual(missing.action == .installAndApply, deliverable, transport)
+            XCTAssertEqual(String(localized: missing.message).contains("Plain mosh"), !deliverable, transport)
+        }
     }
 
     /// `/clear` (and Codex `/new`) keeps the provider process and pane but
@@ -3711,7 +3954,8 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
 
 """#
 
-    /// The same screen as a raw SSH or mosh terminal grid reads it.
+    /// The same screen as a raw SSH or mosh terminal grid's text reads it;
+    /// an action inspection's `promptText` adds the cells' backgrounds.
     private static let claudePhoneQuestionScreen = #"""
 ←  ☐ Run plan  ☐ Report  ✔ Submit  →
 
@@ -3814,6 +4058,71 @@ cancel
             }
             await harness.close()
         }
+    }
+
+    func testRemovedTmuxPaneRequestsOneOccupancySweepAndRetiresItsPrompt() async throws {
+        for transport in ["ssh+tmux", "mosh+tmux"] {
+            let harness = await ConversationPaneHarness(provider: "claude", transport: transport, pane: 75)
+            harness.visibleText = Self.claudeQuestionScreen
+            await pass(event("claude", "PermissionRequest", .waitingForInput, session: "A", at: 100), in: harness)
+            let id = harness.threadID("A")
+            let shown = await waitUntil { self.liveCard(harness.coordinator, id) != nil }
+            XCTAssertTrue(shown, transport)
+            let route = try XCTUnwrap(harness.coordinator.threadRoutes[id])
+            XCTAssertEqual(harness.coordinator.presentation.threadSnapshots[id]?.summary.attention, .needsYou)
+            harness.occupancyPaneExists = false
+            let reads = harness.occupancyReads
+            let discoveries = harness.discoveries.count
+            for _ in 0..<20 {
+                harness.coordinator.noteTmuxPanesRemoved(sessionID: harness.sessionID, registrationID: route.registrationID)
+            }
+            let retired = await waitUntil {
+                harness.coordinator.threadRoutes[id] == nil && harness.coordinator.sessionRefreshIsIdle(harness.sessionID)
+            }
+            XCTAssertTrue(retired, transport)
+            XCTAssertEqual(harness.occupancyReads, reads + 1, "topology bursts coalesce")
+            XCTAssertEqual(harness.discoveries.count, discoveries, "topology requests occupancy only")
+            XCTAssertNil(harness.coordinator.terminalAdapters[id])
+            let snapshot = await harness.coordinator.runtime.snapshot(for: id)
+            XCTAssertNil(snapshot?.binding)
+            XCTAssertEqual(snapshot?.summary.attention, TesseraCore.AgentAttention.none)
+            XCTAssertNil(liveCard(harness.coordinator, id))
+            XCTAssertNotEqual(snapshot?.summary.livePromptWatch, true)
+            await harness.close()
+        }
+    }
+
+    func testOnlyAHydratedWindowListThatLosesAPaneRequestsOccupancy() async throws {
+        let harness = await ConversationPaneHarness(provider: "claude", transport: "ssh+tmux", pane: 75)
+        await pass(event("claude", "SessionStart", .idle, session: "A", at: 100), in: harness)
+        let route = try XCTUnwrap(harness.coordinator.threadRoutes[harness.threadID("A")])
+        func snapshot(_ panes: [Int], hydrated: Bool = true) -> TmuxSnapshot {
+            TmuxSnapshot(sessionID: SessionId(0), sessionName: "work", activeWindowID: WindowId(7),
+                         windows: [.init(id: WindowId(7), name: "agent", activePaneID: PaneId(panes[0]),
+                                         panes: panes.map { .init(id: PaneId($0)) })],
+                         authority: .unknown, isWindowListHydrated: hydrated)
+        }
+        func note(_ next: TmuxSnapshot, after previous: TmuxSnapshot?) {
+            harness.coordinator.noteTmuxTopology(next, replacing: previous, sessionID: harness.sessionID,
+                                                 registrationID: route.registrationID)
+        }
+        // Hydration, a new pane and a partial list prove nothing gone.
+        note(snapshot([75, 76], hydrated: false), after: nil)
+        note(snapshot([75, 76]), after: snapshot([75, 76], hydrated: false))
+        note(snapshot([75, 76, 77]), after: snapshot([75, 76]))
+        note(snapshot([75], hydrated: false), after: snapshot([75, 76, 77]))
+        XCTAssertFalse(harness.coordinator.sessionLivenessRequested.contains(harness.sessionID))
+        note(snapshot([75]), after: snapshot([75, 76]))
+        XCTAssertTrue(harness.coordinator.sessionLivenessRequested.contains(harness.sessionID))
+        await harness.close()
+    }
+
+    func testStaleTopologySourceCannotRequestOccupancy() async throws {
+        let harness = await ConversationPaneHarness(provider: "claude", transport: "ssh+tmux", pane: 75)
+        await pass(event("claude", "SessionStart", .idle, session: "A", at: 100), in: harness)
+        harness.coordinator.noteTmuxPanesRemoved(sessionID: harness.sessionID, registrationID: UUID())
+        XCTAssertFalse(harness.coordinator.sessionLivenessRequested.contains(harness.sessionID))
+        await harness.close()
     }
 
     func testQuietSweepIsNotPostponedByAnotherPanesFrames() async throws {

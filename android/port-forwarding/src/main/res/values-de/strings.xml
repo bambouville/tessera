@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forwarding_title">Portweiterleitung</string>
+    <string name="forwarding_intro">Lokale und dynamische Listener bleiben auf diesem Gerät. Remote-Binds liegen auf dem Server.</string>
+    <string name="forwarding_add">hinzufügen</string>
+    <string name="forwarding_no_rules">Keine Weiterleitungsregeln.</string>
+    <string name="forwarding_enabled">aktiviert</string>
+    <string name="forwarding_open">↗ öffnen</string>
+    <string name="forwarding_edit">bearbeiten</string>
+    <string name="forwarding_delete">löschen</string>
+    <string name="forwarding_stop">Stopp</string>
+    <string name="forwarding_start">starten</string>
+    <string name="forwarding_summary_remote">%1$s → Gerät %2$s</string>
+    <string name="forwarding_rule_title">Weiterleitungsregel</string>
+    <string name="forwarding_edit_title">%1$s bearbeiten</string>
+    <string name="forwarding_cancel">abbrechen</string>
+    <string name="forwarding_save">Sichern</string>
+    <string name="forwarding_label">Bezeichnung</string>
+    <string name="forwarding_optional">optional</string>
+    <string name="forwarding_bind_address">Bind-Adresse</string>
+    <string name="forwarding_loopback_only">nur Loopback</string>
+    <string name="forwarding_bind_port">Bind-Port</string>
+    <string name="forwarding_bind_port_zero_allowed">Bind-Port · 0 erlaubt</string>
+    <string name="forwarding_remote_host">entfernter Host</string>
+    <string name="forwarding_device_host">Host auf dem Gerät</string>
+    <string name="forwarding_target_port">Ziel-Port</string>
+    <string name="forwarding_ports_whole_numbers">Ports müssen ganze Zahlen sein.</string>
+    <string name="forwarding_direction_local">Lokal</string>
+    <string name="forwarding_direction_remote">Entfernt</string>
+    <string name="forwarding_direction_dynamic">Dynamisch</string>
+    <string name="forwarding_status_stopped">Gestoppt</string>
+    <string name="forwarding_status_starting">Wird gestartet</string>
+    <string name="forwarding_status_serving">antwortet · 0 aktiv</string>
+    <string name="forwarding_status_nothing_serving">lauscht · auf dem entfernten Port %1$s antwortet nichts</string>
+    <string name="forwarding_status_checking">lauscht · wird geprüft…</string>
+    <string name="forwarding_status_listening">lauscht · 0 aktiv</string>
+    <string name="forwarding_invalid_bind_address">Eine Bind-Adresse ist erforderlich.</string>
+    <string name="forwarding_invalid_bind_port">Der Bind-Port muss gültig sein.</string>
+    <string name="forwarding_non_loopback_local_bind">Lokale und dynamische Weiterleitung muss an Loopback binden.</string>
+    <string name="forwarding_missing_target">Ein Ziel ist erforderlich.</string>
+    <string name="forwarding_invalid_target_address">Ein Ziel-Host ist erforderlich.</string>
+    <string name="forwarding_invalid_target_port">Der Ziel-Port muss gültig sein.</string>
+    <string name="forwarding_dynamic_cannot_have_target">Dynamische Weiterleitung wählt das Ziel pro SOCKS-Anfrage.</string>
+    <string name="forwarding_bind_collision">Ein anderer lokaler Listener verwendet diesen Port.</string>
+    <string name="forwarding_runtime_unavailable">Die SSH-Weiterleitung ist nicht verfügbar</string>
+    <string name="forwarding_listener_stopped">Der Weiterleitungs-Listener wurde unerwartet beendet</string>
+    <string name="forwarding_mosh_without_side_channel">Mosh hat keinen authentifizierten SSH-Seitenkanal</string>
+    <string name="forwarding_transport_unsupported_local">Dieser Transport unterstützt keine lokale Weiterleitung</string>
+    <string name="forwarding_transport_unsupported_remote">Dieser Transport unterstützt keine Remote-Weiterleitung</string>
+    <string name="forwarding_transport_unsupported_dynamic">Dieser Transport unterstützt keine dynamische Weiterleitung</string>
+    <string name="forwarding_chrome_label">Portweiterleitung</string>
+    <plurals name="forwarding_chrome_label_serving">
+        <item quantity="one">Portweiterleitung, %1$d mit Antwort</item>
+        <item quantity="other">Portweiterleitung, %1$d mit Antwort</item>
+    </plurals>
+    <string name="forwarding_browser_back">zurück</string>
+    <string name="forwarding_browser_forward">Vorwärts</string>
+    <string name="forwarding_browser_stop">Stopp</string>
+    <string name="forwarding_browser_reload">Neu laden</string>
+    <string name="forwarding_browser_done">Fertig</string>
+    <string name="forwarding_browser_no_answer">Dieser Tunnel hat nicht geantwortet</string>
+    <string name="forwarding_browser_check_rule">Prüfe, ob die Regel lauscht und ob der entfernte Dienst läuft.</string>
+    <string name="forwarding_browser_retry">erneut versuchen</string>
+    <string name="forwarding_browser_connection_failed">die Verbindung ist fehlgeschlagen</string>
+    <plurals name="forwarding_status_active_connections">
+        <item quantity="one">%1$d aktive Verbindung</item>
+        <item quantity="other">%1$d aktive Verbindungen</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels">
+        <item quantity="one">%1$d aktiver Tunnel</item>
+        <item quantity="other">%1$d aktive Tunnel</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels_serving">
+        <item quantity="one">%1$d aktiver Tunnel, %2$d mit Antwort</item>
+        <item quantity="other">%1$d aktive Tunnel, %2$d mit Antwort</item>
+    </plurals>
+</resources>

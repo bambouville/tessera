@@ -28,6 +28,29 @@ void rejectsWith(const std::string& code, const std::function<void()>& operation
 }
 int main() {
     {
+        // A seek page replaces the viewport, wherever it lies, and keeps the
+        // head apart; its ACK cannot keep the old viewport or move the head.
+        PageWindow window;
+        window.reserve("boot", 0, PageWindow::Kind::Bootstrap); window.stage(segment(900));
+        window.acknowledge("boot", 1, {"s900"}, "s900");
+        window.reserve("older", 1); window.stage(segment(800));
+        window.acknowledge("older", 2, {"s800", "s900"}, "s900");
+        window.reserve("seek", 2, PageWindow::Kind::Seek); window.stage(segment(300));
+        rejectsWith("windowAckGap", [&] { window.acknowledge("seek", 3, {"s800", "s300"}, "s900"); });
+        rejectsWith("windowAckGap", [&] { window.acknowledge("seek", 3, {"s300", "s900"}, "s900"); });
+        rejectsWith("windowAckHead", [&] { window.acknowledge("seek", 3, {"s300"}, "s300"); });
+        rejectsWith("windowAckDroppedIncoming", [&] { window.acknowledge("seek", 3, {"s800"}, "s900"); });
+        assert(window.version() == 2 && window.pending());
+        window.acknowledge("seek", 3, {"s300"}, "s900");
+        assert(window.viewport() == std::vector<std::string>{"s300"} && window.head() == "s900");
+        assert(window.coverage().size() == 2 && window.find("s900"));
+        rejectsWith("segmentExpired", [&] { window.find("s800"); });
+        // Paging newer from the seek page then grows the viewport as usual.
+        window.reserve("newer", 3, PageWindow::Kind::After); window.stage(segment(400));
+        window.acknowledge("newer", 4, {"s300", "s400"}, "s900");
+        assert(window.viewport().size() == 2 && window.head() == "s900");
+    }
+    {
         // window.capacity.v1: the advertised viewport is 64 full pages plus a
         // detached head. The legacy 4-segment/400-record bound no longer applies.
         static_assert(PageWindow::maximumViewportSegments == 64, "hello maxWindowSegments contract");
@@ -216,6 +239,25 @@ int main() {
         rejectsWith("windowCapacity", [&] { edge.reserve("b", 0, PageWindow::Kind::Bootstrap, PageWindow::serviceGrowthLimit); });
         edge.reserve("b", 0, PageWindow::Kind::Bootstrap, PageWindow::serviceGrowthLimit - page); edge.cancel();
         assert(!edge.pending() && edge.version() == 1 && edge.pendingBytes() == 0);
+    }
+    {
+        // A seek ACK keeps only its page and the head: like a replacing
+        // bootstrap, it is admitted by what it leaves, while its staging
+        // overlaps the old pages under the refresh limit.
+        const auto page = PageWindow::pageLimit;
+        PageWindow deep;
+        deep.reserve("boot", 0, PageWindow::Kind::Bootstrap); deep.stage(segment(900)); deep.acknowledge("boot", 1, {"s900"}, "s900");
+        deep.reserve("older", 1, PageWindow::Kind::Before); deep.stage(segment(800)); deep.acknowledge("older", 2, {"s800", "s900"}, "s900");
+        const auto released = deep.retainedBytes() - deep.find("s900")->bytes();
+        assert(released > 0);
+        const auto full = PageWindow::serviceGrowthLimit - page + released;
+        rejectsWith("windowCapacity", [&] { deep.reserve("deeper", 2, PageWindow::Kind::Before, full); });
+        deep.reserve("seek-edge", 2, PageWindow::Kind::Seek, full); deep.cancel();
+        rejectsWith("windowCapacity", [&] { deep.reserve("seek-over", 2, PageWindow::Kind::Seek, full + 1); });
+        rejectsWith("windowCapacity", [&] { deep.reserve("seek-staging", 2, PageWindow::Kind::Seek, PageWindow::serviceRefreshLimit - page + 1); });
+        deep.reserve("seek", 2, PageWindow::Kind::Seek, full); deep.stage(segment(300));
+        deep.acknowledge("seek", 3, {"s300"}, "s900");
+        assert(deep.retainedBytes() == segment(300)->bytes() + segment(900)->bytes());
     }
     {
         // Staged but unacknowledged pages count, so a burst of reads from

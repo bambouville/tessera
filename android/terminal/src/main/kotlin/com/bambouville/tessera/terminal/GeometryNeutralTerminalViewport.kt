@@ -123,7 +123,7 @@ class GeometryNeutralTerminalViewport(
         // viewport — that is the illegible peer-sized canvas this projection
         // exists to prevent, just self-inflicted.
         val usable = window?.takeIf { it.columns >= 4 && it.rows >= 4 } != null &&
-            (focus ?: window)?.takeIf { it.columns >= 4 && it.rows >= 4 } != null
+            (focus ?: window).takeIf { it.columns >= 4 && it.rows >= 4 } != null
         val validWindow = window.takeIf { usable }
         val validFocus = focus.takeIf { usable }
         if (windowRect == validWindow && focusRect == validFocus) return

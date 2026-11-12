@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="paste_text">Einfügen</string>
+  <string name="copy_text">Kopieren</string>
+  <string name="text_selection_more">Mehr…</string>
+  <string name="quick_open_selected_path">In „Artefakte“ öffnen</string>
+  <string name="reveal_selected_path">In „Dateien“ zeigen</string>
+  <string name="terminal_page_up">Bild auf</string>
+  <string name="terminal_page_down">Bild ab</string>
+</resources>

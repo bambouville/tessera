@@ -4,23 +4,50 @@ import TesseraCore
 struct AgentThreadListView: View {
     @Bindable var model: AgentCenterV2PresentationModel
     let isCompact: Bool
+    /// The desk of a laptop-folded Duo, below the viewer: no tab bar to clear
+    /// and no floating button, and search rides the hinge, because the
+    /// keyboard covers the desk.
+    let isOnDesk: Bool
+    /// The thread a detail shows on screen beside the list, whose row folds
+    /// its answers by default.
+    let shownBesideThreadID: AgentThreadID?
     var onOpenThread: ((AgentThreadID) -> Void)?
     var onOpenCandidate: ((AgentSourceCandidateID) -> Void)?
+    private let answerFolds: Binding<AgentRowAnswerFolds>?
     @FocusState private var searchFocused: Bool
     @State private var visibleRows = AgentThreadListSection.Visibility()
+    @State private var ownAnswerFolds = AgentRowAnswerFolds()
 
     @Environment(\.designTokens) private var T
+    @Environment(\.duoRailMode) private var duoRailMode
 
     init(
         model: AgentCenterV2PresentationModel,
         isCompact: Bool,
+        isOnDesk: Bool = false,
+        answerFolds: Binding<AgentRowAnswerFolds>? = nil,
+        shownBesideThreadID: AgentThreadID? = nil,
         onOpenThread: ((AgentThreadID) -> Void)? = nil,
         onOpenCandidate: ((AgentSourceCandidateID) -> Void)? = nil
     ) {
         self.model = model
         self.isCompact = isCompact
+        self.isOnDesk = isOnDesk
+        self.answerFolds = answerFolds
+        self.shownBesideThreadID = shownBesideThreadID
         self.onOpenThread = onOpenThread
         self.onOpenCandidate = onOpenCandidate
+    }
+
+    /// The section's folds, which outlive this list across layouts.
+    private var folds: AgentRowAnswerFolds { answerFolds?.wrappedValue ?? ownAnswerFolds }
+
+    private func flipAnswers(_ key: AgentRowAnswerFolds.Key, shownBeside: Bool) {
+        if let answerFolds {
+            answerFolds.wrappedValue.flip(key, shownBeside: shownBeside)
+        } else {
+            ownAnswerFolds.flip(key, shownBeside: shownBeside)
+        }
     }
 
     private func setRowVisible(_ key: AgentThreadListSection.Row.Key, _ visible: Bool) {
@@ -32,54 +59,28 @@ struct AgentThreadListView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            searchBar
+            if !isOnDesk || !model.searchQuery.isEmpty { searchBar }
             if model.listSnapshot.threads.isEmpty && model.listSnapshot.candidates.isEmpty
                 && model.searchQuery.isEmpty {
-                ContentUnavailableView {
-                    Label("no threads", systemImage: "sparkles")
-                } description: {
-                    Text("Connected hosts with agent transcripts appear here.")
+                if isOnDesk {
+                    // The viewer above holds the empty state and new agent.
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView {
+                        Label("no threads", systemImage: "sparkles")
+                    } description: {
+                        Text("Connected hosts with agent transcripts appear here.")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2, pinnedViews: .sectionHeaders) {
                         if !model.searchQuery.isEmpty {
                             Section {
-                                if model.isSearching {
-                                    ProgressView().padding(.horizontal, 16).padding(.vertical, 10)
-                                } else if model.searchSnapshot.results.isEmpty {
-                                    Text("no transcript matches on connected sources")
-                                        .font(Typography.tesseraMono(size: 11))
-                                        .foregroundStyle(T.fgDim)
-                                        .padding(.horizontal, 16).padding(.vertical, 10)
-                                } else {
-                                    ForEach(Array(model.searchSnapshot.results.enumerated()), id: \.offset) { _, result in
-                                        Button {
-                                            model.select(result.threadID)
-                                            onOpenThread?(result.threadID)
-                                        } label: {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(model.threadSnapshots[result.threadID]?.summary.title ?? "agent thread")
-                                                    .font(Typography.tesseraMono(size: 10.5, weight: .medium))
-                                                Text(result.excerpt)
-                                                    .font(Typography.tesseraMono(size: 10.5))
-                                                    .foregroundStyle(T.fgMuted)
-                                                    .lineLimit(3)
-                                            }
-                                            .frame(maxWidth: .infinity, minHeight: isCompact ? 44 : 36, alignment: .leading)
-                                            .padding(.horizontal, 16).padding(.vertical, 6)
-                                        }
-                                        .accessibilityIdentifier("agent-center-v2-search-result-\(result.threadID.providerID.rawValue)-\(result.recordID)")
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                if !model.searchSnapshot.unavailableHostIDs.isEmpty {
-                                    Text("\(model.searchSnapshot.unavailableHostIDs.count) connected source\(model.searchSnapshot.unavailableHostIDs.count == 1 ? " is" : "s are") unavailable")
-                                        .font(Typography.tesseraMono(size: 10))
-                                        .foregroundStyle(T.fgDim)
-                                        .padding(.horizontal, 16)
-                                        .padding(.bottom, 8)
+                                AgentThreadSearchResults(model: model, isCompact: isCompact) { result in
+                                    model.openSearchResult(result)
+                                    onOpenThread?(result.threadID)
                                 }
                             } header: {
                                 HStack(spacing: 8) {
@@ -116,7 +117,7 @@ struct AgentThreadListView: View {
                                 }
                             } header: {
                                 HStack(spacing: 8) {
-                                    Text(section.title)
+                                    section.displayTitle
                                         .font(Typography.kicker)
                                         .foregroundStyle(section.isUrgent ? T.amber : T.fgDim)
                                     Rectangle().fill(T.border).frame(height: 1)
@@ -128,7 +129,7 @@ struct AgentThreadListView: View {
                             }
                         }
                     }
-                    .padding(.bottom, isCompact ? 82 : 12)
+                    .padding(.bottom, isCompact && !duoRailMode && !isOnDesk ? 82 : 12)
                 }
                 .scrollIndicators(.hidden)
             }
@@ -146,13 +147,19 @@ struct AgentThreadListView: View {
                     .onChange(of: proxy.size.width) { _, width in reportTitleWidth(width) }
             }
         }
-        .onChange(of: model.searchFocusRequest) { _, _ in searchFocused = true }
+        // On the desk, search rides the hinge (`AgentThreadSearchHingeField`).
+        .onChange(of: model.searchFocusRequest) { _, _ in if !isOnDesk { searchFocused = true } }
+        // Every field that edits the query, in the list or on the hinge,
+        // searches through the list, which is mounted wherever they are.
+        .onChange(of: model.searchQuery) { _, query in
+            model.onAction?(.search(query))
+        }
         .onChange(of: searchFocused) { _, focused in
             if focused { model.keyboardFocus = .search }
             else if model.keyboardFocus == .search { model.keyboardFocus = .none }
         }
         .overlay(alignment: .bottomTrailing) {
-            if isCompact {
+            if isCompact && !duoRailMode && !isOnDesk {
                 Button {
                     model.openLaunch(.spawn)
                 } label: {
@@ -193,10 +200,21 @@ struct AgentThreadListView: View {
             Text("threads")
                 .font(isCompact ? Typography.sheetTitle : Typography.pageTitle)
                 .foregroundStyle(T.fg)
-            Text("\(model.listSnapshot.threads.count + model.listSnapshot.candidates.count)")
-                .font(Typography.tesseraMono(size: 11))
-                .foregroundStyle(T.fgDim)
+            // A search lists its transcript matches, which this count is not.
+            if model.searchQuery.isEmpty {
+                Text("\(model.listSnapshot.threads.count + model.listSnapshot.candidates.count)")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+            }
             Spacer()
+            if isOnDesk {
+                Button { model.requestSearchFocus() } label: {
+                    Image(systemName: "magnifyingglass")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityIdentifier("agent-center-v2-desk-search")
+                .accessibilityLabel("search agent threads")
+            }
             Menu {
                 Button("attention") { setGrouping(.attention) }
                 Button("host") { setGrouping(.host) }
@@ -205,7 +223,14 @@ struct AgentThreadListView: View {
                     .frame(minWidth: isCompact ? 44 : 36, minHeight: isCompact ? 44 : 36)
             }
             .accessibilityLabel("group threads")
-            if !isCompact {
+            if isOnDesk {
+                Button { model.openLaunch(.spawn) } label: {
+                    Image(systemName: "plus")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityIdentifier("agent-center-v2-desk-new")
+                .accessibilityLabel("new agent")
+            } else if !isCompact {
                 Button {
                     model.openLaunch(.spawn)
                 } label: {
@@ -221,9 +246,10 @@ struct AgentThreadListView: View {
                 .accessibilityLabel("new agent")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, isCompact ? 12 : 21)
-        .padding(.bottom, 9)
+        .padding(.leading, 16)
+        .padding(.trailing, isOnDesk ? 8 : 16)
+        .padding(.top, isOnDesk ? 2 : isCompact ? 12 : 21)
+        .padding(.bottom, isOnDesk ? 0 : 9)
     }
 
     private var searchBar: some View {
@@ -231,15 +257,27 @@ struct AgentThreadListView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(T.fgDim)
-            TextField("search all transcripts", text: $model.searchQuery)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .focused($searchFocused)
-                .font(Typography.tesseraMono(size: 11))
-                .onSubmit { model.onAction?(.search(model.searchQuery)) }
-                .onChange(of: model.searchQuery) { _, query in
-                    model.onAction?(.search(query))
+            if isOnDesk {
+                // The query, which reopens on the hinge to edit.
+                Button { model.requestSearchFocus() } label: {
+                    Text(model.searchQuery)
+                        .font(Typography.tesseraMono(size: 11))
+                        .foregroundStyle(T.fg)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("search all transcripts")
+                .accessibilityValue(model.searchQuery)
+            } else {
+                TextField("search all transcripts", text: $model.searchQuery)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($searchFocused)
+                    .font(Typography.tesseraMono(size: 11))
+                    .onSubmit { model.onAction?(.search(model.searchQuery)) }
+            }
             if !model.searchQuery.isEmpty {
                 Button("clear") { model.searchQuery = "" }
                     .font(Typography.tesseraMono(size: 10))
@@ -264,6 +302,13 @@ struct AgentThreadListView: View {
     @ViewBuilder
     private func threadRow(_ summary: AgentThreadSummary) -> some View {
         let isSelected = model.selectedThreadID == summary.id
+        // A waiting row carries its prompt's one-tap answers in every layout,
+        // in a section that folds behind the chevron.
+        let waitingPrompt = AgentCenterV2PresentationModel.rendersInlinePromptOptions(for: summary)
+            ? prompt(for: summary.id) : nil
+        let foldKey = waitingPrompt.map { AgentRowAnswerFolds.Key(thread: summary.id, token: $0.token) }
+        let shownBeside = shownBesideThreadID == summary.id
+        let answersOpen = foldKey.map { folds.isOpen($0, shownBeside: shownBeside) } ?? false
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 model.keyboardFocus = .list
@@ -277,17 +322,32 @@ struct AgentThreadListView: View {
                             .font(Typography.tesseraMono(size: 12.5, weight: .medium))
                             .foregroundStyle(T.fg)
                             .lineLimit(1)
+                            .layoutPriority(1)
                         if summary.queuedMessageCount > 0 {
                             Text("\(summary.queuedMessageCount) queued")
                                 .font(Typography.tesseraMono(size: 9))
                                 .foregroundStyle(T.amber)
+                                .lineLimit(1)
+                                .fixedSize()
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
                                 .background(T.amber.opacity(0.14), in: Capsule())
                         }
+                        if foldKey != nil, AgentRowAnswerFolds.pointsToDetail(isOpen: answersOpen, shownBeside: shownBeside) {
+                            // Only where the title leaves room: the chevron
+                            // already says the answers are folded.
+                            ViewThatFits(in: .horizontal) {
+                                answerElsewhereLabel(summary)
+                                Color.clear.frame(width: 0, height: 0)
+                            }
+                        }
                         Spacer(minLength: 3)
                         age(summary.lastActivity)
+                            .lineLimit(1)
+                            .layoutPriority(1)
                     }
+                    // Room for the chevron, which sits over the row's corner.
+                    .padding(.trailing, foldKey == nil ? 0 : 28)
                     Text(identity(for: summary))
                         .font(Typography.tesseraMono(size: 10))
                         .foregroundStyle(T.fgMuted)
@@ -306,23 +366,65 @@ struct AgentThreadListView: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 9)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(isSelected ? T.inputBg : Color.clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(
-                    isSelected && summary.attention == .needsYou ? T.amber.opacity(0.4) : isSelected ? T.borderStrong : .clear,
-                    lineWidth: 1
-                ))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("agent-center-v2-thread-\(summary.id.providerSessionID)")
             .accessibilityLabel("\(summary.title), \(summary.status.rawValue)")
+            .overlay(alignment: .topTrailing) {
+                if let foldKey {
+                    answersToggle(foldKey, isOpen: answersOpen, shownBeside: shownBeside, threadID: summary.id)
+                }
+            }
 
-            if isCompact, AgentCenterV2PresentationModel.rendersInlinePromptOptions(for: summary), let prompt = prompt(for: summary.id) {
-                urgentActions(prompt, threadID: summary.id)
+            if answersOpen, let waitingPrompt {
+                urgentActions(waitingPrompt, threadID: summary.id)
                     .padding(.horizontal, 9)
                     .padding(.bottom, 9)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("agent-center-v2-row-answers-\(summary.id.providerSessionID)")
             }
         }
+        // The selected card holds its open answers too.
+        .background(isSelected ? T.inputBg : Color.clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(
+            isSelected && summary.attention == .needsYou ? T.amber.opacity(0.4) : isSelected ? T.borderStrong : .clear,
+            lineWidth: 1
+        ))
         .padding(.horizontal, 8)
+    }
+
+    /// Where a folded row's prompt is answered: the thread on screen beside it.
+    private func answerElsewhereLabel(_ summary: AgentThreadSummary) -> some View {
+        Group {
+            if isOnDesk { Text("answer above") } else { Text("answer beside") }
+        }
+        .font(Typography.tesseraMono(size: 9))
+        .foregroundStyle(T.fgDim)
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .overlay(Capsule().stroke(T.borderStrong, lineWidth: 1))
+        .accessibilityIdentifier("agent-center-v2-answer-elsewhere-\(summary.id.providerSessionID)")
+    }
+
+    /// ⌃ folds a waiting row's answers, ⌄ shows them: for this prompt only.
+    private func answersToggle(
+        _ key: AgentRowAnswerFolds.Key, isOpen: Bool, shownBeside: Bool, threadID: AgentThreadID
+    ) -> some View {
+        Button { flipAnswers(key, shownBeside: shownBeside) } label: {
+            Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(T.fgMuted)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // The glyph lines up with the title row; the target reaches past it.
+        .offset(x: 2, y: -5)
+        .accessibilityLabel(isOpen ? "fold answers" : "show answers")
+        .accessibilityIdentifier("agent-center-v2-row-answers-toggle-\(threadID.providerSessionID)")
     }
 
     private func candidateRow(_ candidate: AgentTerminalCandidate) -> some View {
@@ -374,7 +476,7 @@ struct AgentThreadListView: View {
             && model.threadSnapshots[threadID]?.binding?.capabilities.contains(.promptAnswer) == true
         return HStack(spacing: 7) {
             if canAnswer {
-                ForEach(prompt.options.filter { $0.acceptsText != true }.prefix(3)) { option in
+                ForEach(AgentAnswerDeckPolicy.oneTapOptions(prompt)) { option in
                     Button {
                         model.keyboardFocus = .action
                         model.onAction?(.answer(threadID: threadID, token: prompt.token, goal: .option(option.id)))
@@ -390,7 +492,7 @@ struct AgentThreadListView: View {
                     .accessibilityLabel("answer \(option.label)")
                     .disabled(model.answeringPromptThreads.contains(threadID))
                 }
-                if let control = prompt.controls?.first(where: { $0.kind == .open }) {
+                if let control = AgentAnswerDeckPolicy.openControl(prompt) {
                     Button("Answer") {
                         model.onAction?(.answer(threadID: threadID, token: prompt.token, goal: .control(control.kind)))
                     }
@@ -399,7 +501,7 @@ struct AgentThreadListView: View {
                     .accessibilityIdentifier("agent-center-v2-answer-control-open")
                     .disabled(model.answeringPromptThreads.contains(threadID))
                 }
-                if prompt.options.filter({ $0.acceptsText != true }).count > 3 {
+                if AgentAnswerDeckPolicy.overflows(prompt) {
                     Button("more") {
                         model.keyboardFocus = .action
                         model.showPromptOverflow(threadID: threadID, prompt: prompt)
@@ -427,11 +529,7 @@ struct AgentThreadListView: View {
     }
 
     private func prompt(for id: AgentThreadID) -> AgentActionPrompt? {
-        guard let snapshot = model.threadSnapshots[id] else { return nil }
-        return snapshot.messages.reversed().flatMap(\.blocks).compactMap { block in
-            if case .actionPrompt(let prompt) = block { return prompt }
-            return nil
-        }.first
+        model.threadSnapshots[id].flatMap { AgentAnswerDeckPolicy.latestPrompt(in: $0.messages) }
     }
 
     private func identity(for summary: AgentThreadSummary) -> String {
@@ -500,6 +598,67 @@ struct AgentThreadListView: View {
     }
 }
 
+/// Transcript matches for the list's query: in the list, and over the
+/// laptop viewer while the query rides the hinge.
+private extension AgentSearchResult {
+    /// `AgentSearchSnapshot.merging` keeps one result per record of a thread.
+    struct ListID: Hashable { let threadID: AgentThreadID; let recordID: String }
+    var listID: ListID { ListID(threadID: threadID, recordID: recordID) }
+}
+
+struct AgentThreadSearchResults: View {
+    @Bindable var model: AgentCenterV2PresentationModel
+    let isCompact: Bool
+    let onOpen: (AgentSearchResult) -> Void
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // Rows show as sources find them; the spinner stays below them
+            // until the search ends.
+            if !model.searchSnapshot.results.isEmpty {
+                // Rows keep their identity as replies land around them.
+                ForEach(model.searchSnapshot.results, id: \.listID) { result in
+                    Button {
+                        onOpen(result)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.threadSnapshots[result.threadID]?.summary.title ?? "agent thread")
+                                .font(Typography.tesseraMono(size: 10.5, weight: .medium))
+                            Text(result.excerpt)
+                                .font(Typography.tesseraMono(size: 10.5))
+                                .foregroundStyle(T.fgMuted)
+                                .lineLimit(3)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: isCompact ? 44 : 36, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.vertical, 6)
+                    }
+                    .accessibilityIdentifier("agent-center-v2-search-result-\(result.threadID.providerID.rawValue)-\(result.recordID)")
+                    .buttonStyle(.plain)
+                }
+            }
+            if model.isSearching {
+                ProgressView().padding(.horizontal, 16).padding(.vertical, 10)
+                    .accessibilityIdentifier("agent-center-v2-search-progress")
+            } else if model.searchSnapshot.results.isEmpty {
+                Text("no transcript matches on connected sources")
+                    .font(Typography.tesseraMono(size: 11))
+                    .foregroundStyle(T.fgDim)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+            }
+            // Hosts that were unreachable or stopped early, including ones
+            // whose results above are only partial.
+            if !model.isSearching, !model.searchSnapshot.unavailableHostIDs.isEmpty {
+                Text("\(model.searchSnapshot.unavailableHostIDs.count) connected sources could not be fully searched")
+                    .font(Typography.tesseraMono(size: 10))
+                    .foregroundStyle(T.fgDim)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
+        }
+    }
+}
+
 /// One list section. Its identity is its category (or host), never its
 /// position, and its rows are keyed by section as well as thread. A pinned
 /// lazy stack that saw a thread's id move from one section to another kept
@@ -516,9 +675,15 @@ struct AgentThreadListSection: Identifiable {
     }
 
     let title: String
+    let localizedTitle: LocalizedStringResource?
     let rows: [AgentThreadSummary]
     let isUrgent: Bool
     var id: String { title }
+
+    var displayTitle: Text {
+        if let localizedTitle { return Text(localizedTitle) }
+        return Text(verbatim: title)
+    }
 
     var keyedRows: [Row] {
         rows.map { Row(id: .init(section: id, thread: $0.id), summary: $0) }
@@ -549,15 +714,15 @@ struct AgentThreadListSection: Identifiable {
             let finished = rows.filter { $0.attention == .unreadCompletion && $0.status != .working }
             let recent = rows.filter { $0.attention == .none && $0.status != .working }
             return [
-                AgentThreadListSection(title: "needs you", rows: needsYou, isUrgent: true),
-                AgentThreadListSection(title: "working", rows: working, isUrgent: false),
-                AgentThreadListSection(title: "finished", rows: finished, isUrgent: false),
-                AgentThreadListSection(title: "recent", rows: recent, isUrgent: false),
+                AgentThreadListSection(title: "needs you", localizedTitle: LocalizedStringResource("needs you"), rows: needsYou, isUrgent: true),
+                AgentThreadListSection(title: "working", localizedTitle: LocalizedStringResource("working"), rows: working, isUrgent: false),
+                AgentThreadListSection(title: "finished", localizedTitle: LocalizedStringResource("finished"), rows: finished, isUrgent: false),
+                AgentThreadListSection(title: "recent", localizedTitle: LocalizedStringResource("recent"), rows: recent, isUrgent: false),
             ].filter { !$0.rows.isEmpty }
         case .host:
             return Dictionary(grouping: rows, by: \.hostDisplayLabel)
                 .sorted { $0.key < $1.key }
-                .map { AgentThreadListSection(title: $0.key, rows: $0.value, isUrgent: false) }
+                .map { AgentThreadListSection(title: $0.key, localizedTitle: nil, rows: $0.value, isUrgent: false) }
         }
     }
 }

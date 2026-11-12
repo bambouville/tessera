@@ -21,12 +21,14 @@ not transliterations of each other — they use different vocabulary
   by hand**; it is rebuilt from the sources below.
 - `Tessera/InfoPlist.xcstrings` — permission prompts. Hand-maintained, since
   those strings come from build settings rather than Swift.
-- `l10n/translations.json` — simple strings, keyed by the English source.
-- `l10n/plurals.json` — strings that vary by one count.
-- `l10n/subs.json` — strings that vary by more than one count independently.
+- `l10n/strings/*.json` — simple strings, keyed by the English source.
+- `l10n/plurals/*.json` — strings that vary by one count.
+- `l10n/subs/*.json` — strings that vary by more than one count independently.
 
-All three keep every language side by side under one English key, so a key can
-never drift out of sync between languages.
+Each directory holds batch files split by feature area, so each batch stays
+reviewable on its own. The builder merges a directory's batches and fails on a
+key that appears in two of them. Every entry keeps all languages side by side
+under one English key, so a key can never drift out of sync between languages.
 
 ## Regenerating the catalog
 
@@ -40,6 +42,17 @@ xcodebuild -project Tessera.xcodeproj -scheme Tessera \
 python3 scripts/l10n/build-catalog.py            # rebuild the catalog
 python3 scripts/l10n/build-catalog.py --missing  # list untranslated keys
 ```
+
+Both runs rewrite the catalog. With no extraction output under the derived data
+they stop instead, since every key would read as gone. To read another build,
+set `TESSERA_L10N_DERIVED_DATA` to its `-derivedDataPath`.
+
+Our packages (`Packages/TesseraCore` and `Packages/TmuxControl`) declare
+`defaultLocalization: "en"` so Xcode extracts their strings too. Package code
+that shows text in the app uses `String(localized: …, bundle: .main)` to resolve
+against the app catalog. A package without `defaultLocalization` contributes
+nothing to extraction: its translations show up as `[stale]` and its strings
+ship untranslated.
 
 A string with no translation for a language is simply omitted for that
 language, so the app falls back to English rather than rendering blank.

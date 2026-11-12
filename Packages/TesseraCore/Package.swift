@@ -3,12 +3,14 @@ import PackageDescription
 
 let package = Package(
     name: "TesseraCore",
+    defaultLocalization: "en",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
     ],
     products: [
         .library(name: "TesseraDomainCore", targets: ["TesseraDomainCore"]),
+        .library(name: "TesseraArtifactsCore", targets: ["TesseraArtifactsCore"]),
         .library(name: "TesseraProtocolCore", targets: ["TesseraProtocolCore"]),
         .library(name: "TesseraTrustCore", targets: ["TesseraTrustCore"]),
         .library(name: "TesseraInputCore", targets: ["TesseraInputCore"]),
@@ -36,6 +38,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "TesseraDomainCore"),
+        .target(name: "TesseraArtifactsCore", dependencies: ["TesseraDomainCore"]),
         .target(
             name: "TesseraProtocolCore",
             dependencies: [
@@ -114,6 +117,7 @@ let package = Package(
         .target(
             name: "TesseraCoreABI",
             dependencies: [
+                "TesseraArtifactsCore",
                 "TesseraDomainCore",
                 "TesseraProtocolCore",
                 "TesseraTrustCore",
@@ -136,6 +140,7 @@ let package = Package(
         .target(
             name: "TesseraCore",
             dependencies: [
+                "TesseraArtifactsCore",
                 "TesseraDomainCore",
                 "TesseraProtocolCore",
                 "TesseraTrustCore",
@@ -151,6 +156,7 @@ let package = Package(
             ]
         ),
         .testTarget(name: "TesseraDomainCoreTests", dependencies: ["TesseraDomainCore"]),
+        .testTarget(name: "TesseraArtifactsCoreTests", dependencies: ["TesseraArtifactsCore"]),
         .testTarget(name: "TesseraProtocolCoreTests", dependencies: ["TesseraProtocolCore"]),
         .testTarget(name: "TesseraTrustCoreTests", dependencies: ["TesseraTrustCore"]),
         .testTarget(name: "TesseraInputCoreTests", dependencies: ["TesseraInputCore"]),
@@ -163,6 +169,7 @@ let package = Package(
         .testTarget(
             name: "TesseraCoreABITests",
             dependencies: [
+                "TesseraArtifactsCore",
                 "TesseraCoreABI",
                 .product(name: "TmuxControlCore", package: "TmuxControl"),
                 "TesseraTrustCore",
@@ -170,7 +177,8 @@ let package = Package(
                 "TesseraProtocolCore",
                 "TesseraContinuityCore",
                 "TesseraEnrollmentCore",
-            ]
+            ],
+            resources: [.process("Fixtures")]
         ),
         .testTarget(
             name: "TesseraPairingCoreTests",

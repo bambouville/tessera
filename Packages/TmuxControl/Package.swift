@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "TmuxControl",
+    defaultLocalization: "en",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),

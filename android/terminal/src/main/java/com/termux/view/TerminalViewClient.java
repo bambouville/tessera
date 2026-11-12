@@ -5,6 +5,8 @@ import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 
+import androidx.annotation.Nullable;
+
 import com.termux.terminal.TerminalSession;
 
 /**
@@ -28,8 +30,9 @@ public interface TerminalViewClient {
 
     /**
      * On a single tap on the terminal if terminal mouse reporting not enabled.
+     * {@code e} is null for an accessibility click, which has no touch.
      */
-    void onSingleTapUp(MotionEvent e);
+    void onSingleTapUp(@Nullable MotionEvent e);
 
     boolean shouldBackButtonBeMappedToEscape();
 

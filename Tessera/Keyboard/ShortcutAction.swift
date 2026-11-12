@@ -25,10 +25,28 @@ enum ShortcutAvailability: Equatable {
     case padOnly
     /// Lives on the host editor, not the terminal.
     case hostEditor
+    /// Only while the artifacts browser has keyboard focus: its page is on
+    /// screen, or the user last touched a Duo context pane showing it.
+    case artifactsBrowser
+}
+
+/// Where a chord is live. Two actions conflict only when their scopes can
+/// be live at once: the browser's ⌘T and tmux's ⌘T never are, because a
+/// focused terminal keeps its chords and a focused browser takes them.
+enum ShortcutSurface: Equatable {
+    /// Everywhere, including over the terminal and the browser.
+    case app
+    case terminal
+    case browser
+    case hostEditor
+
+    func overlaps(_ other: ShortcutSurface) -> Bool {
+        self == other || self == .app || other == .app
+    }
 }
 
 enum ShortcutGroup: String, CaseIterable, Identifiable {
-    case global, sessions, find, tmux, panes, custom
+    case global, sessions, find, tmux, panes, artifacts, custom
     var id: String { rawValue }
 
     /// Resolved eagerly with `String(localized:)`: the callers uppercase it,
@@ -41,6 +59,7 @@ enum ShortcutGroup: String, CaseIterable, Identifiable {
         case .find:     return String(localized: "find in scrollback")
         case .tmux:     return String(localized: "tmux")
         case .panes:    return String(localized: "panes")
+        case .artifacts: return String(localized: "artifacts browser")
         case .custom:   return String(localized: "custom")
         }
     }
@@ -52,6 +71,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case quickSwitchPalette
     case openSettings
     case toggleAgentCenter
+    case toggleArtifacts
     // sessions
     case previousSession
     case nextSession
@@ -76,6 +96,21 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case panePrevious
     case paneNext
     case paneZoom
+    // artifacts browser: live while it has keyboard focus, where they take
+    // the same chords from the terminal (see `ShortcutSurface`).
+    case browserNewTab
+    case browserEditAddress
+    case browserReload
+    case browserBack
+    case browserForward
+    case browserCloseTab
+    case browserReopenTab
+    case browserPreviousTab
+    case browserNextTab
+    case browserSelectTab
+    case browserTabOverview
+    case browserFind
+    case browserShareFile
 
     var id: String { rawValue }
 
@@ -85,6 +120,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickSwitchPalette:  return String(localized: "quick-switch palette")
         case .openSettings:        return String(localized: "settings")
         case .toggleAgentCenter:   return String(localized: "toggle agent center")
+        case .toggleArtifacts:     return String(localized: "toggle artifacts")
         case .previousSession:     return String(localized: "previous session")
         case .nextSession:         return String(localized: "next session")
         case .toggleFilesPanel:    return String(localized: "toggle files panel")
@@ -105,6 +141,19 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .panePrevious:        return String(localized: "previous pane")
         case .paneNext:            return String(localized: "next pane")
         case .paneZoom:            return String(localized: "zoom pane")
+        case .browserNewTab:       return String(localized: "new tab")
+        case .browserEditAddress:  return String(localized: "edit address")
+        case .browserReload:       return String(localized: "reload")
+        case .browserBack:         return String(localized: "back")
+        case .browserForward:      return String(localized: "forward")
+        case .browserCloseTab:     return String(localized: "close tab")
+        case .browserReopenTab:    return String(localized: "reopen closed tab")
+        case .browserPreviousTab:  return String(localized: "previous tab")
+        case .browserNextTab:      return String(localized: "next tab")
+        case .browserSelectTab:    return String(localized: "jump to tab 1–8 / last")
+        case .browserTabOverview:  return String(localized: "tab overview")
+        case .browserFind:         return String(localized: "find in page")
+        case .browserShareFile:    return String(localized: "share file")
         }
     }
 
@@ -112,20 +161,27 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .newHost:            return String(localized: "opens the host editor from anywhere")
         case .quickSwitchPalette: return String(localized: "jump to any session or host")
+        case .toggleArtifacts:    return String(localized: "every tab from every session; again goes back to where you were")
         case .findNext, .findPrevious: return String(localized: "works with the find bar closed")
         case .refreshTerminal:    return String(localized: "iPad only — the terminal bar no longer carries a refresh button")
         case .connect:            return String(localized: "host editor only")
         case .tmuxCloseWindow:
             return String(localized: "⌘W is claimed by Stage Manager, so the default is ⇧⌘W")
-        case .tmuxSelectWindow:
+        case .tmuxSelectWindow, .browserSelectTab:
             return String(localized: "a nine-key block sharing one action — remapping changes the modifier, not the digits")
+        case .browserCloseTab:
+            return String(localized: "⌘W is claimed by Stage Manager, so the default is ⇧⌘W")
+        case .browserFind:
+            return String(localized: "web pages only")
+        case .browserShareFile:
+            return String(localized: "files with a complete downloaded copy")
         default: return nil
         }
     }
 
     var group: ShortcutGroup {
         switch self {
-        case .newHost, .quickSwitchPalette, .openSettings, .toggleAgentCenter:
+        case .newHost, .quickSwitchPalette, .openSettings, .toggleAgentCenter, .toggleArtifacts:
             return .global
         case .previousSession, .nextSession, .toggleFilesPanel, .refreshTerminal, .connect:
             return .sessions
@@ -135,6 +191,18 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return .tmux
         case .paneSplitSideBySide, .paneSplitStacked, .panePrevious, .paneNext, .paneZoom:
             return .panes
+        case .browserNewTab, .browserEditAddress, .browserReload, .browserBack, .browserForward,
+             .browserCloseTab, .browserReopenTab, .browserPreviousTab, .browserNextTab,
+             .browserSelectTab, .browserTabOverview, .browserFind, .browserShareFile:
+            return .artifacts
+        }
+    }
+
+    var surface: ShortcutSurface {
+        switch group {
+        case .global: return .app
+        case .artifacts: return .browser
+        case .sessions, .find, .tmux, .panes, .custom: return availability == .hostEditor ? .hostEditor : .terminal
         }
     }
 
@@ -147,6 +215,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return .tmuxAttached
         case .panePrevious, .paneNext, .paneZoom:
             return .multiplePanes
+        case _ where group == .artifacts:
+            return .artifactsBrowser
         default:
             return .always
         }
@@ -154,7 +224,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     /// `⌘1–⌘9` is nine `UIKeyCommand`s sharing one action, so the stored
     /// binding names only the modifier and the editor remaps the block.
-    var isDigitBlock: Bool { self == .tmuxSelectWindow }
+    var isDigitBlock: Bool { self == .tmuxSelectWindow || self == .browserSelectTab }
 
     /// The shipped chord. Changing one of these changes what "restore defaults"
     /// means, so the reasons live here rather than in a commit message.
@@ -164,6 +234,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickSwitchPalette: return .cmd("k")
         case .openSettings:       return KeyBinding([.command], .character(","))
         case .toggleAgentCenter:  return .cmdShift("a")
+        case .toggleArtifacts:    return .cmdShift("b")
         // ⌘⇧K/⌘⇧J rather than ⌃Tab or ⌘⌥[: the focus engine eats Tab-family
         // keys, and ⌥ remaps punctuation so a command for "[" never matches.
         case .previousSession:    return .cmdShift("k")
@@ -190,6 +261,22 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .panePrevious:        return .cmd("[")
         case .paneNext:            return .cmd("]")
         case .paneZoom:            return KeyBinding([.command, .shift], .return)
+        // The browser's chords are Safari's, on a focused browser only. ⇧⌘W
+        // closes a tab for the same Stage Manager reason as tmux's, and
+        // ⇧⌘[ / ⇧⌘] step tabs because ⌃Tab never reaches the app.
+        case .browserNewTab:       return .cmd("t")
+        case .browserEditAddress:  return .cmd("l")
+        case .browserReload:       return .cmd("r")
+        case .browserBack:         return .cmd("[")
+        case .browserForward:      return .cmd("]")
+        case .browserCloseTab:     return .cmdShift("w")
+        case .browserReopenTab:    return .cmdShift("t")
+        case .browserPreviousTab:  return .cmdShift("[")
+        case .browserNextTab:      return .cmdShift("]")
+        case .browserSelectTab:    return KeyBinding([.command], .character("1"))
+        case .browserTabOverview:  return .cmdShift("\\")
+        case .browserFind:         return .cmd("f")
+        case .browserShareFile:    return .cmdShift("s")
         }
     }
 
@@ -205,9 +292,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     var wantsPriorityOverSystemBehavior: Bool {
         switch self {
         case .previousSession, .nextSession, .refreshTerminal,
-             .toggleAgentCenter, .toggleFilesPanel,
+             .toggleAgentCenter, .toggleArtifacts, .toggleFilesPanel,
              .paneSplitSideBySide, .paneSplitStacked,
              .panePrevious, .paneNext, .paneZoom:
+            return true
+        // Registered on the terminal only while a Duo context pane holds the
+        // browser's focus, where they must beat SwiftTerm's text input.
+        case .browserNewTab, .browserEditAddress, .browserReload, .browserBack, .browserForward,
+             .browserCloseTab, .browserReopenTab, .browserPreviousTab, .browserNextTab,
+             .browserSelectTab, .browserTabOverview, .browserFind, .browserShareFile:
             return true
         case .newHost, .quickSwitchPalette, .openSettings, .connect,
              .findOpen, .findNext, .findPrevious,
@@ -218,10 +311,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     }
 
     /// Actions the terminal container registers. The rest ride SwiftUI
-    /// `.keyboardShortcut` on hidden buttons in `ContentView` / the host editor.
+    /// `.keyboardShortcut` on hidden buttons in `ContentView` / the host editor,
+    /// and the browser's on hidden buttons in the browser (see
+    /// `ArtifactsBrowserShortcuts`), which the terminal relays only while a
+    /// Duo context pane holds the browser's focus.
     static var terminalActions: [ShortcutAction] {
-        allCases.filter { $0 != .newHost && $0 != .connect }
+        allCases.filter { $0 != .newHost && $0 != .connect && $0.group != .artifacts }
     }
+
+    static var browserActions: [ShortcutAction] { actions(in: .artifacts) }
 
     static func actions(in group: ShortcutGroup) -> [ShortcutAction] {
         allCases.filter { $0.group == group }

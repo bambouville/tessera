@@ -1,6 +1,5 @@
 package com.bambouville.tessera.feature.pairing
 
-import android.content.Context
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 
@@ -35,12 +34,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
+import com.bambouville.tessera.design.DisplayText
 import com.bambouville.tessera.design.LocalTesseraTokens
 import com.bambouville.tessera.design.TesseraButton
 import com.bambouville.tessera.design.TesseraButtonStyle
 import com.bambouville.tessera.design.TesseraKicker
 import com.bambouville.tessera.design.TesseraToggleRow
 import com.bambouville.tessera.design.TesseraType
+import com.bambouville.tessera.design.text
 
 import com.bambouville.tessera.core.bridge.SharedSetupFlow
 
@@ -108,43 +109,53 @@ internal fun PairingSelectionReview(
     reviewStep: Int, onStep: (Int) -> Unit,
     onHost: (String, Boolean) -> Unit, onTrusted: (Boolean) -> Unit,
     onOptional: (String, Boolean) -> Unit,
-    ownerAuthorizationError: String?, onApprove: () -> Unit, onCancel: () -> Unit,
+    ownerAuthorizationError: DisplayText?, onApprove: () -> Unit, onCancel: () -> Unit,
 ) {
     val tokens = LocalTesseraTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
 
                     if (current.hosts.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Hosts", "Include", "Review").forEachIndexed { index, title ->
+                        listOf(
+                            stringResource(R.string.pairing_review_tab_hosts),
+                            stringResource(R.string.pairing_review_tab_include),
+                            stringResource(R.string.pairing_review_tab_review),
+                        ).forEachIndexed { index, title ->
                             FilterChip(selected = reviewStep == index, onClick = { onStep(index) }, label = { Text(title) })
                         }
                     }
                     if (current.hosts.isEmpty() || reviewStep == 2) {
-                    PairingHeading("Ready to copy", "Review this transfer. Passwords and private keys never leave this device.")
-                    Text(current.summary, style = TesseraType.body, color = tokens.fg)
+                    PairingHeading(stringResource(R.string.pairing_ready_to_copy_title), stringResource(R.string.pairing_ready_to_copy_detail))
+                    Text(current.summary.text(), style = TesseraType.body, color = tokens.fg)
                     current.hosts.filter { it.id in presentation.copiedHostIds }.forEach { Text(it.name, style = MaterialTheme.typography.bodyLarge, color = tokens.fg) }
                     if (current.hosts.isNotEmpty()) {
                         Text(pluralStringResource(R.plurals.setup_grants_selected, presentation.grantedHostIds.size, presentation.grantedHostIds.size), color = tokens.fgMuted)
                         Text(pluralStringResource(R.plurals.setup_categories_selected, current.selectedOptionalTransfers.size, current.selectedOptionalTransfers.size), color = tokens.fgMuted)
                     }
-                    if ("trustedHostKeys" in current.selectedOptionalTransfers) Text("Includes trusted server keys", color = tokens.fgMuted)
+                    if ("trustedHostKeys" in current.selectedOptionalTransfers) Text(stringResource(R.string.pairing_includes_trusted_server_keys), color = tokens.fgMuted)
                     current.selectedOptionalTransfers.filter { it != "trustedHostKeys" }.forEach {
-                        Text("Includes " + when (it) { "launchCommands" -> "launch commands"; "environmentVariables" -> "environment variables"; "startupSnippets" -> "startup snippets"; else -> it }, color = tokens.fgMuted)
+                        Text(when (it) {
+                            "launchCommands" -> stringResource(R.string.pairing_includes_launch_commands)
+                            "environmentVariables" -> stringResource(R.string.pairing_includes_environment_variables)
+                            "startupSnippets" -> stringResource(R.string.pairing_includes_startup_snippets)
+                            "notes" -> stringResource(R.string.pairing_includes_notes)
+                            else -> stringResource(R.string.pairing_includes_other, it)
+                        }, color = tokens.fgMuted)
                     }
                     current.recipientFingerprint?.let { fingerprint ->
-                        TesseraKicker("recipient public key")
+                        TesseraKicker(stringResource(R.string.pairing_recipient_key_kicker))
                         Text(fingerprint, style = TesseraType.code, color = tokens.fgMuted)
                         if (current.recipientUsesSoftwareKey) Text(
-                            "Software-backed key. It is not hardware protected; grant access only to hosts you intend this device to use.",
+                            stringResource(R.string.pairing_software_key_warning),
                             style = TesseraType.body,
                             color = tokens.amber,
                         )
                     }
                     }
                     if (current.hosts.isNotEmpty() && reviewStep == 0) {
-                        PairingHeading("Choose your hosts", "Choose which hosts to copy. Required jump hosts are included with their routes.")
-                        TesseraKicker("hosts to copy")
+                        PairingHeading(stringResource(R.string.pairing_choose_hosts_title), stringResource(R.string.pairing_choose_hosts_detail))
+                        TesseraKicker(stringResource(R.string.pairing_hosts_to_copy_kicker))
                         Text(
-                            "An unselected host is not copied at all. Deselecting a host also drops any host that routes through it, so what is checked is exactly what is copied.",
+                            stringResource(R.string.pairing_hosts_to_copy_detail),
                             style = TesseraType.body,
                             color = tokens.fgMuted,
                         )
@@ -157,53 +168,57 @@ internal fun PairingSelectionReview(
                             contentPadding = PaddingValues(vertical = 8.dp),
                         )
                     }
-                    TesseraButton("next: choose data", { onStep(1) }, style = TesseraButtonStyle.Primary, enabled = presentation.allows(SharedSetupFlow.Action.approve))
+                    TesseraButton(stringResource(R.string.pairing_next_choose_data), { onStep(1) }, style = TesseraButtonStyle.Primary, enabled = presentation.allows(SharedSetupFlow.Action.approve))
                     }
                     if (current.hosts.isNotEmpty() && reviewStep == 1) {
-                        PairingHeading("Make it feel familiar", "Host addresses, jump routes, local port forwards, terminal font, scrollback, and bell settings are included.")
+                        PairingHeading(stringResource(R.string.pairing_familiar_title), stringResource(R.string.pairing_familiar_detail))
                         TesseraToggleRow(
-                            title = "trusted server keys",
-                            subtitle = "Trust the same servers on the receiving device. Existing conflicting keys are preserved for review. Off by default.",
+                            title = stringResource(R.string.pairing_trusted_server_keys),
+                            subtitle = stringResource(R.string.pairing_trusted_server_keys_detail),
                             checked = "trustedHostKeys" in current.selectedOptionalTransfers,
                             onCheckedChange = onTrusted,
                         )
-                        listOf("launchCommands" to "launch commands", "notes" to "notes", "environmentVariables" to "environment variables", "startupSnippets" to "startup snippets").forEach { (category, label) ->
+                        listOf(
+                            "launchCommands" to stringResource(R.string.pairing_launch_commands),
+                            "notes" to stringResource(R.string.pairing_notes),
+                            "environmentVariables" to stringResource(R.string.pairing_environment_variables),
+                            "startupSnippets" to stringResource(R.string.pairing_startup_snippets),
+                        ).forEach { (category, label) ->
                             TesseraToggleRow(title = label,
-                                subtitle = "May contain sensitive data or executable shell text. Off by default.",
+                                subtitle = stringResource(R.string.pairing_optional_data_detail),
                                 checked = category in current.selectedOptionalTransfers,
                                 onCheckedChange = { onOptional(category, it) })
                         }
-                        TesseraButton("next: review transfer", { onStep(2) }, style = TesseraButtonStyle.Primary)
+                        TesseraButton(stringResource(R.string.pairing_next_review_transfer), { onStep(2) }, style = TesseraButtonStyle.Primary)
                     }
                     if (current.hosts.isEmpty() || reviewStep == 2) {
-                    ownerAuthorizationError?.let { Text(it, style = TesseraType.body, color = tokens.red) }
+                    ownerAuthorizationError?.let { Text(it.text(), style = TesseraType.body, color = tokens.red) }
                     if (current.hosts.isNotEmpty() && current.selectedHostIds.isEmpty()) Text(
-                        "Select at least one host to copy.",
+                        stringResource(R.string.pairing_select_one_host),
                         style = TesseraType.body,
                         color = tokens.amber,
                     )
-                    TesseraButton("approve source access", {
+                    TesseraButton(stringResource(R.string.pairing_approve_source_access), {
                         onApprove()
                     }, style = TesseraButtonStyle.Primary,
                         enabled = presentation.allows(SharedSetupFlow.Action.approve))
                     }
-                    TesseraButton("cancel", onCancel, style = TesseraButtonStyle.Default)
+                    TesseraButton(stringResource(R.string.pairing_cancel), onCancel, style = TesseraButtonStyle.Default)
     }
 }
 
 @Composable
 internal fun PairingVerification(digits: String, waiting: Boolean, confirm: () -> Unit, reject: () -> Unit, cancel: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        PairingHeading(if (waiting) "Confirm on your other device" else "Do the codes match?",
-            if (waiting) "This device confirmed the code. Confirm the same code on the other screen to continue."
-            else "Compare all six digits on both screens before continuing. No setup has been sent yet.")
+        PairingHeading(stringResource(if (waiting) R.string.pairing_confirm_other_title else R.string.pairing_codes_match_title),
+            stringResource(if (waiting) R.string.pairing_confirm_other_detail else R.string.pairing_codes_match_detail))
         PairingSecurityCode(digits)
         if (waiting) {
-            PairingProgress("Waiting for the other device", "Either device can confirm first.")
-            TesseraButton("cancel", cancel, style = TesseraButtonStyle.Default)
+            PairingProgress(stringResource(R.string.pairing_waiting_other_title), stringResource(R.string.pairing_waiting_other_detail))
+            TesseraButton(stringResource(R.string.pairing_cancel), cancel, style = TesseraButtonStyle.Default)
         } else {
-            TesseraButton("codes match", confirm, style = TesseraButtonStyle.Primary)
-            TesseraButton("they differ", reject, style = TesseraButtonStyle.Danger)
+            TesseraButton(stringResource(R.string.pairing_codes_match), confirm, style = TesseraButtonStyle.Primary)
+            TesseraButton(stringResource(R.string.pairing_codes_differ), reject, style = TesseraButtonStyle.Danger)
         }
     }
 }
@@ -245,7 +260,7 @@ internal fun PairingAccessReceipt(hosts: List<PairingReceiptHost>) {
     }
 }
 
-internal fun pairingFailureMessage(context: Context, reason: SharedSetupFlow.FailureReason?): String = context.getString(when (reason) {
+internal fun pairingFailureMessage(reason: SharedSetupFlow.FailureReason?): DisplayText = DisplayText.Resource(when (reason) {
     SharedSetupFlow.FailureReason.expired -> R.string.setup_failure_expired
     SharedSetupFlow.FailureReason.codeMismatch -> R.string.setup_failure_mismatch
     SharedSetupFlow.FailureReason.disconnected -> R.string.setup_failure_disconnected

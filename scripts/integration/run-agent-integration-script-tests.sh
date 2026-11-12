@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# macOS bash 3.2 lets set -e pass a failing [[ ]], and no bash stops at a
+# failing ! command, so each such assertion fails on its own.
+fail_assertion() {
+  printf 'agent integration scripts: assertion failed at line %s\n' "$1" >&2
+  exit 1
+}
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 RUN_DIR="${1:-}"
@@ -53,7 +60,7 @@ if [ -n "$TESSERA_TEST_RESOLVED_PID" ] && [ "$4" != "$TESSERA_TEST_RESOLVED_PID"
 fi
 case "$2" in
   comm=) printf '%s\n' "$TESSERA_TEST_PROVIDER" ;;
-  args=) printf '/opt/bin/%s\n' "$TESSERA_TEST_PROVIDER" ;;
+  args=) printf '%s\n' "${TESSERA_TEST_AGENT_ARGS:-/opt/bin/$TESSERA_TEST_PROVIDER}" ;;
   tty=) printf '%s\n' "${TESSERA_TEST_TERMINAL#/dev/}" ;;
   stat=)
     printf '%s\n' "$4" >>"$TESSERA_TEST_PS_LOG"
@@ -71,6 +78,7 @@ SH
 cat >"$DEFERRAL_DIR/bin/tmux" <<'SH'
 #!/bin/sh
 printf '%s\n' "$1" >>"$TESSERA_TEST_TMUX_LOG"
+[ -z "${TESSERA_TEST_TMUX_TARGETS:-}" ] || printf '%s %s\n' "$1" "$4" >>"$TESSERA_TEST_TMUX_TARGETS"
 case "$1" in
   show-options)
     retained="$(cat "$TESSERA_TEST_PANE_STATE")"
@@ -99,13 +107,15 @@ cat >"$DEFERRAL_DIR/agent-codex-recover.sh" <<'SH'
 printf '%s\n' "$*" >>"$TESSERA_TEST_RECOVERY_LOG"
 case "$1" in
   --verify-observation) printf '%s\n' "$TESSERA_TEST_AGENT_PID" ;;
+  --bind-shared) [ "$2:$3" != "$TESSERA_TEST_AGENT_PID:${TESSERA_TEST_SHARED_SESSION:-}" ] || printf '%s\n' "$TESSERA_TEST_SHARED_BINDING" ;;
 esac
 SH
 cat >"$DEFERRAL_DIR/bin/python3" <<'SH'
 #!/bin/sh
-case "$2" in
-  "import base64,json,os,re,stat"*)
-    exec "$TESSERA_TEST_PYTHON" -c 'import os,sys
+# The hook runs its programs isolated: python3 -I -c PROGRAM.
+case "$1:$2:$3" in
+  "-I:-c:import base64,json,os,re,stat"*)
+    exec "$TESSERA_TEST_PYTHON" -I -c 'import os,sys
 original=os.lstat
 def listed(path,*args,**kwargs):
  try: return original(path,*args,**kwargs)
@@ -114,7 +124,7 @@ def listed(path,*args,**kwargs):
   if marker and str(path).endswith("/session_index.jsonl"):
    with open(marker,"a") as output: output.write("read\n")
 os.lstat=listed
-exec(sys.argv[1])' "$2"
+exec(sys.argv[1])' "$3"
     ;;
   *) exec "$TESSERA_TEST_PYTHON" "$@" ;;
 esac
@@ -242,7 +252,8 @@ def fixture(name, provider="claude", pid=agent):
                TESSERA_TEST_RECOVERY_LOG=str(home / "recovery-log"), TESSERA_TEST_READ_BARRIER="",
                TESSERA_TEST_RELEASE_BARRIER="", TESSERA_TEST_SERVER="1234:/tmp/tessera-script-tests.sock",
                TESSERA_TEST_PYTHON=sys.executable, TESSERA_TEST_INDEX_READ="")
-    for key in ("TESSERA_AGENT_OBSERVER", "TESSERA_AGENT_OBSERVED_TIMESTAMP_NS", "TESSERA_AGENT_VERIFIED_PROVIDER_PID"):
+    for key in ("TESSERA_AGENT_OBSERVER", "TESSERA_AGENT_OBSERVED_TIMESTAMP_NS", "TESSERA_AGENT_VERIFIED_PROVIDER_PID",
+                "TESSERA_AGENT_OBSERVED_SHARED", "TESSERA_AGENT_OBSERVED_REPLAY", "TESSERA_AGENT_OBSERVED_EVENT_NS"):
         env.pop(key, None)
     return home, env
 
@@ -414,6 +425,267 @@ for different_server in (False, True):
             os.close(master)
             os.close(slave)
 
+# A pane lock unused for a day goes, unless someone holds it; a lock in use
+# stays fresh, since each holder touches it.
+home, env = fixture("lock-prune")
+runtime = home / ".config/tessera/agent-runtime-state"
+runtime.mkdir(parents=True)
+old = time.time() - 2 * 86400
+locks = {name: runtime / f"pane-{name}.delivery.lock" for name in ("stale", "recent", "held")}
+for name, path in locks.items():
+    path.write_text("")
+    if name != "recent":
+        os.utime(path, (old, old))
+live = runtime / ("pane-" + hashlib.sha256((env["TESSERA_TEST_SERVER"] + ":" + env["TMUX_PANE"]).encode()).hexdigest() + ".delivery.lock")
+live.write_text("")
+os.utime(live, (old, old))
+with open(locks["held"]) as held:
+    fcntl.flock(held, fcntl.LOCK_EX)
+    master, slave = os.openpty()
+    env["TESSERA_TEST_TERMINAL"] = os.ttyname(slave)
+    try:
+        finish(start_hook(env, slave, "lock-prune"))
+        assert b"\x1b]1337;TesseraAgentState=" in drain(master)
+    finally:
+        os.close(master)
+        os.close(slave)
+assert not locks["stale"].exists() and locks["recent"].exists() and locks["held"].exists(), sorted(runtime.iterdir())
+# The pane published to is touched as it is held, so it stays.
+assert live.exists() and time.time() - live.stat().st_mtime < 3600, live
+print("pane publication PASS: stale pane locks pruned")
+added += 1
+
+# Codex's shared app-server runs every hosted thread's hooks with the
+# environment of the client that started it (pane %7 here). An event is
+# published to the pane the binder names, under that pane's client PID, and
+# otherwise ignored; a dropped child callback never looks for a pane.
+server_pid, client_pid = 424301, 424302
+shared_ref = base64.urlsafe_b64encode(b"/home/u/.codex/sessions/rollout-shared-a.jsonl").decode().rstrip("=")
+for label, binding, event, state, extra, published in (
+        ("bound event", f"%42 {client_pid} {shared_ref} 1", "UserPromptSubmit", "working", {}, True),
+        ("bound session start", f"%42 {client_pid} {shared_ref} 1", "SessionStart", "idle", {}, True),
+        ("bound event without a transcript", f"%42 {client_pid} {shared_ref} 1", "Stop", "idle", {"transcript_path": None}, True),
+        ("first binding during a turn", f"%42 {client_pid} {shared_ref} 1", "PostToolUse", "working", {}, True),
+        ("bound event of an observed client", f"%42 {client_pid} {shared_ref} 0", "UserPromptSubmit", "working", {}, True),
+        ("bound subagent start", f"%42 {client_pid} {shared_ref} 0", "SubagentStart", "working", {"agent_id": "child-1"}, True),
+        ("unbound event", "", "UserPromptSubmit", "working", {}, False),
+        ("short binding", f"%42 {client_pid} {shared_ref}", "UserPromptSubmit", "working", {}, False),
+        ("binding without a pane", f"42 {client_pid} {shared_ref} 1", "UserPromptSubmit", "working", {}, False),
+        ("binding with a bad pane", f"%4x {client_pid} {shared_ref} 1", "UserPromptSubmit", "working", {}, False),
+        ("binding with a bad PID", f"%42 {client_pid}x {shared_ref} 1", "UserPromptSubmit", "working", {}, False),
+        ("binding with PID 1", f"%42 1 {shared_ref} 1", "UserPromptSubmit", "working", {}, False),
+        ("binding with a bad reference", f"%42 {client_pid} {shared_ref}= 1", "UserPromptSubmit", "working", {}, False),
+        ("binding with a bad observer flag", f"%42 {client_pid} {shared_ref} 2", "UserPromptSubmit", "working", {}, False),
+        ("binding with an extra field", f"%42 {client_pid} {shared_ref} 1 extra", "UserPromptSubmit", "working", {}, False),
+        ("dropped child callback", f"%42 {client_pid} {shared_ref} 1", "PostToolUse", "working", {"agent_id": "child-1"}, False)):
+    home, env = fixture("shared-server-" + label.replace(" ", "-"), "codex", server_pid)
+    env.update(TMUX_PANE="%7", TESSERA_TEST_AGENT_ARGS="/opt/bin/codex app-server --listen unix:// --managed-daemon",
+               TESSERA_TEST_SHARED_SESSION="shared-a", TESSERA_TEST_SHARED_BINDING=binding,
+               TESSERA_TEST_TMUX_TARGETS=str(home / "tmux-targets"))
+    payload = {"session_id": "shared-a", "transcript_path": "/home/u/.codex/sessions/rollout-shared-a.jsonl", **extra}
+    payload = {key: value for key, value in payload.items() if value is not None}
+    master, slave = os.openpty()
+    env["TESSERA_TEST_TERMINAL"] = os.ttyname(slave)
+    try:
+        result = subprocess.run(["/bin/sh", str(root / "agent-lifecycle-hook.sh"), "codex", event, state, "agent-turn"],
+                                input=json.dumps(payload).encode(), env=env, stdout=slave, stderr=subprocess.PIPE, timeout=10)
+        assert result.returncode == 0, (label, result.stderr)
+        wire = drain(master)
+        recovery = (home / "recovery-log").read_text() if (home / "recovery-log").exists() else ""
+        targets = (home / "tmux-targets").read_text().split() if (home / "tmux-targets").exists() else []
+        runtime = home / ".config/tessera/agent-runtime-state"
+        log = home / ".config/tessera/agent-lifecycle-diagnostics.log"
+        diagnostic = log.read_text().splitlines()[-1] if log.exists() else ""
+        assert not (runtime / f"{server_pid}.json").exists(), label
+        assert "--watch-root" not in recovery, (label, recovery)
+        # The bound client holds no rollout; its observer follows the title.
+        # The binder says when none runs yet, whatever the event.
+        observed = published and binding.endswith(" 1")
+        assert (f"--watch-shared {client_pid}" in recovery) == observed, (label, recovery)
+        assert recovery.count("--watch-shared") == observed, (label, recovery)
+        if label == "dropped child callback":
+            assert "--bind-shared" not in recovery, (label, recovery)
+        else:
+            assert f"--bind-shared {server_pid} shared-a" in recovery, (label, recovery)
+            # A root event goes with the binding, for a binder to publish once
+            # a pane shows the thread; a child callback never does.
+            fields = next(line for line in recovery.splitlines() if line.startswith("--bind-shared ")).split()
+            if extra.get("agent_id"):
+                assert fields == ["--bind-shared", str(server_pid), "shared-a"], (label, fields)
+            else:
+                assert fields[:6] == ["--bind-shared", str(server_pid), "shared-a", event, state, "agent-turn"], (label, fields)
+                assert len(fields) == 7 and fields[6].isdigit(), (label, fields)
+        if published:
+            assert "phase=resolved agentPid=present pane=present" in diagnostic, (label, diagnostic)
+            assert b"\x1b]1337;TesseraAgentState=" in wire, label
+            assert targets and set(targets[1::2]) == {"%42"}, (label, targets)
+            frame = json.loads((home / "pane-state").read_text())
+            claim = json.loads((runtime / f"{client_pid}.json").read_text())
+            assert frame == claim, (label, frame, claim)
+            assert frame["agentPid"] == client_pid and frame["sessionId"] == "shared-a" and frame["event"] == event, (label, frame)
+            expected_ref = shared_ref if "transcript_path" not in payload else base64.urlsafe_b64encode(payload["transcript_path"].encode()).decode().rstrip("=")
+            assert frame["transcriptRef"] == expected_ref, (label, frame)
+            if event == "SubagentStart":
+                assert (home / f".config/tessera/active-subagents/{client_pid}/child-1").exists(), label
+        else:
+            assert not (home / "pane-state").read_text() and not targets and b"TesseraAgentState" not in wire, (label, targets)
+            assert not list(runtime.glob("*.json")) if runtime.exists() else True, label
+            if label != "dropped child callback":
+                assert diagnostic.endswith(f"event={event} state={state} reason=agent-turn phase=ignored source=shared-server"), (label, diagnostic)
+        print(f"pane publication PASS: shared server {label}")
+        added += 1
+    finally:
+        os.close(master)
+        os.close(slave)
+
+# A shared client's binder publishes the event its server ran before any pane
+# showed the thread, at the time the server ran it, against the claim epoch it
+# read: a claim stamped later keeps the pane, an earlier one, as another
+# thread's before /new, gives way. Only a start is observed otherwise, and a
+# replay without its time is turned away.
+replayed_at = str(time.time_ns() - 30 * 1000000000)
+for label, event, shared, replay, event_ns, claim_ns, published in (
+        ("binder replay", "Stop", "1", "1", replayed_at, None, True),
+        ("binder replay of a start", "SessionStart", "1", "1", replayed_at, None, True),
+        ("binder replay past an older claim", "Stop", "1", "1", replayed_at, str(int(replayed_at) - 1000000000), True),
+        ("binder replay behind a newer claim", "Stop", "1", "1", replayed_at, str(int(replayed_at) + 1000000000), False),
+        ("binder replay without its time", "Stop", "1", "1", None, None, False),
+        ("binder replay with a malformed time", "Stop", "1", "1", "0" + replayed_at, None, False),
+        ("binder replay with an overlong time", "Stop", "1", "1", replayed_at + "0", None, False),
+        ("replay without a shared client", "Stop", "", "1", replayed_at, None, False),
+        ("start replay without a shared client", "SessionStart", "", "1", replayed_at, None, False),
+        ("observed event other than a start", "Stop", "1", "", replayed_at, None, False)):
+    home, env = fixture("shared-replay-" + label.replace(" ", "-"), "codex", client_pid)
+    runtime = home / ".config/tessera/agent-runtime-state"
+    runtime.mkdir(parents=True, mode=0o700)
+    (runtime / f"{client_pid}.shared-server").write_text("start-1\n424301\n%42\n")
+    claim = None
+    if claim_ns is not None:
+        claim = {"version": 9, "provider": "codex", "event": "Stop", "state": "idle", "reason": "turn-stopped",
+                 "timestampNs": claim_ns, "sessionId": "shared-old", "agentPid": client_pid, "transcriptRef": ""}
+        (runtime / f"{client_pid}.json").write_text(json.dumps(claim))
+    env.update(TESSERA_AGENT_OBSERVER="1", TESSERA_AGENT_OBSERVED_PROVIDER_PID=str(client_pid),
+               TESSERA_AGENT_OBSERVED_PROCESS_START="start-1", TESSERA_AGENT_OBSERVED_TIMESTAMP_NS=claim_ns or "",
+               TESSERA_TEST_AGENT_ARGS="/opt/bin/codex")
+    for key, value in (("TESSERA_AGENT_OBSERVED_SHARED", shared), ("TESSERA_AGENT_OBSERVED_REPLAY", replay),
+                       ("TESSERA_AGENT_OBSERVED_EVENT_NS", event_ns)):
+        if value:
+            env[key] = value
+    reason = "session-start" if event == "SessionStart" else "turn-stopped"
+    result = subprocess.run(["/bin/sh", str(root / "agent-lifecycle-hook.sh"), "codex", event, "idle", reason],
+                            input=json.dumps({"session_id": "shared-a", "transcript_path": "/home/u/.codex/sessions/rollout-shared-a.jsonl"}).encode(),
+                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+    assert result.returncode == 0, (label, result.stderr)
+    state = (home / "pane-state").read_text()
+    held = runtime / f"{client_pid}.json"
+    if published:
+        frame = json.loads(state)
+        assert frame["event"] == event and frame["state"] == "idle" and frame["sessionId"] == "shared-a", (label, frame)
+        assert frame["timestampNs"] == event_ns, (label, frame)
+        assert frame["agentPid"] == client_pid and json.loads(held.read_text()) == frame, (label, frame)
+    else:
+        assert not state, (label, state)
+        assert (json.loads(held.read_text()) == claim) if claim is not None else not held.exists(), label
+    print(f"pane publication PASS: shared {label}")
+    added += 1
+
+# A native hook whose provider's open files could not be read in time leaves
+# its event to a detached child, which publishes it once they read, at the
+# time the hook ran: an observed replay of a client of no shared server, with
+# the same time checks as a binder's. Any other observed event is a start.
+native_pid = 424303
+for label, event, replay, event_ns, claim_ns, published in (
+        ("native replay", "Stop", "1", replayed_at, None, True),
+        ("native replay of a start", "SessionStart", "1", replayed_at, None, True),
+        ("native replay past an older claim", "Stop", "1", replayed_at, str(int(replayed_at) - 1000000000), True),
+        ("native replay behind a newer claim", "Stop", "1", replayed_at, str(int(replayed_at) + 1000000000), False),
+        ("native replay without its time", "Stop", "1", None, None, False),
+        ("native replay with a malformed time", "Stop", "1", "0" + replayed_at, None, False),
+        ("native replay with a non-numeric time", "Stop", "1", replayed_at[:-1] + "x", None, False),
+        ("native replay with an overlong time", "Stop", "1", replayed_at + "0", None, False),
+        ("native observed event other than a start", "Stop", "", replayed_at, None, False)):
+    home, env = fixture("native-replay-" + label.replace(" ", "-"), "codex", native_pid)
+    runtime = home / ".config/tessera/agent-runtime-state"
+    runtime.mkdir(parents=True, mode=0o700)
+    claim = None
+    if claim_ns is not None:
+        claim = {"version": 9, "provider": "codex", "event": "Stop", "state": "idle", "reason": "turn-stopped",
+                 "timestampNs": claim_ns, "sessionId": "native-a", "agentPid": native_pid, "transcriptRef": ""}
+        (runtime / f"{native_pid}.json").write_text(json.dumps(claim))
+    env.update(TESSERA_AGENT_OBSERVER="1", TESSERA_AGENT_OBSERVED_PROVIDER_PID=str(native_pid),
+               TESSERA_AGENT_OBSERVED_PROCESS_START="start-1", TESSERA_AGENT_OBSERVED_TIMESTAMP_NS=claim_ns or "",
+               TESSERA_TEST_AGENT_ARGS="/opt/bin/codex")
+    for key, value in (("TESSERA_AGENT_OBSERVED_REPLAY", replay), ("TESSERA_AGENT_OBSERVED_EVENT_NS", event_ns)):
+        if value:
+            env[key] = value
+    reason = "session-start" if event == "SessionStart" else "turn-stopped"
+    result = subprocess.run(["/bin/sh", str(root / "agent-lifecycle-hook.sh"), "codex", event, "idle", reason],
+                            input=json.dumps({"session_id": "native-a", "transcript_path": "/home/u/.codex/sessions/rollout-native-a.jsonl"}).encode(),
+                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+    assert result.returncode == 0, (label, result.stderr)
+    recovery = (home / "recovery-log").read_text() if (home / "recovery-log").exists() else ""
+    assert recovery.startswith(f"--verify-observation {native_pid} start-1 native-a\n"), (label, recovery)
+    state = (home / "pane-state").read_text()
+    held = runtime / f"{native_pid}.json"
+    if published:
+        frame = json.loads(state)
+        assert frame["event"] == event and frame["state"] == "idle" and frame["sessionId"] == "native-a", (label, frame)
+        assert frame["timestampNs"] == event_ns, (label, frame)
+        assert frame["agentPid"] == native_pid and json.loads(held.read_text()) == frame, (label, frame)
+    else:
+        assert not state, (label, state)
+        assert (json.loads(held.read_text()) == claim) if claim is not None else not held.exists(), label
+    print(f"pane publication PASS: {label}")
+    added += 1
+
+# A native hook that must resolve its root passes its event along, for the
+# child that publishes it should the open files not read in time.
+home, env = fixture("native-resolve-event", "codex", native_pid)
+result = subprocess.run(["/bin/sh", str(root / "agent-lifecycle-hook.sh"), "codex", "Stop", "idle", "turn-stopped"],
+                        input=json.dumps({"session_id": "native-b"}).encode(), env=env,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+assert result.returncode == 0, result.stderr
+recovery = (home / "recovery-log").read_text() if (home / "recovery-log").exists() else ""
+fields = next((line.split() for line in recovery.splitlines() if line.startswith("--resolve-root ")), [])
+assert fields[:6] == ["--resolve-root", str(native_pid), "native-b", "Stop", "idle", "turn-stopped"], (fields, recovery)
+assert len(fields) == 7 and fields[6].isdigit() and not fields[6].startswith("0"), fields
+assert not (home / "pane-state").read_text(), "an unresolved root publishes nothing"
+print("pane publication PASS: native resolve passes its event")
+added += 1
+
+# An observer an earlier install started for a client it cannot see is bound
+# keeps calling the hook; the hook turns it away before any work. The client's
+# own observer, a mark of another process and a missing mark pass.
+for label, start, shared, mark, turned_away in (
+        ("old observer of a bound client", "start-1", "", "start-1\n424301\n%42\n", True),
+        ("old observer of a macOS client", "Tue Oct 28 10:00:00 2026", "", "Tue Oct 28 10:00:00 2026\n424301\n%42\n", True),
+        ("shared observer", "start-1", "1", "start-1\n424301\n%42\n", False),
+        ("reused PID", "start-2", "", "start-1\n424301\n%42\n", False),
+        ("no mark", "start-1", "", None, False),
+        ("linked mark", "start-1", "", "link", False)):
+    home, env = fixture("shared-observer-" + label.replace(" ", "-"), "codex", client_pid)
+    runtime = home / ".config/tessera/agent-runtime-state"
+    runtime.mkdir(parents=True, mode=0o700)
+    if mark == "link":
+        (home / "elsewhere").write_text("start-1\n424301\n%42\n")
+        os.symlink(home / "elsewhere", runtime / f"{client_pid}.shared-server")
+    elif mark is not None:
+        (runtime / f"{client_pid}.shared-server").write_text(mark)
+    env.update(TESSERA_AGENT_OBSERVER="1", TESSERA_AGENT_OBSERVED_PROVIDER_PID=str(client_pid),
+               TESSERA_AGENT_OBSERVED_PROCESS_START=start, TESSERA_AGENT_OBSERVED_TIMESTAMP_NS="100")
+    if shared:
+        env["TESSERA_AGENT_OBSERVED_SHARED"] = shared
+    result = subprocess.run(["/bin/sh", str(root / "agent-lifecycle-hook.sh"), "codex", "SessionStart", "idle", "session-start"],
+                            input=json.dumps({"session_id": "", "transcript_path": None}).encode(), env=env,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+    assert result.returncode == 0, (label, result.stderr)
+    recovery = (home / "recovery-log").read_text() if (home / "recovery-log").exists() else ""
+    log = home / ".config/tessera/agent-lifecycle-diagnostics.log"
+    assert ("--verify-observation" in recovery) != turned_away, (label, recovery)
+    assert log.exists() != turned_away, label
+    print(f"pane publication PASS: shared observer {label}")
+    added += 1
+
 for name in ("missing", "empty", "missing-path", "unusable-ref", "directory", "usable", "duplicate", "symlink-file", "symlink-project"):
     home, env = fixture("claude-locator-" + name)
     config = home / "configured-claude"
@@ -498,7 +770,7 @@ print(f"pane publication and locator tests: {added} passed, 0 failed")
 
 # Execute the unmodified Python proof with only /proc redirected to fixtures.
 # BSD cases read the same PATH ps double used by the hook tests.
-proof = (root / "process-proof.sh").read_text().split("exec python3 -c '\n", 1)[1].rsplit("\n'\n", 1)[0]
+proof = (root / "process-proof.sh").read_text().split("exec python3 -I -c '\n", 1)[1].rsplit("\n'\n", 1)[0]
 real_open = builtins.open
 proof_count = 0
 for platform in ("linux", "bsd"):
@@ -542,6 +814,44 @@ for platform in ("linux", "bsd"):
                 assert response["processIDs"] == [claimed, route] and response["processStart"], response
             print(f"process proof PASS: {platform} {status} requireForeground={require}")
             proof_count += 1
+# A global npm install runs Codex as node through a bin symlink: node keeps
+# the link path, and only its target names the package.
+for label, target, valid in (("npm bin symlink", "lib/node_modules/@openai/codex/bin/codex.js", True),
+                             ("another package's symlink", "lib/node_modules/other/cli.js", False)):
+    home, env = fixture("proof-node-" + label.split()[0].replace("'", ""))
+    claimed, route = 424299, 424200
+    (home / target).parent.mkdir(parents=True)
+    (home / target).write_text("")
+    (home / "bin").mkdir()
+    os.symlink(home / target, home / "bin/codex")
+    env.update(TESSERA_TEST_PROOF_PID=str(claimed), TESSERA_TEST_PROOF_ROOT=str(route), TESSERA_TEST_PROOF_GROUPS="42 42")
+    proc = home / "proc" / str(claimed)
+    proc.mkdir()
+    (proc / "comm").write_text("node\n")
+    (proc / "cmdline").write_bytes(b"node\0" + str(home / "bin/codex").encode() + b"\0resume\0")
+    fields = ["S", str(route), "42", "42", "1", "42"] + ["0"] * 13 + ["123456"]
+    (proc / "stat").write_text(f"{claimed} (node) " + " ".join(fields) + "\n")
+    def proc_open(path, *args, **kwargs):
+        if isinstance(path, str) and path.startswith("/proc/"):
+            path = home / "proc" / path.removeprefix("/proc/")
+        return real_open(path, *args, **kwargs)
+    output = io.StringIO()
+    code = 0
+    request = {"v": 1, "claimedPID": claimed, "rootPID": route, "provider": "codex"}
+    with mock.patch.dict(os.environ, env), mock.patch("builtins.open", side_effect=proc_open), \
+         mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(json.dumps(request).encode()))), \
+         contextlib.redirect_stdout(output):
+        try:
+            exec(compile(proof, str(root / "process-proof.sh"), "exec"), {})
+        except SystemExit as exit:
+            code = exit.code
+    response = json.loads(output.getvalue())
+    if valid:
+        assert code == 0 and response["valid"] is True, (label, response)
+    else:
+        assert code == 1 and response["error"] == "providerMismatch", (label, response)
+    print(f"process proof PASS: {label}")
+    proof_count += 1
 print(f"process foreground proof tests: {proof_count} passed, 0 failed")
 PY
 if [[ "${2:-}" == --hook-deferral-only ]]; then
@@ -572,7 +882,7 @@ HOME="$OVERSIZED_HOME" CODEX_HOME="$OVERSIZED_HOME/.codex" CLAUDE_CONFIG_DIR="$O
 grep -Fq 'TESSERA_AGENT_CODEX_HOOKS error:too-large' "$WORK_DIR/oversized-config-output.txt"
 grep -Fq 'TESSERA_AGENT_CLAUDE_SETTINGS error:too-large' "$WORK_DIR/oversized-config-output.txt"
 grep -Fq 'TESSERA_AGENT_KIMI_CONFIG error:too-large' "$WORK_DIR/oversized-config-output.txt"
-! grep -Fq 'present:' "$WORK_DIR/oversized-config-output.txt"
+! grep -Fq 'present:' "$WORK_DIR/oversized-config-output.txt" || fail_assertion "$LINENO"
 
 install_in_home() {
   local home="$1"
@@ -605,8 +915,8 @@ HOME="$ZSH_HOME" SHELL=/bin/zsh ZDOTDIR="$ZDOTDIR" \
   /bin/zsh -f -c \
     '_tessera_agent_rc_ok=preserved; _tessera_agent_append() { printf preserved; }; eval "$("$1" persist-shell)"; [[ "$_tessera_agent_rc_ok" == preserved ]]; [[ "$(_tessera_agent_append)" == preserved ]]; eval "$("$1" persist-shell)"' \
   _ "$DUMPER"
-[[ "$(grep -cF 'TESSERA-AGENT-LIFECYCLE' "$ZDOTDIR/.zshrc")" == 1 ]]
-[[ ! -e "$ZSH_HOME/.zshrc" ]]
+[[ "$(grep -cF 'TESSERA-AGENT-LIFECYCLE' "$ZDOTDIR/.zshrc")" == 1 ]] || fail_assertion "$LINENO"
+[[ ! -e "$ZSH_HOME/.zshrc" ]] || fail_assertion "$LINENO"
 
 # sshd hands a non-interactive command the stock PATH, not the developer's
 # login PATH. On macOS that resolves python3 to /usr/bin/python3 3.9, which has
@@ -628,7 +938,7 @@ grep -Fq 'TESSERA_AGENT_INTEGRATION_STATUS current' \
 # The merged config is published, not abandoned beside the destination.
 grep -Fq '# TESSERA-AGENT-CENTER-KIMI-HOOKS-BEGIN' \
   "$RESTRICTED_PATH_HOME/.kimi-code/config.toml"
-[[ -z "$(find "$RESTRICTED_PATH_HOME/.kimi-code" -name 'config.toml.tessera.*' -print -quit)" ]]
+[[ -z "$(find "$RESTRICTED_PATH_HOME/.kimi-code" -name 'config.toml.tessera.*' -print -quit)" ]] || fail_assertion "$LINENO"
 # Whichever branch this host takes — an off-PATH interpreter that can parse
 # TOML, or no parser at all — the diagnostic must say which, and neither answer
 # may turn a correct config into a mismatch.
@@ -641,8 +951,8 @@ HOME="$BASH_HOME" SHELL=/bin/bash \
   /bin/bash --noprofile --norc -c \
     '_tessera_agent_rc_ok=preserved; _tessera_agent_append() { printf preserved; }; eval "$("$1" persist-shell)"; [[ "$_tessera_agent_rc_ok" == preserved ]]; [[ "$(_tessera_agent_append)" == preserved ]]; eval "$("$1" persist-shell)"' \
   _ "$DUMPER"
-[[ "$(grep -cF 'TESSERA-AGENT-LIFECYCLE' "$BASH_HOME/.bashrc")" == 1 ]]
-[[ "$(grep -cF 'TESSERA-AGENT-LIFECYCLE' "$BASH_HOME/.bash_profile")" == 1 ]]
+[[ "$(grep -cF 'TESSERA-AGENT-LIFECYCLE' "$BASH_HOME/.bashrc")" == 1 ]] || fail_assertion "$LINENO"
+[[ "$(grep -cF 'TESSERA-AGENT-LIFECYCLE' "$BASH_HOME/.bash_profile")" == 1 ]] || fail_assertion "$LINENO"
 
 # A deterministic app-server double exercises the same machine-readable
 # hooks/list contract as a real Codex install. It keeps this critical bootstrap
@@ -655,7 +965,10 @@ app_server=0
 for argument in "$@"; do
   [ "$argument" = app-server ] && app_server=1
 done
-[ "$app_server" -eq 1 ] || exit 0
+if [ "$app_server" -eq 0 ]; then
+  [ -z "${TESSERA_FAKE_CODEX_ARGV:-}" ] || printf '%s\n' "$*" >>"$TESSERA_FAKE_CODEX_ARGV"
+  exit 0
+fi
 
 while IFS= read -r request; do
   case "$request" in
@@ -704,8 +1017,20 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$pid" = "${TESSERA_TEST_WRAPPER_PID:-}" ] && pid=wrapper
-line="$(grep "^$pid " "$TESSERA_TEST_PS_TABLE" | head -n 1)"
+line="$(grep "^$pid[ 	]" "$TESSERA_TEST_PS_TABLE" | head -n 1)"
 [ -n "$line" ] || exit 1
+# A tab-separated row keeps spaces in the command name and arguments.
+case "$line" in
+  *'	'*)
+    set -f; IFS='	'; set -- $line
+    case "$field" in
+      ppid=) printf '%s\n' "$2" ;;
+      comm=) printf '%s\n' "$3" ;;
+      args=) printf '%s\n' "$4" ;;
+    esac
+    exit 0
+    ;;
+esac
 set -- $line
 case "$field" in
   ppid=) printf '%s\n' "$2" ;;
@@ -722,15 +1047,15 @@ HOOK="$ZSH_HOME/.config/tessera/agent-lifecycle-hook.sh"
 MINIMAL_TIMESTAMP_LINE="$(sed -n '/^case "$timestamp_ns" in /p' "$HOOK")"
 FIRST_TIMESTAMP="$(/bin/sh -c 'date() { printf 123; }; timestamp_ns=""; eval "$1"; printf %s "$timestamp_ns"' _ "$MINIMAL_TIMESTAMP_LINE")"
 SECOND_TIMESTAMP="$(/bin/sh -c 'date() { printf 123; }; timestamp_ns=""; eval "$1"; printf %s "$timestamp_ns"' _ "$MINIMAL_TIMESTAMP_LINE")"
-[[ "$FIRST_TIMESTAMP" == 123* && "$SECOND_TIMESTAMP" == 123* && "$FIRST_TIMESTAMP" != "$SECOND_TIMESTAMP" ]]
+[[ "$FIRST_TIMESTAMP" == 123* && "$SECOND_TIMESTAMP" == 123* && "$FIRST_TIMESTAMP" != "$SECOND_TIMESTAMP" ]] || fail_assertion "$LINENO"
 # Run the actual generated attribution block in an isolated fixture home.
 # A live child cannot suppress root PostToolUse/Stop after auto approval.
 ATTRIBUTION_BLOCK="$(sed -n '/^# Track dedicated child/,/^payload=/p' "$HOOK" | sed '$d')"
 for event in PostToolUse Stop; do
   ROOT_EVENT_OUTPUT="$(HOME="$ZSH_HOME" /bin/sh -c 'provider=codex; event="$1"; state=working; agent_pid=424242; agent_id=""; mkdir -p "$HOME/.config/tessera/active-subagents/$agent_pid"; eval "$2"; printf accepted' _ "$event" "$ATTRIBUTION_BLOCK")"
-  [[ "$ROOT_EVENT_OUTPUT" == accepted ]]
+  [[ "$ROOT_EVENT_OUTPUT" == accepted ]] || fail_assertion "$LINENO"
   CHILD_EVENT_OUTPUT="$(HOME="$ZSH_HOME" /bin/sh -c 'provider=codex; event="$1"; state=working; agent_pid=424242; agent_id=child; eval "$2"; printf accepted' _ "$event" "$ATTRIBUTION_BLOCK")"
-  [[ -z "$CHILD_EVENT_OUTPUT" ]]
+  [[ -z "$CHILD_EVENT_OUTPUT" ]] || fail_assertion "$LINENO"
 done
 env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" PATH="$ANCESTRY_BIN:/usr/bin:/bin" TESSERA_AGENT_TTY=/dev/null \
   TESSERA_TEST_PS_TABLE="$WORK_DIR/ps-plain.txt" \
@@ -745,8 +1070,71 @@ env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" PATH="$ANCESTRY_BIN:/usr/bin:/bin" TES
   /bin/sh -c 'export TESSERA_TEST_WRAPPER_PID=$$; printf %s "$$" >"$1"; "$2" codex WrapperExit unavailable session-ended </dev/null' \
   _ "$WORK_DIR/nested-wrapper-pid.txt" "$HOOK"
 NESTED_WRAPPER_PID="$(cat "$WORK_DIR/nested-wrapper-pid.txt")"
-[[ ! -e "$ZSH_HOME/.config/tessera/agent-runtime-state/$NESTED_WRAPPER_PID.json" ]]
+[[ ! -e "$ZSH_HOME/.config/tessera/agent-runtime-state/$NESTED_WRAPPER_PID.json" ]] || fail_assertion "$LINENO"
 grep -Fq 'event=WrapperExit state=unavailable reason=session-ended phase=ignored source=nested-wrapper' "$ZSH_HOME/.config/tessera/agent-lifecycle-diagnostics.log"
+
+# Codex's shared app-server runs the hooks of every thread it hosts
+# with the environment of the client that started it, so its pane is not the
+# thread's: with no pane bound (here no session) the event is ignored. A
+# private stdio app-server, and a TUI whose prompt merely names the server's
+# options, still publish as before.
+printf '%s\n' 'wrapper 700 codex /opt/codex/bin/codex app-server --listen unix:// --analytics-default-enabled --managed-daemon' '700 1 zsh -zsh' >"$WORK_DIR/ps-daemon.txt"
+printf '%s\n' 'wrapper 700 codex /opt/codex/bin/codex app-server --listen ws://127.0.0.1:4500' '700 1 zsh -zsh' >"$WORK_DIR/ps-listener.txt"
+printf '%s\n' 'wrapper 700 codex /opt/codex/bin/codex app-server --listen=unix:///tmp/codex.sock' '700 1 zsh -zsh' >"$WORK_DIR/ps-socket.txt"
+printf '%s\n' 'wrapper 700 codex /opt/codex/bin/codex -c features.example=true --enable hooks app-server --listen unix://' '700 1 zsh -zsh' >"$WORK_DIR/ps-options-first.txt"
+printf 'wrapper\t700\t%s\t%s\n' '/Users/Sam Doe/.codex/bin/codex' '/Users/Sam Doe/.codex/bin/codex app-server --listen unix:// --managed-daemon' >"$WORK_DIR/ps-spaced-path.txt"
+printf '%s\n' '700 1 zsh -zsh' >>"$WORK_DIR/ps-spaced-path.txt"
+printf '%s\n' 'wrapper 700 codex /opt/codex/bin/codex app-server' '700 1 zsh -zsh' >"$WORK_DIR/ps-private-server.txt"
+printf '%s\n' 'wrapper 700 codex /opt/codex/bin/codex --enable hooks --no-daemon explain app-server --listen unix:// --managed-daemon' '700 1 zsh -zsh' >"$WORK_DIR/ps-prompt.txt"
+SHARED_SERVER_CHECKS=0
+for table in daemon listener socket options-first spaced-path private-server prompt; do
+  env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" PATH="$ANCESTRY_BIN:/usr/bin:/bin" TESSERA_AGENT_TTY=/dev/null \
+    TESSERA_TEST_PS_TABLE="$WORK_DIR/ps-$table.txt" \
+    /bin/sh -c 'export TESSERA_TEST_WRAPPER_PID=$$; printf %s "$$" >"$1"; "$2" codex PostToolUse working agent-turn </dev/null' \
+    _ "$WORK_DIR/server-pid.txt" "$HOOK"
+  SERVER_STATE="$ZSH_HOME/.config/tessera/agent-runtime-state/$(cat "$WORK_DIR/server-pid.txt").json"
+  LAST_DIAGNOSTIC="$(tail -n 1 "$ZSH_HOME/.config/tessera/agent-lifecycle-diagnostics.log")"
+  if [[ "$table" == private-server || "$table" == prompt ]]; then
+    grep -Fq '"event":"PostToolUse"' "$SERVER_STATE"
+    grep -Fq 'event=PostToolUse state=working reason=agent-turn phase=resolved agentPid=present' <<<"$LAST_DIAGNOSTIC"
+  else
+    [[ ! -e "$SERVER_STATE" ]] || fail_assertion "$LINENO"
+    grep -Fq 'event=PostToolUse state=working reason=agent-turn phase=ignored source=shared-server' <<<"$LAST_DIAGNOSTIC"
+  fi
+  SHARED_SERVER_CHECKS=$((SHARED_SERVER_CHECKS + 1))
+done
+[[ "$SHARED_SERVER_CHECKS" == 7 ]] || fail_assertion "$LINENO"
+# Linux hands the hook each argument whole, so there a prompt or an option
+# value that reads like a listener, or a command after `--`, is no server.
+SHARED_SERVER_FUNCTION="$(sed -n '/^tessera_codex_shared_server() {$/,/^}$/p' "$HOOK")"
+[[ -n "$SHARED_SERVER_FUNCTION" ]] || fail_assertion "$LINENO"
+shared_server_argv() {
+  /bin/sh -c 'eval "$1"; shift; printf "%s\n" "$@" | tessera_codex_shared_server' _ "$SHARED_SERVER_FUNCTION" "$@"
+}
+SHARED_SERVER_ARGV_CHECKS=0
+for argv in \
+  '/Users/Sam Doe/.codex/bin/codex|app-server|--listen|unix://|--managed-daemon' \
+  '/opt/codex/bin/codex|-c|features.example=true|--enable|hooks|app-server|--listen|ws://127.0.0.1:4500' \
+  '/opt/codex/bin/codex|--image|first.png|-m|gpt|app-server|--listen=unix:///tmp/codex.sock'; do
+  IFS='|' read -r -a argv_words <<<"$argv"
+  shared_server_argv "${argv_words[@]}"
+  SHARED_SERVER_ARGV_CHECKS=$((SHARED_SERVER_ARGV_CHECKS + 1))
+done
+for argv in \
+  '/opt/codex/bin/codex|app-server --listen unix://|--no-daemon' \
+  '/opt/codex/bin/codex|app-server|-c|developer_instructions="Explain --listen unix:// here"' \
+  '/opt/codex/bin/codex|app-server|-c|--listen|--stdio' \
+  '/opt/codex/bin/codex|--|app-server|--listen|unix://' \
+  '/opt/codex/bin/codex|--image|first.png|app-server|--listen|unix://' \
+  '/opt/codex/bin/codex|resume|app-server|--managed-daemon'; do
+  IFS='|' read -r -a argv_words <<<"$argv"
+  if shared_server_argv "${argv_words[@]}"; then
+    printf 'agent integration scripts: %s read as a shared server\n' "$argv" >&2
+    exit 1
+  fi
+  SHARED_SERVER_ARGV_CHECKS=$((SHARED_SERVER_ARGV_CHECKS + 1))
+done
+[[ "$SHARED_SERVER_ARGV_CHECKS" == 9 ]] || fail_assertion "$LINENO"
 
 # Question tools publish a content-free marker as the reason of their tool
 # boundaries (integration v21); nothing of the question reaches the log.
@@ -759,26 +1147,67 @@ question_reason() {
 }
 ASK='{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Secret ledger question?"}]}}'
 ASK_BACKGROUND='{"tool_name":"AskUserQuestion","tool_input":{"background":true,"questions":[{"question":"Secret ledger question?"}]}}'
-[[ "$(question_reason claude PreToolUse working "$ASK" agent-turn)" == question ]]
-[[ "$(question_reason claude PostToolUse working "$ASK" agent-turn)" == question ]]
-[[ "$(question_reason kimi PreToolUse working "$ASK" agent-turn)" == question ]]
-[[ "$(question_reason kimi PreToolUse working "$ASK_BACKGROUND" agent-turn)" == deferred-question ]]
-[[ "$(question_reason codex PreToolUse working '{"tool_name":"request_user_input","tool_input":{}}' agent-turn)" == question ]]
-[[ "$(question_reason codex PreToolUse working '{"tool_name":"request_user_input_async","tool_input":{}}' agent-turn)" == deferred-question ]]
-[[ "$(question_reason claude PreToolUse working '{"tool_name":"Bash","tool_input":{"command":"ls"}}' agent-turn)" == agent-turn ]]
+[[ "$(question_reason claude PreToolUse working "$ASK" agent-turn)" == question ]] || fail_assertion "$LINENO"
+[[ "$(question_reason claude PostToolUse working "$ASK" agent-turn)" == question ]] || fail_assertion "$LINENO"
+[[ "$(question_reason kimi PreToolUse working "$ASK" agent-turn)" == question ]] || fail_assertion "$LINENO"
+[[ "$(question_reason kimi PreToolUse working "$ASK_BACKGROUND" agent-turn)" == deferred-question ]] || fail_assertion "$LINENO"
+[[ "$(question_reason codex PreToolUse working '{"tool_name":"request_user_input","tool_input":{}}' agent-turn)" == question ]] || fail_assertion "$LINENO"
+[[ "$(question_reason codex PreToolUse working '{"tool_name":"request_user_input_async","tool_input":{}}' agent-turn)" == deferred-question ]] || fail_assertion "$LINENO"
+[[ "$(question_reason claude PreToolUse working '{"tool_name":"Bash","tool_input":{"command":"ls"}}' agent-turn)" == agent-turn ]] || fail_assertion "$LINENO"
 # Only tool boundaries carry the marker.
-[[ "$(question_reason claude PermissionRequest waitingForInput "$ASK" permission)" == permission ]]
+[[ "$(question_reason claude PermissionRequest waitingForInput "$ASK" permission)" == permission ]] || fail_assertion "$LINENO"
 if grep -Fq 'Secret ledger' "$ZSH_HOME/.config/tessera/agent-lifecycle-diagnostics.log"; then exit 1; fi
 # Hosts without Python read the tool name with the bounded sed fallback.
 QUESTION_FALLBACK="$(awk '/^if \[ -z "\$question_marker" \] && \[ -n "\$input" \]; then$/ { copy = 1 } copy { print } copy && /^esac$/ { exit }' "$HOOK")"
-[[ -n "$QUESTION_FALLBACK" ]]
+[[ -n "$QUESTION_FALLBACK" ]] || fail_assertion "$LINENO"
 fallback_reason() {
   /bin/sh -c 'event="$1"; input="$2"; question_marker=""; reason=agent-turn; eval "$3"; printf %s "$reason"' _ "$1" "$2" "$QUESTION_FALLBACK"
 }
-[[ "$(fallback_reason PreToolUse "$ASK")" == question ]]
-[[ "$(fallback_reason PreToolUse "$ASK_BACKGROUND")" == deferred-question ]]
-[[ "$(fallback_reason PreToolUse '{"tool_name":"request_user_input_async"}')" == deferred-question ]]
-[[ "$(fallback_reason Stop "$ASK")" == agent-turn ]]
+[[ "$(fallback_reason PreToolUse "$ASK")" == question ]] || fail_assertion "$LINENO"
+[[ "$(fallback_reason PreToolUse "$ASK_BACKGROUND")" == deferred-question ]] || fail_assertion "$LINENO"
+[[ "$(fallback_reason PreToolUse '{"tool_name":"request_user_input_async"}')" == deferred-question ]] || fail_assertion "$LINENO"
+[[ "$(fallback_reason Stop "$ASK")" == agent-turn ]] || fail_assertion "$LINENO"
+
+# Question tool boundaries name their call (integration v27): Core binds a
+# PostToolUse to the call it closes, not to whichever the transcript shows.
+# The ID goes whole or not at all: a filtered or cut one could name another.
+ask_call() { printf '{"tool_name":"AskUserQuestion","tool_use_id":"%s","tool_input":{"questions":[{"question":"Secret ledger question?"}]}}' "$1"; }
+# The hook finds its terminal through its parent's tty; this ps names the test's pty.
+TTY_BIN="$WORK_DIR/tty-bin"
+mkdir -p "$TTY_BIN"
+cat >"$TTY_BIN/ps" <<'SH'
+#!/bin/sh
+case "$*" in *tty=*) printf '%s\n' "${TESSERA_TEST_TTY#/dev/}"; exit 0 ;; esac
+exit 1
+SH
+chmod 700 "$TTY_BIN/ps"
+emitted_call() {
+  printf '%s' "$1" | env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" PATH="$TTY_BIN:/usr/bin:/bin" \
+    TESSERA_TEST_HOOK="$HOOK" python3 -I -c '
+import base64, json, os, re, subprocess, sys
+master, slave = os.openpty()
+env = dict(os.environ, TESSERA_TEST_TTY=os.ttyname(slave))
+subprocess.run([os.environ["TESSERA_TEST_HOOK"], "claude", "PreToolUse", "working", "agent-turn"],
+               input=sys.stdin.buffer.read(), env=env, check=True, timeout=30)
+# Read before the slave closes: a hung-up pty drops what it buffered.
+os.set_blocking(master, False)
+wire = b""
+try:
+    while chunk := os.read(master, 65536): wire += chunk
+except OSError: pass
+os.close(slave)
+frame = re.search(rb"\x1b\]1337;TesseraAgentState=([A-Za-z0-9+/=]+)\x07", wire)
+print("id=" + json.loads(base64.b64decode(frame.group(1)))["toolUseId"] if frame else "no frame")
+'
+}
+LONGEST_CALL="$(printf 'a%.0s' $(seq 1 255))"
+[[ "$(emitted_call "$(ask_call 'toolu_01:A.b-cde')")" == "id=toolu_01:A.b-cde" ]] || fail_assertion "$LINENO"
+[[ "$(emitted_call "$(ask_call 'toolu_01:A.b-c d/e')")" == "id=" ]] || fail_assertion "$LINENO"
+[[ "$(emitted_call "$(ask_call "$LONGEST_CALL")")" == "id=$LONGEST_CALL" ]] || fail_assertion "$LINENO"
+[[ "$(emitted_call "$(ask_call "${LONGEST_CALL}b")")" == "id=" ]] || fail_assertion "$LINENO"
+TOOL_USE_FALLBACK="$(grep -F '[ -n "$tool_use_id" ] || tool_use_id=' "$HOOK")"
+[[ -n "$TOOL_USE_FALLBACK" ]] || fail_assertion "$LINENO"
+[[ "$(/bin/sh -c 'input="$1"; tool_use_id=""; eval "$2"; printf %s "$tool_use_id"' _ "$(ask_call 'toolu_01:A.b-c d/e')" "$TOOL_USE_FALLBACK")" == "toolu_01:A.b-c d/e" ]] || fail_assertion "$LINENO"
 
 # A stale integration copy can remain earlier than a version-manager provider
 # after HOME/PATH changes. Both production shims must skip any Tessera-owned
@@ -814,9 +1243,9 @@ HOME="$ZSH_HOME" TESSERA_FAKE_CODEX_ENABLED=false \
   "$READINESS" "$FAKE_BIN/codex"
 DISABLED_STATUS=$?
 set -e
-[[ "$UNTRUSTED_STATUS" == 2 ]]
-[[ "$TRUSTED_STATUS" == 0 ]]
-[[ "$DISABLED_STATUS" == 1 ]]
+[[ "$UNTRUSTED_STATUS" == 2 ]] || fail_assertion "$LINENO"
+[[ "$TRUSTED_STATUS" == 0 ]] || fail_assertion "$LINENO"
+[[ "$DISABLED_STATUS" == 1 ]] || fail_assertion "$LINENO"
 grep -Fq 'result=handler-untrusted' \
   "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log"
 grep -Fq 'result=trusted' \
@@ -862,20 +1291,20 @@ HOME="$ZSH_HOME" TESSERA_FAKE_CODEX_TRUST_STATUS=trusted \
   "$READINESS" "$FAKE_BIN/codex" fork --include-non-interactive
 FORK_NON_INTERACTIVE_STATUS=$?
 set -e
-[[ "$RESUME_STATUS" == 0 && "$RESUME_LAST_STATUS" == 0 && "$FORK_STATUS" == 0 ]]
-[[ "$RESUME_PROMPT_STATUS" == 1 && "$PROMPT_STATUS" == 1 && "$TOP_LEVEL_LAST_STATUS" == 1 ]]
-[[ "$RESUME_LAST_PROMPT_STATUS" == 1 && "$RESUME_PROMPT_LAST_STATUS" == 1 ]]
-[[ "$FORK_LAST_PROMPT_STATUS" == 1 && "$FORK_NON_INTERACTIVE_STATUS" == 1 ]]
+[[ "$RESUME_STATUS" == 0 && "$RESUME_LAST_STATUS" == 0 && "$FORK_STATUS" == 0 ]] || fail_assertion "$LINENO"
+[[ "$RESUME_PROMPT_STATUS" == 1 && "$PROMPT_STATUS" == 1 && "$TOP_LEVEL_LAST_STATUS" == 1 ]] || fail_assertion "$LINENO"
+[[ "$RESUME_LAST_PROMPT_STATUS" == 1 && "$RESUME_PROMPT_LAST_STATUS" == 1 ]] || fail_assertion "$LINENO"
+[[ "$FORK_LAST_PROMPT_STATUS" == 1 && "$FORK_NON_INTERACTIVE_STATUS" == 1 ]] || fail_assertion "$LINENO"
 [[ "$(grep -c 'result=trusted profile=absent cwdOverride=absent launch=resume$' \
-  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 2 ]]
+  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 2 ]] || fail_assertion "$LINENO"
 [[ "$(grep -c 'result=trusted profile=absent cwdOverride=absent launch=fork$' \
-  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 1 ]]
+  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 1 ]] || fail_assertion "$LINENO"
 [[ "$(grep -c 'result=deferred-to-provider-hook profile=absent cwdOverride=absent launch=resume$' \
-  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 3 ]]
+  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 3 ]] || fail_assertion "$LINENO"
 [[ "$(grep -c 'result=deferred-to-provider-hook profile=absent cwdOverride=absent launch=fork$' \
-  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 2 ]]
+  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 2 ]] || fail_assertion "$LINENO"
 [[ "$(grep -c 'result=deferred-to-provider-hook profile=absent cwdOverride=absent launch=composer$' \
-  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 2 ]]
+  "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log")" == 2 ]] || fail_assertion "$LINENO"
 
 # Shim runs publish real lifecycle frames: keep them off the developer's own
 # tmux pane and terminal.
@@ -895,17 +1324,27 @@ env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" TESSERA_AGENT_TTY=/dev/null \
 # process identity vanish and ends without publishing anything.
 BOOTSTRAP_LINES_BEFORE="$(grep -c 'reason=verified-trusted-empty-composer' \
   "$ZSH_HOME/.config/tessera/agent-lifecycle-diagnostics.log")"
-RESUME_SHIM_START="$(python3 -c 'import time; print(time.monotonic())')"
-env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" TESSERA_AGENT_TTY=/dev/null \
-  PATH="$ZSH_HOME/.config/tessera/bin:$STALE_BIN:$FAKE_BIN:/usr/bin:/bin" \
-  TESSERA_FAKE_CODEX_TRUST_STATUS=trusted \
-  "$SHIM" resume --last
-# The old hook waited a full 2 s before giving up on the pre-exec launcher.
-python3 -c 'import sys, time; sys.exit(0 if time.monotonic() - float(sys.argv[1]) < 2.0 else 1)' \
-  "$RESUME_SHIM_START"
+# The old hook waited a full 2 s before giving up on the pre-exec launcher,
+# in every run; a loaded host slows only some, so the fastest of three counts.
+RESUME_RUNS=0
+RESUME_FAST=1
+while [[ "$RESUME_RUNS" -lt 3 && "$RESUME_FAST" != 0 ]]; do
+  RESUME_SHIM_START="$(python3 -c 'import time; print(time.monotonic())')"
+  env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" TESSERA_AGENT_TTY=/dev/null \
+    PATH="$ZSH_HOME/.config/tessera/bin:$STALE_BIN:$FAKE_BIN:/usr/bin:/bin" \
+    TESSERA_FAKE_CODEX_TRUST_STATUS=trusted \
+    "$SHIM" resume --last
+  RESUME_RUNS=$((RESUME_RUNS + 1))
+  set +e
+  python3 -c 'import sys, time; sys.exit(0 if time.monotonic() - float(sys.argv[1]) < 2.0 else 1)' \
+    "$RESUME_SHIM_START"
+  RESUME_FAST=$?
+  set -e
+done
+[[ "$RESUME_FAST" == 0 ]] || fail_assertion "$LINENO"
 BOOTSTRAP_LINES_AFTER="$(grep -c 'reason=verified-trusted-empty-composer' \
   "$ZSH_HOME/.config/tessera/agent-lifecycle-diagnostics.log")"
-[[ "$BOOTSTRAP_LINES_AFTER" == $(( BOOTSTRAP_LINES_BEFORE + 2 )) ]]
+[[ "$BOOTSTRAP_LINES_AFTER" == $(( BOOTSTRAP_LINES_BEFORE + 2 * RESUME_RUNS )) ]] || fail_assertion "$LINENO"
 grep -Fq 'result=trusted profile=absent cwdOverride=absent launch=resume' \
   "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log"
 
@@ -979,13 +1418,13 @@ for _ in $(seq 1 40); do
 done
 wait "$OBSERVED_SHIM"
 OBSERVED_PID="$(cat "$OBSERVED_PID_FILE")"
-[[ -n "$OBSERVED_STATE" ]]
+[[ -n "$OBSERVED_STATE" ]] || fail_assertion "$LINENO"
 grep -Fq '"event":"SessionStart"' <<<"$OBSERVED_STATE"
 grep -Fq '"reason":"session-start"' <<<"$OBSERVED_STATE"
 grep -Fq "\"agentPid\":$OBSERVED_PID," <<<"$OBSERVED_STATE"
 OBSERVER_LINES_AFTER="$(grep -c 'reason=session-start phase=resolved' \
   "$ZSH_HOME/.config/tessera/agent-lifecycle-diagnostics.log" || true)"
-[[ "$OBSERVER_LINES_AFTER" == $(( OBSERVER_LINES_BEFORE + 1 )) ]]
+[[ "$OBSERVER_LINES_AFTER" == $(( OBSERVER_LINES_BEFORE + 1 )) ]] || fail_assertion "$LINENO"
 sleep 2
 if ps -axo pid=,command= | grep -F -- "--watch-root $OBSERVED_PID" | grep -v grep; then
   printf 'agent integration scripts: an observer outlived its provider\n' >&2
@@ -1066,7 +1505,7 @@ for _ in $(seq 1 40); do
     break
   fi
 done
-[[ -n "$NODE_STATE" && "$NODE_NATIVE_PID" != "$NODE_LAUNCHER_PID" ]]
+[[ -n "$NODE_STATE" && "$NODE_NATIVE_PID" != "$NODE_LAUNCHER_PID" ]] || fail_assertion "$LINENO"
 grep -Fq '"event":"SessionStart"' <<<"$NODE_STATE"
 grep -Fq "\"agentPid\":$NODE_NATIVE_PID," <<<"$NODE_STATE"
 kill "$NODE_NATIVE_PID"
@@ -1079,12 +1518,41 @@ fi
 wait "$NODE_SHIM"
 trap - EXIT
 printf 'node launcher observer tests: 1 passed, 0 failed\n'
+
+# The shim launches every TUI with hooks enabled, whether Codex hosts it in
+# a shared background server or not. Only the first command decides a
+# pass-through: a session or a prompt named like a command, and every value
+# of an image option, stay a TUI launch.
+SHIM_ARGV="$WORK_DIR/shim-argv.txt"
+shim_launch_arguments() {
+  : >"$SHIM_ARGV"
+  env -u TMUX -u TMUX_PANE HOME="$ZSH_HOME" TESSERA_AGENT_TTY=/dev/null \
+    PATH="$ZSH_HOME/.config/tessera/bin:$FAKE_BIN:/usr/bin:/bin" \
+    TESSERA_FAKE_CODEX_TRUST_STATUS=trusted TESSERA_FAKE_CODEX_ARGV="$SHIM_ARGV" "$@"
+  cat "$SHIM_ARGV"
+}
+[[ "$(shim_launch_arguments "$SHIM")" == '--enable hooks' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" resume --last)" == '--enable hooks resume --last' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" -m agents 'start a turn')" == '--enable hooks -m agents start a turn' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" --remote ws://127.0.0.1:9 resume --last)" == '--enable hooks --remote ws://127.0.0.1:9 resume --last' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" -p review resume)" == '--enable hooks -p review resume' ]] || fail_assertion "$LINENO"
+# A caller's own --no-daemon passes through and still bootstraps the composer.
+[[ "$(shim_launch_arguments "$SHIM" resume --no-daemon --last)" == '--enable hooks resume --no-daemon --last' ]] || fail_assertion "$LINENO"
+tail -n 1 "$ZSH_HOME/.config/tessera/codex-readiness-diagnostics.log" \
+  | grep -Fq 'result=trusted profile=absent cwdOverride=absent launch=resume'
+[[ "$(shim_launch_arguments "$SHIM" review)" == 'review' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" -c model=gpt exec 'say hi')" == '-c model=gpt exec say hi' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" resume review)" == '--enable hooks resume review' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" -- review)" == '--enable hooks -- review' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" --image first.png review -- 'Describe these')" == '--enable hooks --image first.png review -- Describe these' ]] || fail_assertion "$LINENO"
+[[ "$(shim_launch_arguments "$SHIM" --image=first.png review)" == '--image=first.png review' ]] || fail_assertion "$LINENO"
+printf 'codex shim launch tests: 12 passed, 0 failed\n'
 CLAUDE_MARKER="$WORK_DIR/fake-claude-invoked"
 HOME="$ZSH_HOME" \
   PATH="$ZSH_HOME/.config/tessera/bin:$STALE_BIN:$FAKE_BIN:/usr/bin:/bin" \
   TESSERA_FAKE_CLAUDE_MARKER="$CLAUDE_MARKER" \
   "$ZSH_HOME/.config/tessera/bin/claude" --resume test-session
-[[ -f "$CLAUDE_MARKER" ]]
+[[ -f "$CLAUDE_MARKER" ]] || fail_assertion "$LINENO"
 grep -Fq 'reason=verified-configured-empty-composer' \
   "$ZSH_HOME/.config/tessera/agent-lifecycle-diagnostics.log"
 grep -Fq 'reason=verified-trusted-empty-composer' \
@@ -1155,7 +1623,7 @@ HOME="$ZSH_HOME" "$PROJECTOR" <<JSON >"$WORK_DIR/project-rotated.ndjson"
 JSON
 ROTATED_STATUS=$?
 set -e
-[[ "$ROTATED_STATUS" != 0 ]]
+[[ "$ROTATED_STATUS" != 0 ]] || fail_assertion "$LINENO"
 grep -Fq '"error":"sourceChanged"' "$WORK_DIR/project-rotated.ndjson"
 
 # Transcript write permissions belong to the user. Reading and discovery must
@@ -1184,7 +1652,7 @@ HOME="$ZSH_HOME" "$PROJECTOR" <<JSON >"$WORK_DIR/project-symlink.ndjson"
 JSON
 SYMLINK_STATUS=$?
 set -e
-[[ "$SYMLINK_STATUS" != 0 ]]
+[[ "$SYMLINK_STATUS" != 0 ]] || fail_assertion "$LINENO"
 grep -Fq '"error":"permissionDenied"' "$WORK_DIR/project-symlink.ndjson"
 
 # Malformed/oversized requests and bounded search use typed, content-free
@@ -1197,7 +1665,7 @@ print("x" * 70000)
 PY
 OVERSIZED_STATUS=$?
 set -e
-[[ "$MALFORMED_STATUS" != 0 && "$OVERSIZED_STATUS" != 0 ]]
+[[ "$MALFORMED_STATUS" != 0 && "$OVERSIZED_STATUS" != 0 ]] || fail_assertion "$LINENO"
 grep -Fq '"error":"malformed"' "$WORK_DIR/project-malformed.ndjson"
 grep -Fq '"error":"malformed"' "$WORK_DIR/project-oversized.ndjson"
 printf '%s\n' '{"type":"assistant","text":"bounded search needle"}' >>"$PROJECT_SOURCE"
@@ -1205,7 +1673,7 @@ HOME="$ZSH_HOME" "$PROJECTOR" <<JSON >"$WORK_DIR/project-search.ndjson"
 {"v":1,"kind":"search","provider":"claude","transcriptRef":"$PROJECT_REF","query":"search needle","limitRecords":100}
 JSON
 grep -Fq '"kind":"searchResult"' "$WORK_DIR/project-search.ndjson"
-[[ "$(wc -c <"$WORK_DIR/project-search.ndjson")" -le 262144 ]]
+[[ "$(wc -c <"$WORK_DIR/project-search.ndjson")" -le 262144 ]] || fail_assertion "$LINENO"
 
 # Codex rollout envelopes normalize into the same canonical blocks/metadata
 # without changing ordering or exposing the raw envelope shape to clients.
@@ -1429,9 +1897,9 @@ PATH=/bin HOME="$ZSH_HOME" /bin/sh "$WORK_DIR/projector-no-python.sh" <<'JSON' >
 JSON
 NO_PYTHON_STATUS=$?
 set -e
-[[ "$TRAVERSAL_STATUS" != 0 ]]
+[[ "$TRAVERSAL_STATUS" != 0 ]] || fail_assertion "$LINENO"
 grep -Fq '"error":"permissionDenied"' "$WORK_DIR/project-traversal.ndjson"
-[[ "$NO_PYTHON_STATUS" == 69 ]]
+[[ "$NO_PYTHON_STATUS" == 69 ]] || fail_assertion "$LINENO"
 grep -Fq '"detail":"pythonUnavailable"' "$WORK_DIR/project-no-python.ndjson"
 
 SEMANTIC_LAUNCHER="$ZSH_HOME/.config/tessera/tessera-agent-launch"
@@ -1479,7 +1947,7 @@ printf '{"v":1,"claimedPID":%s,"rootPID":%s,"provider":"claude"}\n' "$VERSION_LO
   | HOME="$ZSH_HOME" "$PROCESS_PROOF" >"$WORK_DIR/process-proof-version-lookalike.json"
 VERSION_LOOKALIKE_STATUS=$?
 set -e
-[[ "$VERSION_LOOKALIKE_STATUS" != 0 ]]
+[[ "$VERSION_LOOKALIKE_STATUS" != 0 ]] || fail_assertion "$LINENO"
 grep -Fq '"error":"providerMismatch"' "$WORK_DIR/process-proof-version-lookalike.json"
 kill "$VERSION_LOOKALIKE_PID" 2>/dev/null || true
 wait "$VERSION_LOOKALIKE_PID" 2>/dev/null || true
@@ -1493,7 +1961,7 @@ printf '{"v":1,"claimedPID":%s,"rootPID":%s,"provider":"claude"}\n' "$FORGED_PRO
   | HOME="$ZSH_HOME" "$PROCESS_PROOF" >"$WORK_DIR/process-proof-forged.json"
 FORGED_PROOF_STATUS=$?
 set -e
-[[ "$FORGED_PROOF_STATUS" != 0 ]]
+[[ "$FORGED_PROOF_STATUS" != 0 ]] || fail_assertion "$LINENO"
 grep -Fq '"error":"providerMismatch"' "$WORK_DIR/process-proof-forged.json"
 kill "$FORGED_PROOF_CHILD" 2>/dev/null || true
 wait "$FORGED_PROOF_CHILD" 2>/dev/null || true
@@ -1510,13 +1978,13 @@ set -e
 if [[ -r "/proc/$PROOF_CHILD/environ" ]]; then
   # Linux remote hosts expose the exact environment inherited from the
   # SSH-server-accepted PTY marker, so prove the positive route-binding path.
-  [[ "$PROOF_MARKER_STATUS" == 0 ]]
+  [[ "$PROOF_MARKER_STATUS" == 0 ]] || fail_assertion "$LINENO"
   grep -Fq '"valid":true' "$WORK_DIR/process-proof-marker.json"
 else
   # macOS deliberately withholds another process's environment from ps. Keep
   # the host-side test deterministic and verify the proof fails closed there;
   # the Linux fixture lane above is the authoritative positive marker test.
-  [[ "$PROOF_MARKER_STATUS" != 0 ]]
+  [[ "$PROOF_MARKER_STATUS" != 0 ]] || fail_assertion "$LINENO"
   grep -Fq '"error":"unrelatedProcess"' "$WORK_DIR/process-proof-marker.json"
 fi
 kill "$PROOF_CHILD" 2>/dev/null || true
@@ -1527,9 +1995,9 @@ printf '%s\n' '{"v":1,"requestID":"00000000-0000-4000-8000-000000000001","kind":
   | HOME="$ZSH_HOME" "$SEMANTIC_LAUNCHER" >"$WORK_DIR/launch-injection.ndjson"
 LAUNCH_INJECTION_STATUS=$?
 set -e
-[[ "$LAUNCH_INJECTION_STATUS" != 0 ]]
+[[ "$LAUNCH_INJECTION_STATUS" != 0 ]] || fail_assertion "$LINENO"
 grep -Fq '"error":"invalidBranch"' "$WORK_DIR/launch-injection.ndjson"
-[[ ! -e "$WORK_DIR/touch-pwned" ]]
+[[ ! -e "$WORK_DIR/touch-pwned" ]] || fail_assertion "$LINENO"
 
 # tmux show-buffer appends a newline to the buffer it displays. Exercise that
 # exact transport shape while retaining strict validation of the base64 body.
@@ -1540,7 +2008,7 @@ printf '%s\n' "$LAUNCH_ENCODED" \
   | HOME="$ZSH_HOME" PATH="$FAKE_BIN:/usr/bin:/bin" TMUX_PANE= TESSERA_FAKE_CLAUDE_MARKER="$LAUNCH_MARKER" \
       "$SEMANTIC_LAUNCHER" --request-base64-stdin >"$WORK_DIR/launch-base64-newline.ndjson"
 grep -Fq '"kind":"launchReceipt"' "$WORK_DIR/launch-base64-newline.ndjson"
-[[ -f "$LAUNCH_MARKER" ]]
+[[ -f "$LAUNCH_MARKER" ]] || fail_assertion "$LINENO"
 
 printf 'agent integration scripts: syntax, install, lifecycle v9, bounded projection, safe launch, Claude compatibility, and Codex bootstrap passed\n'
 script_completed=1

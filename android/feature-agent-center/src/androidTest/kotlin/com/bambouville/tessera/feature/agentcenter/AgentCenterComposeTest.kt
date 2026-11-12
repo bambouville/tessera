@@ -21,7 +21,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -30,6 +30,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
@@ -37,6 +39,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.bambouville.tessera.core.bridge.SharedAgentValue
 import com.bambouville.tessera.core.bridge.SharedAgentMarkdown
 import com.bambouville.tessera.core.bridge.SharedAgentReadStatus
@@ -469,14 +472,24 @@ class AgentCenterComposeTest {
     /** Core keeps an observed send as advisory state; the transcript row is its only display. */
     @Test fun observedSendShowsOnlyAsItsTranscriptRow() {
         val live = listOf(AgentBlock("assistant", "ready", recordID = "reply"), AgentBlock("user", "sent once", recordID = "receipt"))
+        var shown by mutableStateOf(detail("8", true).copy(prompt = null, live = live,
+            outgoingMessages = listOf(AgentOutgoingMessage("sent", "sent once", "awaitingReceipt"))))
         setFixtureContent { TesseraTheme {
-            AgentDetailPane(detail("8", true).copy(prompt = null, live = live,
-                outgoingMessages = listOf(AgentOutgoingMessage("sent", "sent once", "observed"))),
+            AgentDetailPane(shown,
                 "", {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, Modifier.safeDrawingPadding())
         } }
+        compose.onNodeWithTag("agent-outgoing-awaitingReceipt").assertIsDisplayed()
+        captureTranscriptFixture("receipt-before-background")
+        compose.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        compose.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+        // The shared-core history regression supplies this observed status
+        // after accepting the older canonical page on foreground recovery.
+        compose.runOnIdle { shown = shown.copy(outgoingMessages = listOf(AgentOutgoingMessage("sent", "sent once", "observed"))) }
         compose.onNodeWithText("sent once").assertIsDisplayed()
         compose.onAllNodesWithText("sent once").assertCountEquals(1)
+        compose.onNodeWithTag("agent-outgoing-awaitingReceipt").assertDoesNotExist()
         compose.onNodeWithTag("agent-outgoing-observed").assertDoesNotExist()
+        captureTranscriptFixture("receipt-after-background")
     }
 
     // The pane runs inside a subcomposition, as the screen hosts it.
@@ -616,7 +629,8 @@ class AgentCenterComposeTest {
         }
 
         compose.onNodeWithText("Fixture").performClick()
-        compose.onNodeWithText(agentRelativeTime(detail.row.lastActivityMillis!!)).assertIsDisplayed()
+        compose.onNodeWithText(agentRelativeTime(detail.row.lastActivityMillis!!,
+            words = InstrumentationRegistry.getInstrumentation().targetContext.resources.agentRowWords())).assertIsDisplayed()
         compose.runOnIdle { assertEquals(detail.row.key, selected) }
     }
 
@@ -633,7 +647,8 @@ class AgentCenterComposeTest {
         }
 
         compose.onNodeWithTag("agent-grouping").assertIsDisplayed()
-        compose.onNodeWithText("fixture-host").assertIsDisplayed()
+        // The host is also shown on each clickable thread row.
+        compose.onNode(hasText("fixture-host") and !hasClickAction()).assertIsDisplayed()
         // Context takes the place of line changes; cost stays supplementary.
         compose.onNodeWithText("62% context · $1.20").assertIsDisplayed()
         compose.onNodeWithText("changes", substring = true).assertDoesNotExist()
@@ -689,9 +704,9 @@ class AgentCenterComposeTest {
         setFixtureContent { TesseraTheme {
             AgentListPane(AgentCenterUiState(loading = false, grouping = "host", threads = rows), {}, {}, {}, {}, Modifier.safeDrawingPadding())
         } }
-        compose.onNodeWithText("mac").assertIsDisplayed()
-        compose.onNodeWithText("windows").performScrollTo().assertIsDisplayed()
-        compose.onAllNodesWithText("windows", substring = false).assertCountEquals(1)
+        compose.onNode(hasText("mac") and !hasClickAction()).assertIsDisplayed()
+        compose.onNode(hasText("windows") and !hasClickAction()).performScrollTo().assertIsDisplayed()
+        compose.onAllNodes(hasText("windows") and !hasClickAction()).assertCountEquals(1)
         compose.onNodeWithText("Windows second").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("unlabeled host").assertDoesNotExist()
     }

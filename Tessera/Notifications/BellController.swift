@@ -3,6 +3,18 @@ import AVFoundation
 import AudioToolbox
 @preconcurrency import UserNotifications
 
+/// What one permission request found.
+struct NotificationPermissionOutcome: Equatable {
+    let status: UNAuthorizationStatus
+    /// Whether iOS showed its prompt for this request.
+    let prompted: Bool
+
+    /// A denial worth explaining: one already in place, which only Settings
+    /// can lift. A "don't allow" the user just chose in the system prompt is
+    /// their answer, and a sheet over it would argue with them.
+    var deniedBeforeAsking: Bool { status == .denied && !prompted }
+}
+
 public enum BellSource: Equatable, Hashable {
     case session(UUID)
     case tmuxWindow(sessionID: UUID, windowID: Int)
@@ -56,15 +68,19 @@ final class BellController {
     }
 
     public func requestPermissionIfNeeded() async -> UNAuthorizationStatus {
+        await requestPermission().status
+    }
+
+    func requestPermission() async -> NotificationPermissionOutcome {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
 
         guard settings.authorizationStatus == .notDetermined else {
-            return settings.authorizationStatus
+            return NotificationPermissionOutcome(status: settings.authorizationStatus, prompted: false)
         }
 
         _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
-        return (await center.notificationSettings()).authorizationStatus
+        return NotificationPermissionOutcome(status: (await center.notificationSettings()).authorizationStatus, prompted: true)
     }
 
     private func ringAsync(source: BellSource, isOriginOnScreen: Bool, hostDisplayName: String, paneTitle: String?) async {

@@ -43,6 +43,110 @@ class SharedTmuxAuthoritySessionNativeTest {
         }
     }
 
+    /**
+     * §6.9: a relaunch hands back what an earlier process kept. Our stamp
+     * still stands over a grid this device owned, so the read replays it with
+     * no veil, and the record to keep next comes back merged.
+     */
+    @Test
+    fun aRelaunchReplaysTheGridsItsStandingStampOwned() {
+        SharedTmuxAuthoritySession.create(initialGeneration = 0).use { session ->
+            val owned = SharedTmuxGridSize(columns = 105, rows = 31)
+            val local = SharedTmuxGridSize(columns = 92, rows = 38)
+            val restored = session.restoreOwnedGeometry(
+                0,
+                listOf(
+                    SharedTmuxOwnedGeometryRecord(generation = 3, sizes = listOf(owned)),
+                    SharedTmuxOwnedGeometryRecord(generation = 4, sizes = listOf(SharedTmuxGridSize(columns = 0, rows = 24))),
+                    SharedTmuxOwnedGeometryRecord(generation = 5, sizes = emptyList()),
+                ),
+            )
+            assertEquals("event=restoreOwnedGeometry(g3) authority=unknown claim=none restored=0->1", restored.trace)
+            assertNull(restored.state.ownedGeometryRecord)
+            session.attached(1, localDeviceId = "SELF")
+            session.adoptShown(2)
+            session.localSize(3, local)
+            session.windowFacts(
+                4, hydrated = true,
+                activeWindow = SharedTmuxAuthorityActiveWindow(id = 0, size = owned, authoritative = true),
+            )
+            session.windowSizePolicyReplied(5, windowId = 0, rawPolicy = "latest")
+            val replied = session.queryReplied(6, queryId = 1, rawValue = "v1 SELF 3 Android-Tablet", localDeviceId = "SELF")
+            assertEquals(
+                listOf(
+                    SharedTmuxAuthoritySessionEffect.AuthorityChanged(SharedTmuxGridAuthoritySnapshot.Mine(3)),
+                    SharedTmuxAuthoritySessionEffect.ReleaseGeometry(SharedTmuxAuthorityGeometryRelease.OWNER_REPLAY),
+                ),
+                replied.effects,
+            )
+            assertEquals(SharedTmuxAuthorityPresentation.None, replied.state.presentation)
+            assertEquals(SharedTmuxOwnedGeometryRecord(generation = 3, sizes = listOf(owned, local)), replied.state.ownedGeometryRecord)
+            assertFalse("nothing pending, nothing restored: no change", session.restoreOwnedGeometry(7, emptyList()).changed)
+        }
+    }
+
+    @Test
+    fun aRelaunchWithoutARecordForTheStandingStampStillVeils() {
+        SharedTmuxAuthoritySession.create(initialGeneration = 0).use { session ->
+            val owned = SharedTmuxGridSize(columns = 105, rows = 31)
+            session.restoreOwnedGeometry(0, listOf(SharedTmuxOwnedGeometryRecord(generation = 2, sizes = listOf(owned))))
+            session.attached(1, localDeviceId = "SELF")
+            session.adoptShown(2)
+            session.localSize(3, SharedTmuxGridSize(columns = 92, rows = 38))
+            session.windowFacts(
+                4, hydrated = true,
+                activeWindow = SharedTmuxAuthorityActiveWindow(id = 0, size = owned, authoritative = true),
+            )
+            session.windowSizePolicyReplied(5, windowId = 0, rawPolicy = "latest")
+            val replied = session.queryReplied(6, queryId = 1, rawValue = "v1 SELF 3 Android-Tablet", localDeviceId = "SELF")
+            assertTrue(replied.effects.contains(SharedTmuxAuthoritySessionEffect.RaiseStamplessPeer))
+            assertTrue(replied.state.presentation is SharedTmuxAuthorityPresentation.Veiled)
+            assertNull(replied.state.ownedGeometryRecord)
+        }
+    }
+
+    @Test
+    fun keepingJoinsItsGenerationAndKeepsTheNewest() {
+        val size = SharedTmuxGridSize(columns = 80, rows = 24)
+        val other = SharedTmuxGridSize(columns = 92, rows = 38)
+        var kept = emptyList<SharedTmuxOwnedGeometryRecord>()
+        for (generation in 1L..(SharedTmuxOwnedGeometryRecord.RESTORE_LIMIT + 3L)) {
+            kept = SharedTmuxOwnedGeometryRecord.keeping(SharedTmuxOwnedGeometryRecord(generation, listOf(size)), kept)
+        }
+        // Another window's record under the same stamp: its grids join, ranked newer.
+        kept = SharedTmuxOwnedGeometryRecord.keeping(SharedTmuxOwnedGeometryRecord(generation = 10, sizes = listOf(other)), kept)
+        assertEquals((SharedTmuxOwnedGeometryRecord.RESTORE_LIMIT + 3L downTo 4L).toList(), kept.map { it.generation })
+        assertEquals(listOf(size, other), kept.single { it.generation == 10L }.sizes)
+        kept = SharedTmuxOwnedGeometryRecord.keeping(SharedTmuxOwnedGeometryRecord(generation = 10, sizes = listOf(other, size)), kept)
+        assertEquals("a repeat moves to newest", listOf(other, size), kept.single { it.generation == 10L }.sizes)
+        // `TmuxOwnedSizeHistory.limit` grids stay, the newest.
+        val full = (1..SharedTmuxOwnedGeometryRecord.SIZE_LIMIT).map { SharedTmuxGridSize(columns = 80 + it, rows = 24) }
+        val grown = SharedTmuxOwnedGeometryRecord.keeping(
+            SharedTmuxOwnedGeometryRecord(generation = 3, sizes = listOf(SharedTmuxGridSize(columns = 200, rows = 50))),
+            listOf(SharedTmuxOwnedGeometryRecord(generation = 3, sizes = full)),
+        )
+        assertEquals(full.drop(1) + SharedTmuxGridSize(columns = 200, rows = 50), grown.single().sizes)
+    }
+
+    /** The Kotlin limits are the core's: a store at both limits restores whole, and an empty restore clears it. */
+    @Test
+    fun aRestoreAtBothLimitsIsCarriedAndAnEmptyOneClearsIt() {
+        SharedTmuxAuthoritySession.create(initialGeneration = 0).use { session ->
+            val limit = SharedTmuxOwnedGeometryRecord.RESTORE_LIMIT
+            val records = (1L..limit.toLong()).map { generation ->
+                SharedTmuxOwnedGeometryRecord(
+                    generation,
+                    (1..SharedTmuxOwnedGeometryRecord.SIZE_LIMIT).map { SharedTmuxGridSize(columns = 80 + it, rows = 24) },
+                )
+            }
+            val restored = session.restoreOwnedGeometry(0, records)
+            assertTrue(restored.changed)
+            assertTrue(restored.trace, restored.trace!!.endsWith("restored=0->$limit"))
+            val cleared = session.restoreOwnedGeometry(1, emptyList())
+            assertTrue(cleared.trace, cleared.trace!!.endsWith("restored=$limit->0"))
+        }
+    }
+
     @Test
     fun aClaimFenceConfirmsOverTheWireOnceTheWindowReachesItsTarget() {
         SharedTmuxAuthoritySession.create(initialGeneration = 0).use { session ->

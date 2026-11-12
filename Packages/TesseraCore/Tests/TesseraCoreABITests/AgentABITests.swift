@@ -119,7 +119,7 @@ final class AgentABITests: XCTestCase {
     func testComposerInsertionABIUsesBoundedExactPasteBytes() throws {
         for (provider, text) in [("claude", "first\n\nsecond\n"), ("claude", "Describe\n\"/tmp/a screenshot.png\""), ("codex", "Describe\n\"/tmp/a screenshot.png\"")] {
         let input = try JSONSerialization.data(withJSONObject: ["provider": provider, "text": text, "bracketedPasteEnabled": false])
-        try input.withUnsafeBytes { raw in
+        input.withUnsafeBytes { raw in
             let inputBytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self)
             let count = tesseraAgentComposerInsertion(inputBytes: inputBytes, inputCount: raw.count, outputBytes: nil, outputCapacity: 0)
             XCTAssertGreaterThan(count, 0)
@@ -488,6 +488,95 @@ final class AgentABITests: XCTestCase {
         XCTAssertNil(try AgentABICommand.decode(plain.encoded()).promptAnswerPlan)
     }
 
+    /// A dialog whose question scrolled off a short pane answers through the
+    /// ABI as on iOS: read through its thread, the waiting call names it and
+    /// binds the screen to that call; its bare signature answers nothing.
+    func testPromptObservationReadsADialogCroppedFromItsQuestionThroughItsThread() async throws {
+        let replied = expectation(description: "events")
+        replied.assertForOverFulfill = false
+        let capture = AgentABIEventCapture(expectation: replied)
+        let runtime = AgentABIRuntime { capture.receive($0) }
+        defer { runtime.destroy() }
+        let screen = "❯ 1. Postgres\n     Mature, transactional.\n  2. SQLite\n  3. Type something.\n\n"
+            + "Enter to select · ↑/↓ to navigate · Esc to cancel"
+        let request = AgentPromptObservationRequest(providerID: .claude, visibleText: screen, currentCursorLine: nil)!
+        XCTAssertNil(AgentPromptGrammar.observe(request))
+        let bare = try XCTUnwrap(AgentPromptGrammar.observe(request, allowingCroppedTop: true)).signature
+        let id = thread()
+        func observe(_ threadID: AgentThreadID?, expecting signature: String, _ label: String) async throws -> AgentABIEvent {
+            let count = capture.events.count
+            runtime.submit(try AgentABICommand(kind: .promptObservation, threadID: threadID, promptObservation: request,
+                promptAnswerPlan: .init(goal: .option("2"), expectedSignature: signature, anchor: nil, history: []),
+                promptRequestID: label).encoded())
+            try await waitForEvents(capture, count + 1)
+            return try XCTUnwrap(capture.events.last { $0.promptRequestID == label }, label)
+        }
+
+        var event = try await observe(nil, expecting: bare, "threadless")
+        XCTAssertEqual(event.promptObservation?.signature, bare, "without its thread the screen is only itself")
+        event = try await observe(id, expecting: bare, "no call")
+        XCTAssertNil(event.promptObservation, "no waiting call names the crop")
+        XCTAssertEqual(event.promptAnswerPlan?.step.refusal, .stalePrompt)
+
+        func awaitEvent(_ label: String, count: Int = 1, _ match: @escaping (AgentABIEvent) -> Bool) async throws -> AgentABIEvent {
+            for _ in 0..<200 where capture.events.filter(match).count < count { try await Task.sleep(nanoseconds: 10_000_000) }
+            XCTAssertEqual(capture.events.filter(match).count, count, label)
+            return try XCTUnwrap(capture.events.last(where: match), label)
+        }
+        let answering = binding(capabilities: [.observe, .send, .promptAnswer, .tmux])
+        let token = bindingToken(runtime, id: id, binding: answering)
+        runtime.submit(try AgentABICommand(kind: .bind, threadID: id, bindingToken: token).encoded())
+        runtime.submit(try lifecycleCommand(id, token: token, timestamp: 1_000).encoded())
+        runtime.submit(try lifecycleCommand(id, token: token, timestamp: 2_000, event: .preToolUse, status: .working,
+                                            question: "toolu_A").encoded())
+        _ = try await awaitEvent("hooks", count: 2) { $0.kind == .lifecycleAccepted }
+        let preview = #"{"questions":[{"header":"Database","multiSelect":false,"options":[{"description":"Mature, transactional.","label":"Postgres"},{"label":"SQLite"}],"question":"Which database?"}]}"#
+        let call = AgentProjectionRecord(sequence: 1, recordID: "call", record: .object([
+            "type": .string("message"), "role": .string("assistant"),
+            "blocks": .array([.object(["type": .string("tool_call"), "name": .string("AskUserQuestion"), "preview": .string(preview),
+                                       "toolCallID": .string("toolu_A")])])
+        ]))!
+        let page = AgentProjectionPage(sourceIdentity: "source", records: [call], cursor: "1", hasMore: false)!
+        runtime.submit(try AgentABICommand(kind: .projection, threadID: id, bindingToken: token, projection: page).encoded())
+        try await waitForEvents(capture, capture.events.count + 3)
+        XCTAssertTrue(capture.events.contains { $0.kind == .projectionApplied })
+
+        event = try await observe(id, expecting: bare, "bare")
+        let bound = try XCTUnwrap(event.promptObservation, "the waiting call names the crop")
+        XCTAssertEqual(bound.isCropped, true)
+        XCTAssertEqual(bound.question, "Which database?")
+        XCTAssertNotEqual(bound.signature, bare)
+        XCTAssertEqual(event.promptAnswerPlan?.step.refusal, .stalePrompt, "the bare crop was never this thread's card")
+        event = try await observe(id, expecting: bound.signature, "bound")
+        XCTAssertEqual(event.promptAnswerPlan?.step.action, .send)
+        XCTAssertEqual(event.promptAnswerPlan?.step.bytes, "2")
+
+        // Before each write the answer asks Core whether its prompt still
+        // waits: yes while its call does, no once that call's hook closed it.
+        let answer = try XCTUnwrap(AgentPromptAnswerRequest(threadID: id, binding: answering,
+            actionToken: AgentPromptGrammar.actionToken(for: bound.signature), expectedSignature: bound.signature,
+            optionID: "2", text: nil, control: nil))
+        runtime.submit(try AgentABICommand(kind: .action, threadID: id, bindingToken: token, action: .answerPrompt,
+                                           actionPayload: .init(promptAnswer: answer)).encoded())
+        let plan = try await awaitEvent("lease") { $0.kind == .actionPlan }
+        let lease = try XCTUnwrap(plan.lease)
+        func check(_ count: Int) async throws -> String? {
+            runtime.submit(try AgentABICommand(kind: .promptAnswerCurrent, bindingToken: token, lease: lease).encoded())
+            return try await awaitEvent("check \(count)", count: count) {
+                $0.lease == lease && ["promptCurrent", "promptChanged"].contains($0.code)
+            }.code
+        }
+        let current = try await check(1)
+        XCTAssertEqual(current, "promptCurrent")
+        runtime.submit(try lifecycleCommand(id, token: token, timestamp: 3_000, event: .postToolUse, status: .working,
+                                            question: "toolu_A").encoded())
+        _ = try await awaitEvent("closed", count: 3) { $0.kind == .lifecycleAccepted }
+        let changed = try await check(2)
+        XCTAssertEqual(changed, "promptChanged", "the call it answers closed")
+        XCTAssertThrowsError(try AgentABICommand(kind: .promptAnswerCurrent, bindingToken: token).encoded())
+        await fulfillment(of: [replied], timeout: 1)
+    }
+
     func testLivePromptObservationTakesExactlyOneFence() throws {
         let request = AgentPromptObservationRequest(providerID: .claude, visibleText: "prompt", currentCursorLine: nil)!
         let token = UUID()
@@ -618,6 +707,64 @@ final class AgentABITests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 2)
         XCTAssertEqual(capture.events.map(\.kind), [.threadSnapshot, .listSnapshot, .projectionApplied, .threadSnapshot])
         XCTAssertFalse(capture.events.contains { $0.code == "abi_invalidField" })
+        runtime.destroy()
+    }
+
+    /// A device asks where its reader is before a new connection's newest
+    /// page replaces their window: the answer is tagged with the asking id.
+    func testAReaderPlaceAnswersWithTheAnchoredRowOrNothing() async throws {
+        let replied = expectation(description: "events")
+        replied.assertForOverFulfill = false
+        let capture = AgentABIEventCapture(expectation: replied)
+        let runtime = AgentABIRuntime { capture.receive($0) }
+        let id = thread()
+        let token = bindingToken(runtime, id: id)
+        runtime.submit(try AgentABICommand(kind: .bind, threadID: id, bindingToken: token).encoded())
+        func page(_ start: Int, lane: AgentIngestionWindowTransaction.Lane, version: UInt64) throws -> AgentProjectionPage {
+            let operation: AgentIngestionRange.Operation = lane == .bootstrap ? .bootstrap : .history
+            let window = try AgentIngestionWindowTransaction(lane: lane, version: version, segmentID: "s\(start)",
+                before: "b\(start)", after: "a\(start + 10)", hasOlder: true, hasNewer: lane != .bootstrap)
+            let records = (start..<(start + 10)).map { AgentProjectionRecord(sequence: UInt64($0), recordID: "r\($0)",
+                record: .object(["type": .string("assistant"), "text": .string("hello \($0)")]), sourceOffset: UInt64($0 * 10),
+                revision: version, seekToken: "0123456789abcdef:t-\($0)")! }
+            // A seek is read from the live cursor the bootstrap left.
+            return AgentProjectionPage(sourceIdentity: "source", from: lane == .seek ? "live" : nil, records: records,
+                cursor: "b\(start)", hasMore: true,
+                ingestion: .init(epoch: "epoch", requestID: "tx\(version)", operation: operation,
+                    liveCursor: operation == .bootstrap ? "live" : nil, window: window)!)!
+        }
+        func place(_ label: String) async throws -> AgentABIEvent {
+            runtime.submit(try AgentABICommand(kind: .readerPlace, threadID: id, ingestionRequestID: label).encoded())
+            for _ in 0..<200 where !capture.events.contains(where: { $0.ingestionRequestID == label }) {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            let event = try XCTUnwrap(capture.events.last { $0.ingestionRequestID == label }, label)
+            XCTAssertEqual(event.kind, .readerPlace, label)
+            return event
+        }
+
+        runtime.submit(try AgentABICommand(kind: .projection, threadID: id, bindingToken: token,
+                                           projection: page(90, lane: .bootstrap, version: 1)).encoded())
+        var event = try await place("place-following")
+        XCTAssertEqual(event.search?.results, [], "a reader following the newest page names no row")
+        runtime.submit(try AgentABICommand(kind: .viewportAnchor, threadID: id, recordID: "r95").encoded())
+        event = try await place("place-newest")
+        XCTAssertEqual(event.search?.results.map(\.recordID), ["r95"])
+
+        runtime.submit(try AgentABICommand(kind: .projection, threadID: id, bindingToken: token,
+                                           projection: page(40, lane: .seek, version: 2)).encoded())
+        runtime.submit(try AgentABICommand(kind: .viewportAnchor, threadID: id, recordID: "r43").encoded())
+        event = try await place("place-history")
+        let result = try XCTUnwrap(event.search?.results.first)
+        XCTAssertEqual(event.search?.results.count, 1)
+        XCTAssertEqual(result.threadID, id)
+        XCTAssertEqual(result.recordID, "r43")
+        XCTAssertEqual(result.sequence, 43)
+        XCTAssertEqual(result.sourceOffset, 430)
+        XCTAssertEqual(result.seekToken, "0123456789abcdef:t-43")
+        XCTAssertFalse(capture.events.contains { $0.code?.hasPrefix("abi_") == true })
+        XCTAssertThrowsError(try AgentABICommand(kind: .readerPlace, threadID: id).encoded(), "the answer needs an id to reach its asker")
+        await fulfillment(of: [replied], timeout: 1)
         runtime.destroy()
     }
 
@@ -1270,11 +1417,13 @@ final class AgentABITests: XCTestCase {
     }
 
     private func lifecycleCommand(_ id: AgentThreadID, token: UUID, timestamp: UInt64 = 1_000,
-                                  agentID: String? = nil) -> AgentABICommand {
+                                  agentID: String? = nil, event: AgentLifecycleEventKind = .sessionStart,
+                                  status: AgentStatus = .idle, question call: String? = nil) -> AgentABICommand {
         .init(kind: .lifecycle, threadID: id, bindingToken: token,
-            lifecycle: AgentLifecycleEnvelope(version: 9, providerID: id.providerID, event: .sessionStart, status: .idle,
+            lifecycle: AgentLifecycleEnvelope(version: 9, providerID: id.providerID, event: event, status: status,
                 providerSessionID: id.providerSessionID, agentPID: 42, transcriptRef: "b3BhcXVl", agentID: agentID,
-                eventSequence: timestamp, sourceTimestampNanoseconds: timestamp)!)
+                eventSequence: timestamp, sourceTimestampNanoseconds: timestamp)!
+                .withInputHint(call == nil ? nil : .question, toolUseID: call))
     }
 
     private func absentOccupancy() -> AgentOccupancyObservation {

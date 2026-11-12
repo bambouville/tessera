@@ -372,7 +372,8 @@ actor PairingTCPRecordConnection {
 
     private func receiveChunk() async throws -> Data {
         let connection = self.connection
-        let operation = {
+        // Preserve this actor's isolation in both the timed and direct calls.
+        let operation: @Sendable (isolated PairingTCPRecordConnection) async throws -> Data = { isolatedSelf in
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                     connection.receive(
@@ -383,7 +384,7 @@ actor PairingTCPRecordConnection {
                         else if let data, !data.isEmpty { continuation.resume(returning: data) }
                         else if complete {
                             do {
-                                try self.decoder.finish()
+                                try isolatedSelf.decoder.finish()
                                 continuation.resume(throwing: PairingLocalTCPTransportError.connectionClosed)
                             } catch {
                                 continuation.resume(throwing: PairingLocalTCPTransportError.network)
@@ -397,9 +398,9 @@ actor PairingTCPRecordConnection {
             }
         }
         if let readTimeout = timeouts.read {
-            return try await withTimeout(readTimeout, operation: operation)
+            return try await withTimeout(readTimeout) { try await operation(self) }
         }
-        return try await operation()
+        return try await operation(self)
     }
 
     private func requireStarted() throws {

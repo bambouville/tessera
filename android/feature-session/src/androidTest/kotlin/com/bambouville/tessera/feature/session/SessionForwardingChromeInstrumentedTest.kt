@@ -7,7 +7,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -113,7 +113,7 @@ class SessionForwardingChromeInstrumentedTest {
             forwarding = ForwardingChromePresentation(visible = true, activeCount = 1, servingCount = 1),
         )
 
-        compose.onNodeWithTag(TAG).assertContentDescriptionEquals("1 active tunnels, 1 serving")
+        compose.onNodeWithTag(TAG).assertContentDescriptionEquals("1 active tunnel, 1 serving")
         assertTrue("the serving glyph is not green", greenGlyphPixels() > 0)
     }
 
@@ -139,7 +139,7 @@ class SessionForwardingChromeInstrumentedTest {
             forwarding = ForwardingChromePresentation(visible = true, activeCount = 1),
         )
 
-        compose.onNodeWithTag(TAG).assertContentDescriptionEquals("1 active tunnels")
+        compose.onNodeWithTag(TAG).assertContentDescriptionEquals("1 active tunnel")
         assertEquals(0, greenGlyphPixels())
     }
 

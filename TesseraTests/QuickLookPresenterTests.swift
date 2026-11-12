@@ -1,9 +1,36 @@
 import Foundation
+import Observation
 import Testing
 import UIKit
 @testable import Tessera
 
 struct QuickLookPresenterTests {
+    @Test @MainActor func artifactMarkdownTaskIdentityIncludesImagesWithoutChangingDocumentIdentity() async throws {
+        let url = URL(fileURLWithPath: "/cache/readme.md")
+        var preparations = 0
+        let first = ArtifactDocumentView(localURL: url, title: "readme.md",
+            prepareImages: ArtifactImagePreparation(generation: 4) { preparations += 1 }, reloadToken: 7)
+        let retry = ArtifactDocumentView(localURL: url, title: "readme.md",
+            prepareImages: ArtifactImagePreparation(generation: 5) { preparations += 1 }, reloadToken: 7)
+        let initialIdentity = first.markdownPresenter.markdownTaskIdentity
+        let retryIdentity = retry.markdownPresenter.markdownTaskIdentity
+        #expect(first.reloadToken == retry.reloadToken)
+        #expect(initialIdentity.fileURL == retryIdentity.fileURL)
+        #expect(initialIdentity.imageGeneration == 4)
+        #expect(retryIdentity.imageGeneration == 5)
+        #expect(initialIdentity != retryIdentity)
+        #expect(retryIdentity == retry.markdownPresenter.markdownTaskIdentity)
+        #expect(QuickLookPresenter(fileURL: url).markdownTaskIdentity == MarkdownPreviewTaskIdentity(fileURL: url, imageGeneration: 0))
+        let offline = ArtifactDocumentView(localURL: url, title: "readme.md", prepareImages: nil, reloadToken: 7)
+        let firstLive = ArtifactDocumentView(localURL: url, title: "readme.md",
+            prepareImages: ArtifactImagePreparation(generation: 0) {}, reloadToken: 7)
+        #expect(offline.markdownPresenter.markdownTaskIdentity != firstLive.markdownPresenter.markdownTaskIdentity,
+                "a document shown offline stages once its first live preparation arrives")
+        let prepare = try #require(retry.markdownPresenter.prepareImages)
+        try await prepare()
+        #expect(preparations == 1, "the task's action travels with its generation")
+    }
+
     @Test func imageParsingPreservesProseAndFindsReferencesInNestedBlocks() throws {
         let source = """
         Before ![a **bold** caption][picture] after.
@@ -54,6 +81,184 @@ struct QuickLookPresenterTests {
         }
         #expect(try MarkdownPreviewSupport.loadDocument(from: document).images == images)
         #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 4)
+    }
+
+    @Test @MainActor func explicitImageRefreshBypassesMatchingSizeAndMtimeButFollowerReuses() async throws {
+        let directory = artifactTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let document = directory.appendingPathComponent("readme.md")
+        try "![one](one.png) ![again](/docs/one.png)".write(to: document, atomically: true, encoding: .utf8)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4))
+        var first = renderer.pngData { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        var replacement = renderer.pngData { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        let bytes = max(first.count, replacement.count)
+        first.append(Data(repeating: 0, count: bytes - first.count))
+        replacement.append(Data(repeating: 0, count: bytes - replacement.count))
+        let bridge = ArtifactTestBridge()
+        bridge.files["/docs/one.png"] = first
+        try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+        let original = MarkdownImageStaging.images(for: document)
+        let thumbnail = try #require(original["one.png"])
+        let oldBytes = try Data(contentsOf: thumbnail)
+        let modified = bridge.modified
+        bridge.downloads.removeAll()
+        bridge.files["/docs/one.png"] = replacement
+
+        try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+        #expect(bridge.downloads.isEmpty)
+        #expect(MarkdownImageStaging.images(for: document) == original)
+        try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge, force: true)
+        let refreshed = MarkdownImageStaging.images(for: document)
+        #expect(bridge.downloads == ["/docs/one.png"])
+        let refreshedThumbnail = try #require(refreshed["one.png"])
+        #expect(refreshed["/docs/one.png"] == refreshedThumbnail)
+        #expect(try Data(contentsOf: refreshedThumbnail) != oldBytes)
+        #expect(!FileManager.default.fileExists(atPath: thumbnail.path))
+        #expect(bridge.modified == modified)
+
+        bridge.state = .idle
+        do {
+            try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge, force: true)
+            Issue.record("offline staging must fail")
+        } catch FileBridgeError.notConnected { }
+        #expect(bridge.connectCalls == 0)
+    }
+
+    @Test @MainActor func failedForcedImageDownloadRetainsThumbnailAndManifestAndReportsIncomplete() async throws {
+        let directory = artifactTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let document = directory.appendingPathComponent("readme.md")
+        try "![one](one.png) ![alias](/docs/one.png)".write(to: document, atomically: true, encoding: .utf8)
+        let bridge = ArtifactTestBridge()
+        bridge.files["/docs/one.png"] = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { _ in }
+        try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+        let original = MarkdownImageStaging.images(for: document)
+        let thumbnail = try #require(original["one.png"])
+        let bytes = try Data(contentsOf: thumbnail)
+        let manifest = MarkdownImageStaging.manifestURL(for: document)
+        let originalObject = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest))
+        let originalManifest = try #require(originalObject as? NSDictionary)
+        bridge.downloads.removeAll()
+        bridge.failAfterWrite = true
+
+        let failed = try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge, force: true)
+        #expect(!failed)
+        #expect(bridge.downloads == ["/docs/one.png"], "aliases must share the retained entry after a failed attempt")
+        #expect(MarkdownImageStaging.images(for: document) == original)
+        #expect(try Data(contentsOf: thumbnail) == bytes)
+        #expect((try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? NSDictionary) == originalManifest)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 3)
+
+        bridge.failAfterWrite = false
+        let succeeded = try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge, force: true)
+        #expect(succeeded)
+        #expect(bridge.downloads == ["/docs/one.png", "/docs/one.png"])
+        let refreshed = try #require(MarkdownImageStaging.images(for: document)["one.png"])
+        #expect(refreshed != thumbnail)
+        #expect(!FileManager.default.fileExists(atPath: thumbnail.path))
+        bridge.downloads.removeAll()
+        try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+        #expect(bridge.downloads.isEmpty)
+
+        bridge.modified = Date(timeIntervalSince1970: 2)
+        bridge.failAfterWrite = true
+        let unforced = try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+        #expect(!unforced, "a transient miss is reported, so a shown document can retry it")
+        #expect(MarkdownImageStaging.images(for: document).isEmpty, "non-forced failure keeps its existing behavior")
+        #expect(!FileManager.default.fileExists(atPath: refreshed.path))
+        #expect(bridge.connectCalls == 0)
+    }
+
+    @Test @MainActor func forcedMissingOrOversizedImageDropsTheOldThumbnailAndCompletesTheRefresh() async throws {
+        for missing in [true, false] {
+            let directory = artifactTestDirectory()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let document = directory.appendingPathComponent("readme.md")
+            try "![one](one.png)".write(to: document, atomically: true, encoding: .utf8)
+            let bridge = ArtifactTestBridge()
+            bridge.files["/docs/one.png"] = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { _ in }
+            try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+            let thumbnail = try #require(MarkdownImageStaging.images(for: document)["one.png"])
+            if missing { bridge.files["/docs/one.png"] = nil }
+            else { bridge.progressBytes = MarkdownImageStaging.maxImageBytes + 1 }
+            let completed = try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge, force: true)
+            // A definitive answer must not keep the refresh pending, or every
+            // later load would re-download the document and all its images.
+            #expect(completed)
+            #expect(MarkdownImageStaging.images(for: document).isEmpty)
+            #expect(!FileManager.default.fileExists(atPath: thumbnail.path))
+            #expect(bridge.connectCalls == 0)
+        }
+    }
+
+    @Test @MainActor func definitiveImageErrorsDropTheOldThumbnailAndCompleteTheRefresh() async throws {
+        let errors: [Error] = [
+            FileBridgeError.remoteStatus(code: 2, message: "missing"),
+            FileBridgeError.remoteStatus(code: 3, message: "permission denied"),
+            FileBridgeError.remoteStatus(code: 8, message: "unsupported"),
+            FileBridgeError.remoteStatus(code: 10, message: "no such path"),
+            CocoaError(.fileReadNoPermission), CocoaError(.fileReadNoSuchFile),
+            POSIXError(.EACCES), POSIXError(.EPERM), POSIXError(.ENOENT),
+        ]
+        for error in errors {
+            let directory = artifactTestDirectory()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let document = directory.appendingPathComponent("readme.md")
+            try "![one](one.png)".write(to: document, atomically: true, encoding: .utf8)
+            let bridge = ArtifactImageFailureTestBridge()
+            bridge.base.files["/docs/one.png"] = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { _ in }
+            try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+            let thumbnail = try #require(MarkdownImageStaging.images(for: document)["one.png"])
+            bridge.downloadAttempts.removeAll()
+            bridge.downloadErrors["/docs/one.png"] = error
+            let completed = try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge, force: true)
+            #expect(completed)
+            #expect(bridge.downloadAttempts == ["/docs/one.png"])
+            #expect(MarkdownImageStaging.images(for: document).isEmpty)
+            #expect(!FileManager.default.fileExists(atPath: thumbnail.path))
+            #expect(bridge.base.connectCalls == 0)
+        }
+    }
+
+    @Test @MainActor func transientImageErrorsKeepTheThumbnailAndLeaveTheRefreshPending() async throws {
+        let errors: [Error] = [
+            FileBridgeError.remoteStatus(code: 4, message: "failure"),
+            FileBridgeError.remoteStatus(code: 1, message: "unexpected status"),
+            FileBridgeError.network("interrupted"), FileBridgeError.notConnected,
+            FileBridgeError.remoteOperationFailed("failure"),
+            URLError(.networkConnectionLost), POSIXError(.ECONNRESET), CocoaError(.fileReadUnknown),
+            NSError(domain: "test.image.failure", code: 1),
+        ]
+        for error in errors {
+            let directory = artifactTestDirectory()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let document = directory.appendingPathComponent("readme.md")
+            try "![one](one.png)".write(to: document, atomically: true, encoding: .utf8)
+            let bridge = ArtifactImageFailureTestBridge()
+            bridge.base.files["/docs/one.png"] = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { _ in }
+            try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge)
+            let original = MarkdownImageStaging.images(for: document)
+            let thumbnail = try #require(original["one.png"])
+            bridge.downloadAttempts.removeAll()
+            bridge.downloadErrors["/docs/one.png"] = error
+            let completed = try await MarkdownImageStaging.stage(document: document, remotePath: "/docs/readme.md", bridge: bridge, force: true)
+            #expect(!completed)
+            #expect(bridge.downloadAttempts == ["/docs/one.png"])
+            #expect(MarkdownImageStaging.images(for: document) == original)
+            #expect(FileManager.default.fileExists(atPath: thumbnail.path))
+            #expect(bridge.base.connectCalls == 0)
+        }
     }
 
     @Test func linkedAndAdjacentImagesKeepDestinationsAndLinks() throws {
@@ -308,4 +513,39 @@ struct QuickLookPresenterTests {
         #expect(document.blocks.first?.kind == .heading(level: 2))
         #expect(document.blocks.filter { $0.listStyle == .unordered }.count == 2)
     }
+}
+
+@MainActor
+@Observable
+final class ArtifactImageFailureTestBridge: FileBridging {
+    let base = ArtifactTestBridge()
+    var downloadErrors: [String: Error] = [:]
+    var downloadAttempts: [String] = []
+    var key: FileBridgeKey { base.key }
+    var state: FileBridgeState { base.state }
+    var homeDirectory: String? { base.homeDirectory }
+    var suppressIdleTeardown: Bool {
+        get { base.suppressIdleTeardown }
+        set { base.suppressIdleTeardown = newValue }
+    }
+
+    func connect() async throws { try await base.connect() }
+    func disconnect() async { await base.disconnect() }
+    func listDirectory(_ path: String) async throws -> [RemoteFileEntry] { try await base.listDirectory(path) }
+    func attributes(_ path: String) async throws -> RemoteFileEntry { try await base.attributes(path) }
+    func realPath(_ path: String) async throws -> String { try await base.realPath(path) }
+    func createDirectory(_ path: String) async throws { try await base.createDirectory(path) }
+    func setPermissions(_ permissions: UInt16, at path: String) async throws { try await base.setPermissions(permissions, at: path) }
+    func rename(from oldPath: String, to newPath: String) async throws { try await base.rename(from: oldPath, to: newPath) }
+    func removeFile(_ path: String) async throws { try await base.removeFile(path) }
+    func removeDirectory(_ path: String) async throws { try await base.removeDirectory(path) }
+    func download(remotePath: String, to localURL: URL, progress: TransferProgressHandler?) async throws {
+        downloadAttempts.append(remotePath)
+        if let error = downloadErrors[remotePath] { throw error }
+        try await base.download(remotePath: remotePath, to: localURL, progress: progress)
+    }
+    func upload(localURL: URL, to remotePath: String, progress: TransferProgressHandler?) async throws {
+        try await base.upload(localURL: localURL, to: remotePath, progress: progress)
+    }
+    func exec(_ command: String, inShell: Bool) async throws -> String { try await base.exec(command, inShell: inShell) }
 }

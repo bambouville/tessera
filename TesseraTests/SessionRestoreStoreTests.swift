@@ -1,5 +1,6 @@
 import XCTest
 @testable import Tessera
+import TmuxControlCore
 
 final class SessionRestoreStoreTests: XCTestCase {
     private var suiteName: String!
@@ -485,5 +486,99 @@ final class ConnectionActivityStoreTests: XCTestCase {
                 sessions: [saved]
             ).isEmpty
         )
+    }
+}
+
+@MainActor
+final class TmuxOwnedGeometryFileStoreTests: XCTestCase {
+    private func temporaryURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("TmuxOwnedGeometryFileStoreTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tmux-owned-geometry.json")
+    }
+
+    private func record(_ generation: UInt64, _ columns: Int = 92) -> TmuxOwnedGeometryRecord {
+        .init(generation: generation, sizes: [.init(columns: columns, rows: 38)])
+    }
+
+    /// A relaunch reads what the dead process kept: per host and tmux
+    /// session, each generation's grids together.
+    func test_aNewProcessReadsTheRecordsKeptPerHostAndSession() throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let host = Host(name: "dev", address: "dev.example", port: 22, user: "dev", password: "")
+        let other = Host(name: "dev", address: "other.example", port: 22, user: "dev", password: "")
+
+        let first = TmuxOwnedGeometryFileStore(url: url)
+        first.store(for: host).keep(record(3), "main")
+        first.store(for: host).keep(record(3, 100), "main")
+        first.store(for: host).keep(record(4), "main")
+        first.store(for: other).keep(record(9), "main")
+        first.flushForTesting()
+
+        let relaunched = TmuxOwnedGeometryFileStore(url: url)
+        XCTAssertEqual(relaunched.store(for: host).records("main"), [
+            record(4), .init(generation: 3, sizes: [.init(columns: 92, rows: 38), .init(columns: 100, rows: 38)]),
+        ])
+        XCTAssertEqual(relaunched.store(for: other).records("main"), [record(9)])
+        XCTAssertEqual(relaunched.store(for: host).records("other"), [])
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(text.contains("dev.example") || text.contains("main"), "only hashed keys are stored")
+        XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+    }
+
+    func test_onlyTheNewestGenerationsAndSessionsStay() {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let host = Host(name: "dev", address: "dev.example", port: 22, user: "dev", password: "")
+        let store = TmuxOwnedGeometryFileStore(url: url)
+        let limit = TmuxOwnedGeometryRecord.restoreLimit
+        for generation in 1...UInt64(limit + 3) { store.store(for: host).keep(record(generation), "main") }
+        XCTAssertEqual(store.store(for: host).records("main").map(\.generation),
+                       Array((4...UInt64(limit + 3)).reversed()))
+
+        for index in 0..<TmuxOwnedGeometryFileStore.sessionLimit { store.store(for: host).keep(record(1), "s\(index)") }
+        XCTAssertEqual(store.store(for: host).records("main"), [], "the least recently kept session goes")
+        XCTAssertEqual(store.store(for: host).records("s0"), [record(1)])
+        store.flushForTesting()
+    }
+
+    /// `store(for:)` reads the file off main ahead of the first attach; a
+    /// keep that needed the file first is never undone by that read.
+    func test_aPreloadNeverUndoesAKeep() async {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let host = Host(name: "dev", address: "dev.example", port: 22, user: "dev", password: "")
+        let earlier = TmuxOwnedGeometryFileStore(url: url)
+        earlier.store(for: host).keep(record(3), "main")
+        earlier.flushForTesting()
+
+        let store = TmuxOwnedGeometryFileStore(url: url)
+        store.store(for: host).keep(record(4), "main")
+        store.flushForTesting()
+        // The preload's result reaches main behind everything queued so far.
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+        XCTAssertEqual(store.store(for: host).records("main"), [record(4), record(3)])
+
+        let preloaded = TmuxOwnedGeometryFileStore(url: url)
+        let records = preloaded.store(for: host).records
+        preloaded.flushForTesting()
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+        XCTAssertEqual(records("main"), [record(4), record(3)])
+    }
+
+    /// Android's `TmuxOwnedGeometryStore.key` derives the same digest.
+    func test_theKeyIsTheDigestOfHostAndSession() {
+        XCTAssertEqual(TmuxOwnedGeometryFileStore.key(hostKey: "dev@dev.example:22", session: "main"),
+                       "e5dd6243ef3e958d54310afd3c5bed0e07c2144b60a91430d2c54840656a2143")
+    }
+
+    func test_anUnreadableFileKeepsNothing() throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: url)
+        let host = Host(name: "dev", address: "dev.example", port: 22, user: "dev", password: "")
+        XCTAssertEqual(TmuxOwnedGeometryFileStore(url: url).store(for: host).records("main"), [])
     }
 }

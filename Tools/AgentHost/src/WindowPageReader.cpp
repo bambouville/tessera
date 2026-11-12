@@ -1,4 +1,5 @@
 #include "WindowPageReader.h"
+#include "SourceDigest.h"
 #include "Json.h"
 #include "OpenCodeStore.h"
 #include <algorithm>
@@ -89,7 +90,6 @@ WindowPageReader::HistorySegment WindowPageReader::describeHistory(const Source&
     histories_->beginRead(); histories_->hold(historyPath_); histories_->hold(result.key);
     auto& index = histories_->get(result.key);
     JsonlReader reader(source.path, "codex", catalog_.open(source), cancelled_, CodexHistoryIndex::metadata, cutoff);
-    reader.setValidationRefresh(refreshValidation_);
     index.refresh(reader, cancelled_, histories_->budgetFor(result.key), true);
     if (index.sessionID() != source.sessionID) throw std::runtime_error("sourceChanged");
     if (cutoff != UINT64_MAX && (!index.paginated() || reader.completeEnd() != cutoff || index.nextOrdinal() != expectedOrdinal))
@@ -143,7 +143,6 @@ void WindowPageReader::loadHistory(HistorySegment segment) {
     auto& index = histories_->get(segment.key);
     auto reader = std::make_unique<JsonlReader>(segment.source.path, "codex", catalog_.open(segment.source), cancelled_,
         CodexHistoryIndex::metadata, segment.cutoff);
-    reader->setValidationRefresh(refreshValidation_);
     index.refresh(*reader, cancelled_, histories_->budgetFor(segment.key), true);
     const auto witness = segment.cutoff == UINT64_MAX ? index.generation() : index.sourceWitness();
     if (index.size() != segment.count || witness != segment.witness) throw std::runtime_error("sourceChanged");
@@ -196,9 +195,16 @@ uint64_t WindowPageReader::historyBytesRead() const {
 }
 
 WindowRead WindowPageReader::read(const Source& source, const std::string& generation,
-        const std::optional<WindowAnchor>& anchor, bool forward, size_t limit, uint64_t& revision) {
+        const std::optional<WindowAnchor>& anchor, bool forward, size_t limit, uint64_t& revision, bool seek) {
     if (!limit || limit > 100 || (anchor && (anchor->source != generation || anchor->forward != forward || anchor->terminal)))
         throw std::runtime_error("invalidWindowAnchor");
+    // Within one generation an index only grows, so a position past its end
+    // names no record it ever had.
+    auto checkIndexAnchor = [&](const std::string& identity, uint64_t count) {
+        if (!anchor) return;
+        if (generation != identity) throw std::runtime_error("sourceChanged");
+        if (anchor->position > count) throw std::runtime_error(seek ? "seekRecordMoved" : "sourceChanged");
+    };
     WindowRead result;
     if (source.provider == "opencode") {
         OpenCodeStore database(source.path, cancelled_);
@@ -249,7 +255,7 @@ WindowRead WindowPageReader::read(const Source& source, const std::string& gener
             prepareHistory(source);
             if (historyIndexed_) {
                 const auto& identity = historyGeneration_; const auto count = historyCount_;
-                if (anchor && (generation != identity || anchor->position > count)) throw std::runtime_error("sourceChanged");
+                checkIndexAnchor(identity, count);
                 // Reuse the authorized descriptor and finite snapshot for
                 // index selection, page bodies, and the ensuing revision
                 // sweep. A path replacement cannot switch their provenance.
@@ -261,7 +267,7 @@ WindowRead WindowPageReader::read(const Source& source, const std::string& gener
                     const auto order = forward ? position : position - 1;
                     auto [segment, entry] = historyEntry(order);
                     auto record = segment.reader->readRecord(entry.start, entry.end);
-                    if (record.value.providerID != entry.id) throw std::runtime_error("sourceChanged");
+                    if (record.value.providerID != entry.id) { segment.index->contradicted(); throw std::runtime_error("sourceChanged"); }
                     // A lineage is one virtual concatenation of immutable
                     // ancestor prefixes plus the mutable child. Receipt offsets
                     // and sourceEnd must use this SAME provenance domain.
@@ -287,14 +293,13 @@ WindowRead WindowPageReader::read(const Source& source, const std::string& gener
             }
         }
         JsonlReader reader(source.path, source.provider, catalog_.open(source), cancelled_);
-        reader.setValidationRefresh(refreshValidation_);
         if (source.provider == "kimi") {
             auto& index = kimi_->get(source.path);
             reader.setNormalizer(KimiHistoryIndex::metadata);
             index.refresh(reader, cancelled_, kimi_->budgetFor(source.path));
             reader.setNormalizer({});
             const auto& identity = index.generation(); const auto count = index.size();
-            if (anchor && (generation != identity || anchor->position > count)) throw std::runtime_error("sourceChanged");
+            checkIndexAnchor(identity, count);
             size_t position = anchor ? anchor->position : forward ? 0 : count;
             result.segment.source = identity; result.sourceEnd = reader.size();
             auto boundary = [&](size_t ordinal, bool direction) -> WindowAnchor {
@@ -343,7 +348,7 @@ WindowRead WindowPageReader::read(const Source& source, const std::string& gener
                 throw std::runtime_error("piIdentityConflict");
             const auto& identity = index.generation();
             const auto count = index.size();
-            if (anchor && (generation != identity || anchor->position > count)) throw std::runtime_error("sourceChanged");
+            checkIndexAnchor(identity, count);
             size_t position = anchor ? anchor->position : forward ? 0 : count;
             result.segment.source = identity; result.sourceEnd = reader.size();
             auto boundary = [&](size_t ordinal, bool direction) -> WindowAnchor {
@@ -509,9 +514,10 @@ PositionedRecord WindowPageReader::reviseHistory(const PositionedRecord& record,
     if (sourceOffset == record.sourceByteOffset) return result;
     auto& reader = *segment.reader; const auto before = reader.bytesRead();
     auto fresh = reader.readRecord(entry.start, entry.end); bytesRead += reader.bytesRead() - before;
-    if (fresh.value.providerID != record.value.providerID) throw std::runtime_error("sourceChanged");
     simdjson::dom::parser parser;
-    if (json::text(parser.parse(fresh.value.json).value(), "turnID") != entry.turn) throw std::runtime_error("sourceChanged");
+    if (fresh.value.providerID != record.value.providerID || json::text(parser.parse(fresh.value.json).value(), "turnID") != entry.turn) {
+        segment.index->contradicted(); throw std::runtime_error("sourceChanged");
+    }
     if (revision == UINT64_MAX) throw std::runtime_error("revisionBudgetExceeded");
     result.value = std::move(fresh.value); result.sourceByteOffset = sourceOffset; result.revision = ++revision;
     return result;

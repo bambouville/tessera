@@ -146,7 +146,10 @@ final class SessionRestoreLifecycleProbe: XCTestCase {
     ///
     /// Compact width coerces "ask" to "always", so this case is only meaningful
     /// on a regular-width simulator; the gate script picks an iPad.
-    func testTheAskPromptIsRaisedOnceAndStaysUp() {
+    func testTheAskPromptIsRaisedOnceAndStaysUp() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("every iPhone, Duo included, coerces ask to always")
+        }
         launch(caseName: "ask-prompt", policy: "ask", hostCount: 2)
         settle()
 

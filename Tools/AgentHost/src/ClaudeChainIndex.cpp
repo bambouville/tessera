@@ -122,10 +122,65 @@ uint16_t recordFlags(const ClaudeChainIndex::Entry& entry) {
 // vector-capacity rounding. Payloads stay in the reader's separately bounded
 // 100-record page, never in this index.
 constexpr size_t recordCost = 160;
+// The index decodes only chain fields: display normalization of every record
+// dominated a cold index and each ancestry walk of a long transcript. The
+// kind lets a continuation remember these results as it does the default's,
+// so a page larger than one slice still finishes. A reader's own normalizer
+// is kept.
+class MetadataReads {
+public:
+    MetadataReads(JsonlReader& reader, bool pi) : reader_(reader), previous_(reader.normalizer()),
+            previousKind_(reader.normalizerKind()) {
+        if (previous_) return;
+        const std::string provider = pi ? "pi" : "claude";
+        reader.setNormalizer([provider](simdjson::dom::element value, bool truncated) {
+            return normalizeChainMetadata(provider, value, truncated);
+        }, "chainMetadata:" + provider);
+    }
+    ~MetadataReads() { reader_.setNormalizer(std::move(previous_), std::move(previousKind_)); }
+    MetadataReads(const MetadataReads&) = delete;
+    MetadataReads& operator=(const MetadataReads&) = delete;
+private:
+    JsonlReader& reader_;
+    JsonlReader::Normalizer previous_;
+    std::string previousKind_;
+};
 uint64_t identityHash(const std::string& value) {
     uint64_t result = 1469598103934665603ULL;
     for (const unsigned char byte : value) { result ^= byte; result *= 1099511628211ULL; }
     return result;
+}
+// Whether a power-of-two-word Bloom filter may hold the UUID (an empty one
+// holds nothing); insert adds it.
+bool bloomBits(std::vector<uint64_t>& bloom, const std::string& id, bool insert) {
+    if (bloom.empty()) return false;
+    const auto mask = bloom.size() * 64 - 1;
+    uint64_t hash = identityHash(id); bool present = true;
+    for (unsigned i = 0; i < 7; ++i) {
+        // Independent mixed positions keep sequential synthetic IDs from
+        // concentrating in adjacent bits. Collisions never imply equality.
+        hash += 0x9e3779b97f4a7c15ULL;
+        auto mixed = hash; mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebULL; mixed ^= mixed >> 31;
+        const auto bit = mixed & mask, value = uint64_t(1) << (bit & 63);
+        present = present && (bloom[bit / 64] & value);
+        if (insert) bloom[bit / 64] |= value;
+    }
+    return present;
+}
+// Words in each UUID filter: together at most an eighth of the budget.
+size_t idWords(size_t budget) {
+    const auto wordLimit = std::max<size_t>(8, budget / (16 * sizeof(uint64_t)));
+    size_t words = 8; while (words <= wordLimit / 2) words *= 2;
+    return words;
+}
+// Halves a filter to at most `words`. A bit's position is the hash under a
+// mask, so the fold is the filter a fill at that size would have built.
+void foldBloom(std::vector<uint64_t>& bloom, size_t words) {
+    auto size = bloom.size();
+    if (size <= words) return;
+    while (size > words) { size /= 2; for (size_t i = 0; i < size; ++i) bloom[i] |= bloom[i + size]; }
+    std::vector<uint64_t>(bloom.begin(), bloom.begin() + size).swap(bloom);
 }
 void checkCancelled(const std::function<bool()>& cancelled) {
     if (cancelled && cancelled()) throw std::runtime_error("cancelled");
@@ -143,8 +198,12 @@ size_t ClaudeChainIndex::bytes() const {
     size_t result = entries_.capacity() * sizeof(Compact) + selected_.capacity() * sizeof(uint64_t) +
         window_.capacity() * sizeof(CachedEntry) + identities_.capacity() * sizeof(Identity) + identity_.capacity() +
         generation_.capacity() + lookup_.id.capacity() + sizeof(*this) + dangling_.capacity() * sizeof(uint64_t) +
-        linearBuild_.bloom.capacity() * sizeof(uint64_t) + checkpoints_.capacity() * sizeof(CachedEntry);
+        linearBuild_.bloom.capacity() * sizeof(uint64_t) + checkpoints_.capacity() * sizeof(CachedEntry) +
+        (seenIds_.capacity() + repeatedIds_.capacity()) * sizeof(uint64_t) + copies_.capacity() * sizeof(copies_[0]) +
+        (lateMax_.capacity() + build_.late.capacity()) * sizeof(uint64_t);
     for (const auto& value : recent_) result += value.id.capacity();
+    for (const auto& [_, value] : lazyCheckpoints_)
+        result += sizeof(value) + 64 + (value.node ? value.node->id.capacity() + value.node->parent.capacity() + value.node->logicalParent.capacity() : 0);
     for (const auto* value : {&tail_, &cursor_.node, &build_.candidate, &build_.leaf, &build_.child,
             &build_.bestLeaf, &build_.bestTerminal, &build_.current, &build_.oldTail, &maximumCurrent_, &linearBuild_.previous,
             &linearBuild_.candidate, &boundaryLookup_.candidate})
@@ -181,7 +240,7 @@ ClaudeChainIndex::Entry ClaudeChainIndex::readEntry(JsonlReader& reader, uint64_
 }
 
 std::optional<ClaudeChainIndex::Entry> ClaudeChainIndex::latest(JsonlReader& reader, const std::string& id,
-        const std::function<bool()>& cancelled) {
+        const std::function<bool()>& cancelled, uint64_t hint) {
     if (id.empty()) return std::nullopt;
     if (pi_ && piVersion_ == 1 && id.compare(0, 3, "v1:") == 0) {
         const auto start = std::stoull(id.substr(3));
@@ -189,23 +248,88 @@ std::optional<ClaudeChainIndex::Entry> ClaudeChainIndex::latest(JsonlReader& rea
         if (page.records.empty() || page.records.front().start != start) throw std::runtime_error("piChainUnproven");
         return readEntry(reader, page.records.front().start, page.records.front().end);
     }
-    if (!lookup_.active || lookup_.id != id) lookup_ = {id, position_, true};
-    while (lookup_.position) {
-        checkCancelled(cancelled);
-        const auto page = reader.page(lookup_.position, false, 100);
-        if (page.records.empty()) throw std::runtime_error("claudeIndexNoProgress");
-        for (auto it = page.records.rbegin(); it != page.records.rend(); ++it) {
-            const auto candidate = decode(*it);
-            if (candidate.node && candidate.id == id) { lookup_.active = false; return candidate; }
+    if (!lookup_.active || lookup_.id != id) {
+        // A lone copy is current wherever it lies: search back from the
+        // hint, where it usually is, then the part after the hint. From the
+        // end of the file, a walk down a long path rereads it at every step.
+        const bool hinted = hint < position_;
+        if (hinted && unrepeated(id)) lookup_ = {id, hint, true, 0, hint, 1};
+        else if (copiesKnown()) lookup_ = hinted ? Lookup{id, hint, true, 0, hint, 1, true} : Lookup{id, position_, true, 0, absent, 100, true};
+        else lookup_ = {id, position_, true};
+    }
+    if (lookup_.copies) {
+        // The newest later copy is current. With none, the one copy is the
+        // first, which the search below finds as a lone one.
+        if (!copiesSorted_) { std::sort(copies_.begin(), copies_.end()); copiesSorted_ = true; }
+        const auto hash = identityHash(id);
+        const auto first = std::lower_bound(copies_.begin(), copies_.end(), std::make_pair(hash, uint64_t(0)));
+        const auto last = std::upper_bound(first, copies_.end(), std::make_pair(hash, UINT64_MAX));
+        while (lookup_.copy < size_t(last - first)) {
+            checkCancelled(cancelled);
+            const auto start = (last - 1 - lookup_.copy)->second;
+            const auto page = reader.page(start, true, 1);
+            if (!page.records.empty() && page.records.front().start == start) {
+                const auto candidate = decode(page.records.front());
+                if (candidate.node && candidate.id == id) { lookup_.active = false; return candidate; }
+            }
+            ++lookup_.copy;
         }
-        lookup_.position = page.records.front().start;
+        lookup_.copies = false;
+    }
+    for (;;) {
+        while (lookup_.position > lookup_.floor) {
+            checkCancelled(cancelled);
+            const auto page = reader.page(lookup_.position, false, lookup_.span);
+            if (page.records.empty()) throw std::runtime_error("claudeIndexNoProgress");
+            lookup_.span = std::min<size_t>(100, lookup_.span * 2);
+            for (auto it = page.records.rbegin(); it != page.records.rend() && it->start >= lookup_.floor; ++it) {
+                const auto candidate = decode(*it);
+                if (candidate.node && candidate.id == id) { lookup_.active = false; return candidate; }
+            }
+            lookup_.position = std::max(page.records.front().start, lookup_.floor);
+        }
+        if (lookup_.rest == absent) break;
+        lookup_.position = position_; lookup_.floor = lookup_.rest; lookup_.rest = absent; lookup_.span = 100;
     }
     lookup_.active = false; return std::nullopt;
 }
 
+bool ClaudeChainIndex::unrepeated(const std::string& id) {
+    return idsEnd_ >= position_ && !repeatedIds_.empty() && !bloomBits(repeatedIds_, id, false);
+}
+
+bool ClaudeChainIndex::copiesKnown() const {
+    return idsEnd_ >= position_ && !seenIds_.empty() && !copiesDropped_;
+}
+
+size_t ClaudeChainIndex::spareBytes(size_t budget) {
+    // An eighth of the budget, as the filters, and in a small budget half of
+    // what the window (half the rest), filters and checkpoints leave.
+    const auto self = sizeof(ClaudeChainIndex), spare = 5 * budget / 16 > self / 2 ? 5 * budget / 16 - self / 2 : 0;
+    return std::min(budget / 8, spare / 2);
+}
+
+size_t ClaudeChainIndex::copyLimit(size_t budget) {
+    // Three quarters of the spare bytes: late nodes, rarer, keep the rest.
+    return spareBytes(budget) * 3 / 4 / sizeof(std::pair<uint64_t, uint64_t>);
+}
+
+void ClaudeChainIndex::keepCopy(const std::string& id, uint64_t start) {
+    if (copiesDropped_) return;
+    const auto limit = copyLimit(budget_);
+    if (copies_.size() >= limit) { copiesDropped_ = true; std::vector<std::pair<uint64_t, uint64_t>>().swap(copies_); return; }
+    if (copies_.size() == copies_.capacity()) copies_.reserve(std::min(limit, std::max<size_t>(16, copies_.size() * 2)));
+    copies_.emplace_back(identityHash(id), start); copiesSorted_ = false;
+}
+
+void ClaudeChainIndex::dropIds() {
+    std::vector<uint64_t>().swap(seenIds_); std::vector<uint64_t>().swap(repeatedIds_); idsEnd_ = 0;
+    std::vector<std::pair<uint64_t, uint64_t>>().swap(copies_); copiesDropped_ = false; copiesSorted_ = true;
+}
+
 std::optional<ClaudeChainIndex::Entry> ClaudeChainIndex::parent(JsonlReader& reader, const Entry& node,
         const std::function<bool()>& cancelled) {
-    auto result = latest(reader, node.parent, cancelled);
+    auto result = latest(reader, node.parent, cancelled, node.start);
     if (pi_ && !node.parent.empty() && (!result || result->start >= node.start)) throw std::runtime_error("piChainUnproven");
     return result;
 }
@@ -227,7 +351,7 @@ std::optional<ClaudeChainIndex::Entry> ClaudeChainIndex::effectiveParent(JsonlRe
     };
     if (state.phase == 1) {
         std::optional<Entry> logical;
-        if (!node.logicalParent.empty()) logical = latest(reader, node.logicalParent, cancelled);
+        if (!node.logicalParent.empty()) logical = latest(reader, node.logicalParent, cancelled, node.start);
         if (logical && logical->start < node.start) { state = {}; return logical; }
         state.phase = appended(logical) ? 4 : 2;
     }
@@ -241,7 +365,7 @@ std::optional<ClaudeChainIndex::Entry> ClaudeChainIndex::effectiveParent(JsonlRe
     for (;;) {
         checkCancelled(cancelled);
         if (state.phase == 3) {
-            const auto current = latest(reader, state.candidate->id, cancelled);
+            const auto current = latest(reader, state.candidate->id, cancelled, state.candidate->end);
             if (current && current->start == state.candidate->start) { auto result = std::move(state.candidate); state = {}; return result; }
             if (appended(current)) *revised = true;
             state.position = state.candidate->start; state.candidate.reset(); state.phase = 2;
@@ -265,6 +389,7 @@ std::optional<ClaudeChainIndex::Entry> ClaudeChainIndex::displayParent(JsonlRead
 
 void ClaudeChainIndex::refresh(JsonlReader& reader, const std::function<bool()>& cancelled, size_t budget, bool pi,
         const std::string& expectedSessionID) {
+    MetadataReads metadata(reader, pi);
     if (budget < budget_) {
         if (!lazy_ && entries_.capacity() > compactCapacity(budget)) { demote(); dirty_ = true; }
         if (linearBuild_.bloom.capacity() * sizeof(uint64_t) > std::max<size_t>(64, budget / 2) ||
@@ -272,11 +397,21 @@ void ClaudeChainIndex::refresh(JsonlReader& reader, const std::function<bool()>&
             linearBuild_ = {}; lookup_ = {}; boundaryLookup_ = {}; std::vector<CachedEntry>().swap(checkpoints_);
             linear_ = false; dirty_ = true;
         }
+        // The build, its UUID filters and walk checkpoints stay, shrunk to fit.
+        foldBloom(seenIds_, idWords(budget)); foldBloom(repeatedIds_, idWords(budget));
+        if (copies_.capacity() > copyLimit(budget)) {
+            if (copies_.size() > copyLimit(budget)) { copiesDropped_ = true; std::vector<std::pair<uint64_t, uint64_t>>().swap(copies_); }
+            else copies_.shrink_to_fit();
+        }
+        if (lookup_.copies && copiesDropped_) lookup_ = {};
+        const auto copyBytes = copies_.capacity() * sizeof(copies_[0]);
+        if (copyBytes + lateMax_.capacity() * sizeof(uint64_t) > spareBytes(budget)) { std::vector<uint64_t>().swap(lateMax_); lateKnown_ = false; }
+        if (copyBytes + build_.late.capacity() * sizeof(uint64_t) > spareBytes(budget)) { std::vector<uint64_t>().swap(build_.late); build_.lateDropped = true; }
+        thinCheckpoints(checkpointLimit(budget));
         std::vector<CachedEntry>().swap(window_); buildingWindow_ = false;
     }
     budget_ = budget;
-    const auto validation = reader.validatePrefix(validation_, SourceValidation::defaultSlice, SourceValidation::Clock::now(), position_);
-    if (!validation.ready) throw std::runtime_error("readPending");
+    auto validation = reader.validatePrefix(validation_, position_);
     uint64_t headerWitness = 0;
     unsigned headerVersion = 0;
     if (pi) {
@@ -290,7 +425,10 @@ void ClaudeChainIndex::refresh(JsonlReader& reader, const std::function<bool()>&
     }
     if (validatedRevision_ != validation.revision || identity_ != reader.identity() || position_ > reader.size() ||
         (pi && headerWitness_ != headerWitness) || (pi && piVersion_ && piVersion_ != headerVersion) ||
-        (position_ && reader.anchor(position_) != witness_)) {
+        (position_ && reader.anchor(position_) != witness_) || contradicted_) {
+        // A change the stat did not show retires what continuations hold for
+        // the old revision.
+        if (validatedRevision_ == validation.revision) { validation_.invalidate(); validation = reader.validatePrefix(validation_); }
         auto savedValidation = std::move(validation_);
         *this = ClaudeChainIndex(); validation_ = std::move(savedValidation);
         validatedRevision_ = validation.revision; identity_ = reader.identity();
@@ -553,7 +691,7 @@ void ClaudeChainIndex::demote() {
     std::vector<Compact>().swap(entries_); std::vector<uint64_t>().swap(selected_);
     std::vector<Identity>().swap(identities_); std::vector<uint64_t>().swap(dangling_);
     builtCount_ = 0; builtMainNode_ = absent; builtDangling_ = 0; compactFrom_ = 0; recent_ = {}; recentNext_ = 0;
-    linearBuild_ = {}; build_ = {}; lookup_ = {}; boundaryLookup_ = {};
+    linearBuild_ = {}; build_ = {}; lookup_ = {}; boundaryLookup_ = {}; dropIds();
 }
 
 bool ClaudeChainIndex::selectedLinear(const Entry& entry) const {
@@ -572,22 +710,7 @@ bool ClaudeChainIndex::proveLinear(JsonlReader& reader, const std::function<bool
         if (!pi_ || piVersion_ != 1) state.bloom.assign(words, 0);
         std::vector<CachedEntry>().swap(checkpoints_);
     }
-    auto bits = [&](const std::string& id, bool insert) {
-        if (state.bloom.empty()) return false;
-        const auto mask = state.bloom.size() * 64 - 1;
-        uint64_t hash = identityHash(id); bool present = true;
-        for (unsigned i = 0; i < 7; ++i) {
-            // Independent mixed positions keep sequential synthetic IDs from
-            // concentrating in adjacent bits. Collisions never imply equality.
-            hash += 0x9e3779b97f4a7c15ULL;
-            auto mixed = hash; mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ULL;
-            mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebULL; mixed ^= mixed >> 31;
-            const auto bit = mixed & mask, value = uint64_t(1) << (bit & 63);
-            present = present && (state.bloom[bit / 64] & value);
-            if (insert) state.bloom[bit / 64] |= value;
-        }
-        return present;
-    };
+    auto bits = [&](const std::string& id, bool insert) { return bloomBits(state.bloom, id, insert); };
     auto accept = [&] {
         const auto& value = *state.candidate;
         bits(value.id, true);
@@ -687,17 +810,22 @@ ClaudeChainIndex::Entry ClaudeChainIndex::linearEntry(JsonlReader& reader, size_
         linearPagePosition_ = value.start; linearPageOrdinal_ = value.ordinal;
         window_.clear(); window_.reserve(capacity); windowBegin_ = begin; windowEnd_ = end; buildingWindow_ = true;
     }
-    while (linearPageOrdinal_ < end && linearPagePosition_ < position_) {
-        checkCancelled(cancelled);
-        const auto page = reader.page(linearPagePosition_, true, 100);
-        if (page.records.empty()) throw std::runtime_error("claudeIndexNoProgress");
-        for (const auto& record : page.records) {
-            if (selectedLinear(decode(record))) {
-                if (linearPageOrdinal_ >= begin && linearPageOrdinal_ < end) window_.push_back({linearPageOrdinal_, record.start, record.end});
-                ++linearPageOrdinal_;
+    {
+        // The walk reads chain fields only; the entry it finds is read by
+        // default, which the page's content read then reuses.
+        MetadataReads metadata(reader, pi_);
+        while (linearPageOrdinal_ < end && linearPagePosition_ < position_) {
+            checkCancelled(cancelled);
+            const auto page = reader.page(linearPagePosition_, true, 100);
+            if (page.records.empty()) throw std::runtime_error("claudeIndexNoProgress");
+            for (const auto& record : page.records) {
+                if (selectedLinear(decode(record))) {
+                    if (linearPageOrdinal_ >= begin && linearPageOrdinal_ < end) window_.push_back({linearPageOrdinal_, record.start, record.end});
+                    ++linearPageOrdinal_;
+                }
+                linearPagePosition_ = record.end;
+                if (linearPageOrdinal_ >= end) break;
             }
-            linearPagePosition_ = record.end;
-            if (linearPageOrdinal_ >= end) break;
         }
     }
     buildingWindow_ = false;
@@ -711,12 +839,25 @@ void ClaudeChainIndex::rebuildLazy(JsonlReader& reader, const std::function<bool
     // an ever-growing prefix until its deadline expires.
     auto& state = build_;
     if (!state.phase) {
-        state = {}; state.phase = 1; state.scan = position_; state.oldTail = tail_;
+        state = {}; state.phase = idsEnd_ < position_ ? 12 : 1; state.scan = position_; state.oldTail = tail_;
         state.oldCount = selectedCount_; state.oldTailFound = !tail_;
     }
     while (state.phase != 10) {
         checkCancelled(cancelled);
-        if (state.phase == 1) {
+        if (state.phase == 12) {
+            // First, the UUIDs any lookup below may meet: those appended
+            // since the last build, or all after a demotion.
+            if (idsEnd_ >= position_) { state.phase = 1; continue; }
+            if (!idsEnd_) { seenIds_.assign(idWords(budget_), 0); repeatedIds_.assign(idWords(budget_), 0); }
+            const auto page = reader.page(idsEnd_, true, 100);
+            if (page.records.empty()) throw std::runtime_error("claudeIndexNoProgress");
+            for (const auto& record : page.records) {
+                if (record.start >= position_) break;
+                const auto value = decode(record);
+                if (value.node && bloomBits(seenIds_, value.id, true)) { bloomBits(repeatedIds_, value.id, true); keepCopy(value.id, record.start); }
+                idsEnd_ = record.end;
+            }
+        } else if (state.phase == 1) {
             if (!state.scan) {
                 if (!pi_ && !state.bestTerminal && state.authored) throw std::runtime_error("claudeIndexUnproven");
                 state.current = state.bestTerminal; state.count = pi_ ? (physicalCount_ ? 1 : 0) : metadataCount_;
@@ -744,7 +885,7 @@ void ClaudeChainIndex::rebuildLazy(JsonlReader& reader, const std::function<bool
             if (!better && state.bestLeaf) { state.scan = state.candidate->start; state.phase = 1; continue; }
             state.phase = 3;
         } else if (state.phase == 3) {
-            const auto current = latest(reader, state.candidate->id, cancelled);
+            const auto current = latest(reader, state.candidate->id, cancelled, state.candidate->end);
             const bool newest = current && current->start == state.candidate->start;
             if (pi_) {
                 if (!newest) throw std::runtime_error("piDuplicateEntryID");
@@ -771,7 +912,7 @@ void ClaudeChainIndex::rebuildLazy(JsonlReader& reader, const std::function<bool
             }
             if (!possibleChild) continue;
         } else if (state.phase == 5) {
-            const auto child = latest(reader, state.child->id, cancelled);
+            const auto child = latest(reader, state.child->id, cancelled, state.child->end);
             if (child && child->start == state.child->start) {
                 state.scan = state.candidate->start; state.phase = 1;
             } else { state.childScan = state.child->end; state.phase = 4; }
@@ -813,7 +954,18 @@ void ClaudeChainIndex::rebuildLazy(JsonlReader& reader, const std::function<bool
                 state.oldTail && state.oldTailFound ? &state.revised : nullptr);
             state.crossed = state.crossed || (!pi_ && current.boundary && current.parent.empty());
             if (state.crossed && next && next->start >= state.minimum) { next.reset(); state.cut = current.start; }
-            if (next && next->start >= current.start) state.monotone = false;
+            if (next && next->start >= current.start) {
+                state.monotone = false;
+                // Kept in what the copies leave of the spare bytes.
+                const auto limit = spareBytes(budget_) - std::min(spareBytes(budget_), copies_.capacity() * sizeof(copies_[0]));
+                if (!state.lateDropped && (state.late.size() + 1) * sizeof(uint64_t) > limit) {
+                    state.lateDropped = true; std::vector<uint64_t>().swap(state.late);
+                } else if (!state.lateDropped) {
+                    if (state.late.size() == state.late.capacity())
+                        state.late.reserve(std::min(limit / sizeof(uint64_t), std::max<size_t>(16, state.late.size() * 2)));
+                    state.late.push_back(next->start);
+                }
+            }
             state.current = std::move(next); state.phase = 8;
         } else if (state.phase == 11) {
             if (state.metadataScan >= publishedEnd_) { state.phase = 10; continue; }
@@ -835,8 +987,10 @@ void ClaudeChainIndex::rebuildLazy(JsonlReader& reader, const std::function<bool
     if (state.oldCount && (!state.prefix || !state.oldTailFound || state.count < state.oldCount))
         generation_ = std::string(pi_ ? "pi-chain:" : "claude-chain:") + randomID();
     tail_ = state.bestTerminal; selectedCount_ = state.count; monotonePath_ = state.monotone; linear_ = false;
+    lateKnown_ = !state.monotone && !state.lateDropped; lateMax_ = lateKnown_ ? std::move(state.late) : std::vector<uint64_t>();
+    for (size_t i = lateMax_.size(); i > 1; --i) lateMax_[i - 2] = std::max(lateMax_[i - 2], lateMax_[i - 1]);
     pathMaximum_ = state.maximum; cutStart_ = state.cut; pathEnd_ = state.last; state = {}; lookup_ = {}; boundaryLookup_ = {};
-    std::vector<CachedEntry>().swap(window_); buildingWindow_ = false; maximumActive_ = false; resetCursor();
+    std::vector<CachedEntry>().swap(window_); buildingWindow_ = false; maximumActive_ = false; lazyCheckpoints_.clear(); resetCursor();
 }
 
 uint64_t ClaudeChainIndex::ancestryMaximum(JsonlReader& reader, const std::optional<Entry>& node,
@@ -858,6 +1012,40 @@ void ClaudeChainIndex::resetCursor() {
     maximumActive_ = false; maximumCurrent_.reset(); lookup_.active = false; boundaryLookup_ = {};
 }
 
+void ClaudeChainIndex::resumeCursor(uint64_t end) {
+    const auto found = lazyCheckpoints_.lower_bound(end);
+    if (found == lazyCheckpoints_.end()) { resetCursor(); return; }
+    // Lookups and the ancestry maximum resume by their own keys; restarted,
+    // they find the same values.
+    cursor_ = found->second;
+    maximumActive_ = false; maximumCurrent_.reset(); lookup_.active = false; boundaryLookup_ = {};
+}
+
+size_t ClaudeChainIndex::checkpointLimit(size_t budget) {
+    // A sixteenth of the budget at most, a few hundred bytes each.
+    return std::clamp<size_t>(budget / 16 / 512, 2, lazyCheckpointLimit);
+}
+
+void ClaudeChainIndex::thinCheckpoints(size_t keep) {
+    if (!keep || lazyCheckpoints_.size() <= keep) return;
+    // Evenly spread survivors, as many as fit.
+    const auto stride = (lazyCheckpoints_.size() + keep - 1) / keep;
+    size_t index = 0;
+    for (auto value = lazyCheckpoints_.begin(); value != lazyCheckpoints_.end(); ++index)
+        value = index % stride ? lazyCheckpoints_.erase(value) : std::next(value);
+}
+
+void ClaudeChainIndex::keepCheckpoint() {
+    // Kept no closer than a full set spaced evenly: halving them as they
+    // arrived would leave the oldest part of a walk the sparsest.
+    const uint64_t limit = checkpointLimit(budget_), spacing = (selectedCount_ + limit - 2) / (limit - 1);
+    const auto next = lazyCheckpoints_.lower_bound(cursor_.remaining);
+    if ((next != lazyCheckpoints_.end() && next->first - cursor_.remaining < spacing) ||
+        (next != lazyCheckpoints_.begin() && cursor_.remaining - std::prev(next)->first < spacing)) return;
+    thinCheckpoints(limit - 1);
+    lazyCheckpoints_[cursor_.remaining] = cursor_;
+}
+
 std::optional<ClaudeChainIndex::CachedEntry> ClaudeChainIndex::nextLazy(JsonlReader& reader,
         const std::function<bool()>& cancelled) {
     while (cursor_.remaining) {
@@ -872,15 +1060,19 @@ std::optional<ClaudeChainIndex::CachedEntry> ClaudeChainIndex::nextLazy(JsonlRea
         }
         if (cursor_.emitNode) {
             const auto value = *cursor_.node; cursor_.node = displayParent(reader, value, cancelled);
+            if (cursor_.node && cursor_.node->start >= value.start) ++cursor_.late;
             cursor_.emitNode = false; cursor_.thresholdKnown = false;
             if (!value.message || value.main) return CachedEntry{--cursor_.remaining, value.start, value.end};
             continue;
         }
-        // A full ancestry walk on a non-monotone path: recomputing it for
-        // each metadata record, or after a yielded page read, could consume
-        // every worker slice without progress.
+        // Without the late nodes, a full ancestry walk on a non-monotone
+        // path: recomputing it for each metadata record, or after a yielded
+        // page read, could consume every worker slice without progress.
         if (!cursor_.thresholdKnown) {
-            cursor_.threshold = ancestryMaximum(reader, cursor_.node, cancelled); cursor_.thresholdKnown = true;
+            cursor_.threshold = lateKnown_ && cursor_.node ?
+                std::max(cursor_.node->start, cursor_.late < lateMax_.size() ? lateMax_[cursor_.late] : 0) :
+                ancestryMaximum(reader, cursor_.node, cancelled);
+            cursor_.thresholdKnown = true;
         }
         const auto threshold = cursor_.threshold;
         while (cursor_.metadataEnd && (threshold == absent || cursor_.metadataEnd > threshold)) {
@@ -912,8 +1104,9 @@ ClaudeChainIndex::Entry ClaudeChainIndex::entry(JsonlReader& reader, size_t ordi
         const auto& storedParent = boundary ? result.logicalParent : result.parent;
         if (identityHash(result.id) != value.hash || recordFlags(result) != (value.flags & persistentFlags) ||
             (value.parent != absent && (!boundary || (value.flags & logicalFlag)) &&
-             identityHash(storedParent) != entries_[value.parent].hash))
-            throw std::runtime_error("sourceChanged");
+             identityHash(storedParent) != entries_[value.parent].hash)) {
+            contradicted_ = true; throw std::runtime_error("sourceChanged");
+        }
         return result;
     }
     for (const auto& value : window_) if (value.ordinal == ordinal) return readEntry(reader, value.start, value.end);
@@ -922,14 +1115,21 @@ ClaudeChainIndex::Entry ClaudeChainIndex::entry(JsonlReader& reader, size_t ordi
     const auto capacity = std::max<size_t>(1, std::min<size_t>(300, budget_ > sizeof(*this) ? (budget_ - sizeof(*this)) / (2 * sizeof(CachedEntry)) : 1));
     const auto begin = ordinal / capacity * capacity, end = std::min<size_t>(selectedCount_, begin + capacity);
     if (!buildingWindow_ || windowBegin_ != begin || windowEnd_ != end) {
-        if (cursor_.remaining < end) resetCursor();
+        if (cursor_.remaining < end) resumeCursor(end);
         window_.clear(); window_.reserve(capacity);
         windowBegin_ = begin; windowEnd_ = end; buildingWindow_ = true;
     }
-    while (cursor_.remaining > begin) {
-        const auto value = nextLazy(reader, cancelled);
-        if (!value) break;
-        if (value->ordinal < end) window_.push_back(*value);
+    {
+        // The walk reads chain fields only; the entry it finds is read by
+        // default, which the page's content read then reuses.
+        MetadataReads metadata(reader, pi_);
+        while (cursor_.remaining > begin) {
+            const auto value = nextLazy(reader, cancelled);
+            if (!value) break;
+            if (value->ordinal < end) window_.push_back(*value);
+            // At 0 the walk is done: nothing resumes there.
+            if (cursor_.remaining && cursor_.remaining % capacity == 0) keepCheckpoint();
+        }
     }
     buildingWindow_ = false;
     for (const auto& value : window_) if (value.ordinal == ordinal) return readEntry(reader, value.start, value.end);

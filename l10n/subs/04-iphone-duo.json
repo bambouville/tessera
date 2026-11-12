@@ -1,0 +1,53 @@
+{
+  "terminal grid %lld columns, %lld rows": {
+    "en": {
+      "value": "terminal grid %#@columns@, %#@rows@",
+      "subs": {
+        "columns": { "argNum": 1, "one": "%lld column", "other": "%lld columns" },
+        "rows": { "argNum": 2, "one": "%lld row", "other": "%lld rows" }
+      }
+    },
+    "de": {
+      "value": "Terminalraster: %#@columns@, %#@rows@",
+      "subs": {
+        "columns": { "argNum": 1, "one": "%lld Spalte", "other": "%lld Spalten" },
+        "rows": { "argNum": 2, "one": "%lld Zeile", "other": "%lld Zeilen" }
+      }
+    },
+    "es": {
+      "value": "cuadrícula del terminal: %#@columns@, %#@rows@",
+      "subs": {
+        "columns": { "argNum": 1, "one": "%lld columna", "other": "%lld columnas" },
+        "rows": { "argNum": 2, "one": "%lld fila", "other": "%lld filas" }
+      }
+    },
+    "fr": {
+      "value": "grille du terminal : %#@columns@, %#@rows@",
+      "subs": {
+        "columns": { "argNum": 1, "one": "%lld colonne", "other": "%lld colonnes" },
+        "rows": { "argNum": 2, "one": "%lld ligne", "other": "%lld lignes" }
+      }
+    },
+    "ja": {
+      "value": "ターミナルのグリッド、%#@columns@、%#@rows@",
+      "subs": {
+        "columns": { "argNum": 1, "other": "%lld 列" },
+        "rows": { "argNum": 2, "other": "%lld 行" }
+      }
+    },
+    "zh-Hans": {
+      "value": "终端网格，%#@columns@，%#@rows@",
+      "subs": {
+        "columns": { "argNum": 1, "other": "%lld 列" },
+        "rows": { "argNum": 2, "other": "%lld 行" }
+      }
+    },
+    "zh-Hant": {
+      "value": "終端機格線，%#@columns@，%#@rows@",
+      "subs": {
+        "columns": { "argNum": 1, "other": "%lld 欄" },
+        "rows": { "argNum": 2, "other": "%lld 列" }
+      }
+    }
+  }
+}

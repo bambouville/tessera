@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -133,20 +134,22 @@ internal fun TunnelWebBrowserContent(
         ) {
             TesseraIconButton(
                 icon = TesseraIcons.ChevronLeft,
-                contentDescription = "back",
+                contentDescription = stringResource(R.string.forwarding_browser_back),
                 onClick = { webView?.goBack() },
                 enabled = state.canGoBack,
                 modifier = Modifier.testTag("tunnel-browser-back"),
             )
             TesseraIconButton(
                 icon = TesseraIcons.ChevronRight,
-                contentDescription = "forward",
+                contentDescription = stringResource(R.string.forwarding_browser_forward),
                 onClick = { webView?.goForward() },
                 enabled = state.canGoForward,
             )
             TesseraIconButton(
                 icon = if (state.isLoading) TesseraIcons.Close else TesseraIcons.Refresh,
-                contentDescription = if (state.isLoading) "stop" else "reload",
+                contentDescription = stringResource(
+                    if (state.isLoading) R.string.forwarding_browser_stop else R.string.forwarding_browser_reload,
+                ),
                 onClick = {
                     val view = webView ?: return@TesseraIconButton
                     if (state.isLoading) view.stopLoading() else reload(view, state)
@@ -161,7 +164,7 @@ internal fun TunnelWebBrowserContent(
             )
 
             TesseraButton(
-                text = "done",
+                text = stringResource(R.string.forwarding_browser_done),
                 onClick = onDismiss,
                 style = TesseraButtonStyle.Primary,
                 compact = true,
@@ -256,7 +259,7 @@ private fun Failure(failure: String, onRetry: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("this tunnel did not answer", style = TesseraType.section, color = tokens.fg)
+            Text(stringResource(R.string.forwarding_browser_no_answer), style = TesseraType.section, color = tokens.fg)
             Text(
                 text = failure,
                 style = TesseraType.rowMicro,
@@ -264,13 +267,13 @@ private fun Failure(failure: String, onRetry: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = "check that the rule is listening and that the remote service is up.",
+                text = stringResource(R.string.forwarding_browser_check_rule),
                 style = TesseraType.rowMicro,
                 color = tokens.fgDim,
                 textAlign = TextAlign.Center,
             )
             TesseraButton(
-                text = "retry",
+                text = stringResource(R.string.forwarding_browser_retry),
                 onClick = onRetry,
                 style = TesseraButtonStyle.Primary,
                 compact = true,
@@ -335,7 +338,7 @@ private fun buildWebView(
             // only a failed main document means there is no page to show.
             if (!request.isForMainFrame) return
             state.isLoading = false
-            state.failure = error.description?.toString() ?: "the connection failed"
+            state.failure = error.description?.toString() ?: context.getString(R.string.forwarding_browser_connection_failed)
             sync(view)
         }
 

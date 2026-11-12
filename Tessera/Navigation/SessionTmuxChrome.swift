@@ -8,6 +8,7 @@ import TmuxControlCore
 import PortForwarding
 import UIKit
 import GameController
+import Combine
 
 enum MoshTcpControlStatus: Equatable {
     case connected
@@ -299,6 +300,15 @@ struct TmuxTabCloseButtonStyle: ButtonStyle {
     }
 }
 
+extension AgentCenterV2Coordinator {
+    /// The shared window label rule, given the agent on the active pane.
+    func windowLabel(_ window: TmuxController.WindowInfo, sessionID: UUID) -> String {
+        window.agentDisplayName(agentProvider: (window.activePaneId ?? window.activePane?.id).flatMap {
+            paneAgentProvider(sessionID: sessionID, paneID: $0.rawValue)
+        })
+    }
+}
+
 struct SessionTopBar: View {
     private enum PendingContinuityAction {
         case continueSession
@@ -357,6 +367,10 @@ struct SessionTopBar: View {
     /// thing the ⌘D path does. SSH mounts real pane views and needs nothing,
     /// so it leaves this nil.
     var onTmuxPaneMutation: (() -> Void)? = nil
+    var railMode = false
+    var terminalColumns: Int? = nil
+    var terminalRows: Int? = nil
+    var railSwitcher: SessionRailSwitcher? = nil
     @State private var statusBreakdownVisible = false
     @State private var continuityPopoverVisible = false
     @State private var attentionPopoverVisible = false
@@ -417,6 +431,8 @@ struct SessionTopBar: View {
     @Environment(SessionRegistry.self) private var sessionRegistry
     @Environment(CommandPalette.self) private var commandPalette
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.duoWorkspace) private var duoWorkspace
+    @Environment(\.duoPanesOverPicture) private var duoPanesOverPicture
 
     private var isPhone: Bool {
         CompactLayout.isPhone(horizontalSizeClass)
@@ -445,10 +461,13 @@ struct SessionTopBar: View {
     /// the pill itself plus its top and bottom gaps. The session views key
     /// their `.frame(height:)` and the banner / swipe-pad top offsets off
     /// this so everything tracks the user's `topBarHeight` slider together.
-    static func reservedHeight(pillHeight: Double, compact: Bool) -> CGFloat {
+    static func reservedHeight(pillHeight: Double, compact: Bool, railMode: Bool = false) -> CGFloat {
         let visualHeight: CGFloat = compact ? 44 : CGFloat(pillHeight)
         let interactionHeight = max(44, visualHeight)
-        return max(visualHeight + floatTopInset + floatBottomInset, interactionHeight)
+        return SessionRailPolicy.reservedHeight(
+            railMode: railMode,
+            regularHeight: max(visualHeight + floatTopInset + floatBottomInset, interactionHeight)
+        )
     }
 
     private var visualBarHeight: CGFloat {
@@ -588,7 +607,9 @@ struct SessionTopBar: View {
                     manager: forwarderManager,
                     scale: scale,
                     T: T,
-                    monitorsServices: sessionIsActive && appPhase.isActive
+                    monitorsServices: sessionIsActive && appPhase.isActive,
+                    hostID: host.id,
+                    sessionID: sessionID
                 )
             }
 
@@ -685,7 +706,13 @@ struct SessionTopBar: View {
     }
 
     var body: some View {
-        styledBar
+        Group {
+            if railMode {
+                paneHeader
+            } else {
+                styledBar
+            }
+        }
         // iPadOS reserves the top edge for moving the app window. While the
         // tmux strip is present, let its native hold/scroll recognizers see
         // the first gesture there; the system gesture remains available via
@@ -698,6 +725,7 @@ struct SessionTopBar: View {
                 : []
         )
         .onChange(of: compactTmuxPaletteSyncKey, initial: true) { _, snapshot in
+            publishRailSwitcher()
             sessionRegistry.setTmuxPaletteSnapshot(snapshot, for: sessionID)
             refreshOpenCompactPalette()
         }
@@ -709,12 +737,14 @@ struct SessionTopBar: View {
         }
         .task(id: integrationWarningDue) { await settleIntegrationWarning() }
         .onChange(of: compactIntegrationNotice) { _, notice in
+            publishRailSwitcher()
             guard isPhone,
                   commandPalette.isOpen,
                   commandPalette.currentSessionID == sessionID
             else { return }
             commandPalette.refreshNotice(notice)
         }
+        .onDisappear { railSwitcher?.open = {} }
         .onChange(of: tmux.gridAuthority.isPeer) { _, yielded in
             guard yielded else { return }
             findController.close()
@@ -726,6 +756,7 @@ struct SessionTopBar: View {
             cancelWindowReorder()
         }
         .onAppear {
+            publishRailSwitcher()
             #if DEBUG
             if ProcessInfo.processInfo.environment["TESSERA_IPHONE_SESSION_HARNESS_MODE"] == "integration-popover" {
                 integrationPopoverVisible = true
@@ -823,7 +854,7 @@ struct SessionTopBar: View {
             guard let error, !error.isEmpty else { return }
             windowOrderErrorTask?.cancel()
             withAnimation(.easeOut(duration: 0.18)) {
-                windowOrderErrorMessage = NSLocalizedString(error, comment: "tmux window ordering failure")
+                windowOrderErrorMessage = error
             }
             windowOrderErrorTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(3.5))
@@ -912,6 +943,90 @@ struct SessionTopBar: View {
         }
     }
 
+    private var paneHeader: some View {
+        HStack(spacing: 10) {
+            hostStatusButton {
+                HStack(spacing: 6) {
+                    AttentionStatusDot(
+                        color: statusDotColor,
+                        attention: compactIntegrationNotice != nil,
+                        attentionColor: T.amber
+                    )
+                    Text(verbatim: host.name.isEmpty ? host.address : host.name)
+                        .foregroundStyle(T.fg)
+                        .lineLimit(1)
+                }
+                .chromeBarTextCap()
+            }
+            .accessibilityIdentifier("duo-session-status")
+
+            Text(verbatim: paneHeaderTransport)
+                .foregroundStyle(T.fgMuted)
+                .chromeBarTextCap()
+                .accessibilityIdentifier("duo-session-transport")
+
+            Spacer(minLength: 0)
+
+            if let terminalColumns, let terminalRows {
+                Text(verbatim: "\(terminalColumns) × \(terminalRows)")
+                    .monospacedDigit()
+                    .foregroundStyle(T.fgDim)
+                    .chromeBarTextCap()
+                    .accessibilityLabel("terminal grid \(terminalColumns) columns, \(terminalRows) rows")
+                    .accessibilityIdentifier("duo-session-grid")
+            }
+
+            if let duoWorkspace, duoWorkspace.offersFullScreen {
+                Button(action: duoWorkspace.toggleFullScreen) {
+                    Label(
+                        duoWorkspace.isFullScreen ? "exit full screen" : "full screen",
+                        systemImage: duoWorkspace.isFullScreen
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right"
+                    )
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(T.fgMuted)
+                    .frame(width: 28, height: SessionRailPolicy.paneHeaderHeight)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .windowTopTapTarget(duoWorkspace.toggleFullScreen)
+                .accessibilityIdentifier("duo-session-full-screen")
+            }
+        }
+        .font(Typography.tesseraMono(size: 10.5, weight: .medium))
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+        .frame(height: SessionRailPolicy.paneHeaderHeight)
+        .background { paneHeaderSurface }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(T.border).frame(height: 0.5)
+        }
+        .accessibilityIdentifier("duo-session-pane-header")
+    }
+
+    /// Over the session's picture the header frosts it, as the context's
+    /// header beside it does, so the picture runs under both bars.
+    @ViewBuilder
+    private var paneHeaderSurface: some View {
+        if duoPanesOverPicture {
+            T.sidebarBg
+                .background(.regularMaterial)
+                .environment(\.colorScheme, T.isLight ? .light : .dark)
+        } else {
+            T.bg.opacity(0.94)
+        }
+    }
+
+    private var paneHeaderTransport: String {
+        let transport: String
+        switch connectionStatus {
+        case .ssh: transport = "ssh"
+        case .mosh: transport = "mosh"
+        }
+        return tmux.mode == .tmuxControl ? transport + "+tmux" : transport
+    }
+
     private var compactBarCore: some View {
         compactBarContent
     }
@@ -983,7 +1098,9 @@ struct SessionTopBar: View {
             CompactForwardingStatusButton(
                 manager: forwarderManager,
                 T: T,
-                monitorsServices: sessionIsActive && appPhase.isActive
+                monitorsServices: sessionIsActive && appPhase.isActive,
+                hostID: host.id,
+                sessionID: sessionID
             )
             if let continuityActions {
                 compactContinuityButton(actions: continuityActions)
@@ -1116,6 +1233,13 @@ struct SessionTopBar: View {
         }
     }
 
+    private func publishRailSwitcher() {
+        // Do not let the stored opener retain its own holder through this view.
+        var chrome = self
+        chrome.railSwitcher = nil
+        railSwitcher?.open = chrome.openCompactSwitcher
+    }
+
     private func openCompactSwitcher() {
         let sync = compactTmuxPaletteSyncKey
         let activeTitle = sync.activeWindowID.flatMap { activeID in
@@ -1211,18 +1335,19 @@ struct SessionTopBar: View {
     private func closeConfirmationMessage(
         for window: TmuxController.WindowInfo
     ) -> String {
+        let name = agentCenterV2.windowLabel(window, sessionID: sessionID)
         guard window.paneCount > 1 else {
             // Reachable only while the window's details query is in flight:
             // the pane count is still a guess (link-window/move-window can
             // add an already-split window), so the close fails closed with
             // a generic confirmation instead of a promptless kill.
             return String(
-                localized: "“\(window.name)” is still syncing its pane layout. Closing this window will close every pane it contains.",
+                localized: "“\(name)” is still syncing its pane layout. Closing this window will close every pane it contains.",
                 comment: "Close confirmation while the pane count is still unknown."
             )
         }
         return String(
-            localized: "“\(window.name)” contains \(window.paneCount) panes. Closing this window will close every pane in it.",
+            localized: "“\(name)” contains \(window.paneCount) panes. Closing this window will close every pane in it.",
             comment: "Close confirmation. Pluralized on the pane count."
         )
     }
@@ -1809,7 +1934,7 @@ struct SessionTopBar: View {
         isActive: Bool,
         isDegraded: Bool
     ) -> some View {
-        let name = window.name
+        let name = agentCenterV2.windowLabel(window, sessionID: sessionID)
         let windowID = window.id.rawValue
         let hasPendingBell = appearance.bellVisualEnabled
             && !isActive
@@ -2017,16 +2142,17 @@ struct SessionTopBar: View {
         position: Int,
         status: String? = nil
     ) -> String {
+        let name = agentCenterV2.windowLabel(window, sessionID: sessionID)
         guard let index = window.index, index != position else {
-            guard let status else { return String(localized: "\(window.name), window \(position)") }
+            guard let status else { return String(localized: "\(name), window \(position)") }
             return String(
-                localized: "\(window.name), window \(position), \(status)",
+                localized: "\(name), window \(position), \(status)",
                 comment: "tmux tab for VoiceOver. Arguments: window name, position, attention words."
             )
         }
-        guard let status else { return String(localized: "\(window.name), window \(position), tmux index \(index)") }
+        guard let status else { return String(localized: "\(name), window \(position), tmux index \(index)") }
         return String(
-            localized: "\(window.name), window \(position), tmux index \(index), \(status)",
+            localized: "\(name), window \(position), tmux index \(index), \(status)",
             comment: "tmux tab for VoiceOver. Arguments: window name, position, tmux index, attention words."
         )
     }
@@ -2360,6 +2486,8 @@ struct SessionTopBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Duo's pane header sits flush with the window's top edge.
+        .windowTopTapTarget(isActive: railMode) { statusBreakdownVisible = true }
         .popover(
             isPresented: $statusBreakdownVisible,
             attachmentAnchor: .rect(.bounds),
@@ -2508,6 +2636,62 @@ struct SessionAgentIntegrationWarningPopover: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Rail actions present from the session, independent of its pane header.
+struct SessionRailSheets: ViewModifier {
+    @Binding var forwardingPresented: Bool
+    @Binding var continuityPresented: Bool
+    let manager: PortForwarderManager?
+    let continuityActions: SessionContinuityActions?
+    let hostID: UUID
+    let sessionID: UUID
+    let sessionIsActive: Bool
+    let T: DesignTokens
+    @State private var pendingContinuityAction: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        content
+            // These sheets cover the docked context pane, so it stops counting its tab as seen.
+            .preference(
+                key: ArtifactCoveringSheetPreferenceKey.self,
+                value: sessionIsActive && (forwardingPresented || continuityPresented)
+            )
+            .sheet(isPresented: $forwardingPresented) {
+                ForwardingStatusSheet(manager: manager, readOnly: true, hostID: hostID, sessionID: sessionID)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $continuityPresented, onDismiss: performPendingContinuityAction) {
+                if let continuityActions {
+                    ContinuityActionPopover(
+                        T: T,
+                        onContinue: { stageContinuityAction(continuityActions.continueSession) },
+                        onSetUpAndContinue: { stageContinuityAction(continuityActions.setUpAndContinue) }
+                    )
+                    .presentationDetents([.height(144)])
+                    .presentationDragIndicator(.visible)
+                }
+            }
+            .onChange(of: sessionIsActive) { _, active in
+                guard !active else { return }
+                pendingContinuityAction = nil
+                forwardingPresented = false
+                continuityPresented = false
+            }
+    }
+
+    private func stageContinuityAction(_ action: @escaping () -> Void) {
+        pendingContinuityAction = action
+        continuityPresented = false
+    }
+
+    private func performPendingContinuityAction() {
+        let action = pendingContinuityAction
+        pendingContinuityAction = nil
+        guard sessionIsActive else { return }
+        action?()
     }
 }
 
@@ -3346,6 +3530,7 @@ struct TmuxWindowListPopover: View {
     }
 
     private func row(number: Int, window: TmuxController.WindowInfo) -> some View {
+        let name = agentCenterV2.windowLabel(window, sessionID: sessionID)
         let windowID = window.id.rawValue
         let isActive = window.id == tmux.activeWindowId
         // Agents and programs reporting OSC 7501 share one cue: the window's
@@ -3381,7 +3566,7 @@ struct TmuxWindowListPopover: View {
                             .accessibilityHidden(true)
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(window.name)
+                        Text(name)
                             .font(Typography.tesseraMono(size: 12.5, weight: isActive ? .medium : .regular))
                             .foregroundStyle(
                                 agentHasUnreadFinished && !isDegraded
@@ -3432,7 +3617,7 @@ struct TmuxWindowListPopover: View {
                 TmuxWindowInteractionSurface(
                     enabled: !isDegraded,
                     accessibilityLabel: windowRowAccessibilityLabel(
-                        name: window.name,
+                        name: name,
                         number: number,
                         tmuxIndex: window.index,
                         hasAgent: hasAgent,
@@ -3455,7 +3640,7 @@ struct TmuxWindowListPopover: View {
             // sparkle's state back in — a VoiceOver user scanning the list
             // for the window whose agent needs attention has no other signal.
             .accessibilityLabel(windowRowAccessibilityLabel(
-                name: window.name,
+                name: name,
                 number: number,
                 tmuxIndex: window.index,
                 hasAgent: hasAgent,
@@ -3465,7 +3650,7 @@ struct TmuxWindowListPopover: View {
             .accessibilityIdentifier("tmux-window-list-\(windowID)-row")
 
             TmuxTabCloseButton(
-                name: window.name,
+                name: name,
                 windowID: windowID,
                 isActive: isActive,
                 isAvailable: closeIsAvailable,
@@ -3778,6 +3963,15 @@ struct IPhoneKeyboardHarnessView: View {
                 .accessibilityIdentifier("iphone-keyboard-state")
                 .accessibilityValue(oracle.isVisible ? "visible" : "hidden")
         }
+        .overlay(alignment: .leading) {
+            let top = oracle.keyboardTop.map { String(format: "%.1f", $0) } ?? "none"
+            Text(verbatim: "keyboard top \(top)")
+                .font(Typography.tesseraMono(size: 11, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.01))
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("iphone-keyboard-top")
+                .accessibilityValue(top)
+        }
         .overlay(alignment: .topTrailing) {
             let measuredRows = viewportLayoutGeneration == oracle.frameGeneration
                 ? String(viewportRows)
@@ -4026,6 +4220,8 @@ struct IPhoneKeyboardHarnessView: View {
 @Observable
 private final class IPhoneKeyboardHarnessOracle {
     private(set) var isVisible = false
+    /// The shown keyboard's top edge in screen points, as UIKit reports it.
+    private(set) var keyboardTop: CGFloat?
     private(set) var hideCount = 0
     private(set) var frameGeneration = 0
     private(set) var settledGeneration = 0
@@ -4046,8 +4242,9 @@ private final class IPhoneKeyboardHarnessOracle {
                 forName: UIResponder.keyboardDidShowNotification,
                 object: nil,
                 queue: .main
-            ) { [weak self] _ in
+            ) { [weak self] note in
                 self?.isVisible = true
+                self?.keyboardTop = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.minY
                 self?.settledGeneration += 1
             },
             center.addObserver(
@@ -4056,6 +4253,7 @@ private final class IPhoneKeyboardHarnessOracle {
                 queue: .main
             ) { [weak self] _ in
                 self?.isVisible = false
+                self?.keyboardTop = nil
                 self?.hideCount += 1
                 self?.settledGeneration += 1
             },
@@ -4544,7 +4742,7 @@ struct IPhoneCompanionHarnessView: View {
         let windows = tmux.windows.enumerated().map { position, window in
             CommandPaletteTmuxWindow(
                 id: window.id,
-                title: window.displayName,
+                title: window.agentDisplayName(agentProvider: nil),
                 renameSeed: window.windowName,
                 position: position,
                 tmuxIndex: window.index,

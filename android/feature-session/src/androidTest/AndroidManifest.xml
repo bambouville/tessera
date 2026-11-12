@@ -5,5 +5,13 @@
             android:authorities="${applicationId}.recovery" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/files_recovery_test_paths" />
         </provider>
+        <!-- Stands in for a screen reader, so Compose sends its accessibility events. -->
+        <service android:name="com.bambouville.tessera.feature.session.AnnouncementProbeService"
+            android:exported="false" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/announcement_probe" />
+        </service>
     </application>
 </manifest>

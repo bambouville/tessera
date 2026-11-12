@@ -152,7 +152,7 @@ final class AuthoritySessionTests: XCTestCase {
         XCTAssertEqual(h.session.mutationRefusal, .yielded)
     }
 
-    func test_aShowOverAPeerClaimsAndSettles() {
+    func test_aShowOverAPeerClaimsAndSettles() throws {
         var h = yielded()
         XCTAssertEqual(h.send(.shown(source: .show, stepAt: 1_000), at: 1_000), [.queryAuthority(id: 2)])
         XCTAssertEqual(h.session.presentation, .resuming(awaitingConnection: false))
@@ -161,7 +161,7 @@ final class AuthoritySessionTests: XCTestCase {
 
         let begun = claims(in: h.reply(Self.mac, at: 1_200))
         XCTAssertEqual(begun.map(\.reason), [.show])
-        let generation = try! XCTUnwrap(begun.first?.generation)
+        let generation = try XCTUnwrap(begun.first?.generation)
         XCTAssertEqual(h.session.geometryHold, .owner, "a claim owns geometry through its fence")
         XCTAssertEqual(h.session.presentation, .resuming(awaitingConnection: false))
         XCTAssertEqual(h.session.carriedShow(now: h.now), .init(source: .show, stepAt: 1_000), "the claim keeps the user's step")
@@ -384,6 +384,252 @@ final class AuthoritySessionTests: XCTestCase {
         XCTAssertNil(h.claim, "our stamp over a foreign grid must not claim")
         XCTAssertEqual(h.session.presentation, .veiled(peerName: TmuxStamplessPeer.displayName))
         XCTAssertEqual(h.session.geometryHold, .withheld)
+    }
+
+    // MARK: Owned grids kept across a relaunch (§6.9)
+
+    /// A relaunched process, our stamp still standing and the window at 92x38,
+    /// the grid this device owned before it died; the new viewport is 100x40.
+    private func relaunched(restoring records: [TmuxOwnedGeometryRecord]) -> Harness {
+        var h = Harness()
+        h.send(.restoreOwnedGeometry(records))
+        h.send(.attached)
+        h.send(.adoptShown)
+        h.send(.localSize(Self.size(100, 40)))
+        h.send(Self.window(1, Self.size(92, 38)))
+        h.send(.windowSizePolicyReplied(windowID: 1, raw: "latest"))
+        return h
+    }
+
+    func test_aRelaunchAtAGridOwnedUnderTheStandingStampReplaysWithoutAVeil() {
+        var h = relaunched(restoring: [
+            .init(generation: 2, sizes: [Self.size(120, 40)]),
+            .init(generation: 3, sizes: [Self.size(92, 38), Self.size(80, 24)]),
+        ])
+        XCTAssertEqual(h.reply(Self.mine), [
+            .authorityChanged(.mine(generation: 3)),
+            .releaseGeometry(.ownerReplay),
+        ], "still our window: one owner resize, no veil")
+        XCTAssertNil(h.claim)
+        XCTAssertEqual(h.session.presentation, .none)
+        XCTAssertEqual(h.session.geometryHold, .owner)
+        XCTAssertEqual(h.session.restoredOwnedGeometry, [], "decided: the other generation is gone")
+        let owned = [Self.size(92, 38), Self.size(80, 24), Self.size(100, 40)]
+        XCTAssertEqual(h.session.evidence.owned.sizes, owned, "the replay's own grid is owned next")
+        XCTAssertEqual(h.session.ownedGeometryRecord, .init(generation: 3, sizes: owned),
+                       "the adopted grids are kept again for the next relaunch")
+    }
+
+    func test_aRelaunchKeepsVeilingWhatNoStandingStampOwned() {
+        let otherGeneration = relaunched(restoring: [.init(generation: 2, sizes: [Self.size(92, 38)])])
+        let neverOwned = relaunched(restoring: [.init(generation: 3, sizes: [Self.size(80, 24)])])
+        for var h in [otherGeneration, neverOwned] {
+            XCTAssertEqual(h.reply(Self.mine), [.authorityChanged(stamplessPeer), .raiseStamplessPeer])
+            XCTAssertEqual(h.session.presentation, .veiled(peerName: TmuxStamplessPeer.displayName))
+            XCTAssertEqual(h.session.geometryHold, .withheld)
+            XCTAssertEqual(h.session.restoredOwnedGeometry, [])
+            XCTAssertNil(h.session.ownedGeometryRecord)
+        }
+    }
+
+    func test_aRestoreLandingAfterAHeldOwnReadDecidesIt() {
+        var h = Harness()
+        h.send(.attached)
+        h.send(.adoptShown)
+        h.send(.localSize(Self.size(100, 40)))
+        h.send(Self.window(1, Self.size(92, 38)))
+        XCTAssertEqual(h.reply(Self.mine), [], "no policy yet: held")
+        XCTAssertNotNil(h.session.query.held)
+        XCTAssertEqual(h.send(.restoreOwnedGeometry([.init(generation: 3, sizes: [Self.size(92, 38)])])), [
+            .authorityChanged(.mine(generation: 3)),
+            .releaseGeometry(.ownerReplay),
+        ])
+        XCTAssertNil(h.session.query.held)
+        XCTAssertEqual(h.session.presentation, .none)
+    }
+
+    func test_aLiveOwnStampAdoptsItsRecord() {
+        var h = Harness()
+        h.send(.restoreOwnedGeometry([
+            .init(generation: 3, sizes: [Self.size(92, 38)]),
+            .init(generation: 4, sizes: []),
+        ]))
+        XCTAssertEqual(h.session.restoredOwnedGeometry, [.init(generation: 3, sizes: [Self.size(92, 38)])],
+                       "an empty record owns nothing")
+        h.send(.attached)
+        h.send(.observedAuthority(.mine(generation: 3)))
+        XCTAssertEqual(h.session.restoredOwnedGeometry, [])
+        XCTAssertEqual(h.session.evidence.owned.sizes, [Self.size(92, 38)])
+    }
+
+    func test_aPeerStampOrANewScopeDropsTheRestoredRecords() {
+        let record = TmuxOwnedGeometryRecord(generation: 3, sizes: [Self.size(92, 38)])
+        var peer = Harness()
+        peer.send(.restoreOwnedGeometry([record]))
+        peer.send(.attached)
+        peer.send(.observedAuthority(macPeer))
+        XCTAssertEqual(peer.session.restoredOwnedGeometry, [])
+
+        var unstamped = Harness()
+        unstamped.send(.restoreOwnedGeometry([record]))
+        unstamped.send(.attached)
+        unstamped.reply("")
+        XCTAssertEqual(unstamped.session.restoredOwnedGeometry, [], "no stamp stands for a record to belong to")
+
+        var garbled = Harness()
+        garbled.send(.restoreOwnedGeometry([record]))
+        garbled.send(.attached)
+        garbled.reply("android-id")
+        XCTAssertEqual(garbled.session.restoredOwnedGeometry, [record], "an unreadable stamp decides nothing")
+
+        var renamed = Harness()
+        renamed.send(.restoreOwnedGeometry([record]))
+        renamed.send(.identityChanged)
+        XCTAssertEqual(renamed.session.restoredOwnedGeometry, [])
+
+        var switched = Harness()
+        switched.send(.restoreOwnedGeometry([record]))
+        switched.send(.attached)
+        switched.send(.controlSessionChanged(replacedKnownSession: true))
+        XCTAssertEqual(switched.session.restoredOwnedGeometry, [])
+        XCTAssertEqual(switched.session.evidence.owned.sizes, [])
+    }
+
+    func test_theKeptRecordFollowsTheStandingStamp() {
+        var h = owner()
+        XCTAssertEqual(h.session.ownedGeometryRecord, .init(generation: 3, sizes: [Self.size(92, 38)]))
+        h.send(.sizeAdvertised(Self.size(100, 40)))
+        XCTAssertEqual(h.session.ownedGeometryRecord,
+                       .init(generation: 3, sizes: [Self.size(92, 38), Self.size(100, 40)]))
+        h.send(.observedAuthority(macPeer))
+        XCTAssertNil(h.session.ownedGeometryRecord, "no stamp of ours stands")
+    }
+
+    func test_aRestoreKeepsOnlyTheNewestGenerations() {
+        var h = Harness()
+        let limit = TmuxOwnedGeometryRecord.restoreLimit
+        h.send(.restoreOwnedGeometry((1...UInt64(limit + 4)).map { .init(generation: $0, sizes: [Self.size(80, 24)]) }))
+        XCTAssertEqual(h.session.restoredOwnedGeometry.map(\.generation),
+                       Array((5...UInt64(limit + 4)).reversed()))
+    }
+
+    func test_aRestoreLandingWhileOursAdoptsAtOnce() {
+        var h = owner()
+        XCTAssertEqual(h.send(.restoreOwnedGeometry([
+            .init(generation: 2, sizes: [Self.size(120, 40)]),
+            .init(generation: 3, sizes: [Self.size(80, 24)]),
+        ])), [])
+        XCTAssertEqual(h.session.restoredOwnedGeometry, [])
+        XCTAssertEqual(h.session.evidence.owned.sizes, [Self.size(80, 24), Self.size(92, 38)],
+                       "the earlier process's grids rank older")
+        XCTAssertEqual(h.session.ownedGeometryRecord,
+                       .init(generation: 3, sizes: [Self.size(80, 24), Self.size(92, 38)]))
+        XCTAssertEqual(h.session.presentation, .none)
+    }
+
+    /// Dropped records are no evidence later: a grid only they owned is
+    /// foreign to the read that follows.
+    func test_droppedRecordsLeaveTheirGridsForeign() {
+        let record = TmuxOwnedGeometryRecord(generation: 3, sizes: [Self.size(92, 38)])
+
+        var otherGeneration = relaunched(restoring: [record])
+        otherGeneration.send(.observedAuthority(.mine(generation: 5)))
+        XCTAssertEqual(otherGeneration.session.restoredOwnedGeometry, [])
+        otherGeneration.send(.windowSizePolicyReplied(windowID: 1, raw: "latest"))
+        if otherGeneration.session.query.current != nil { otherGeneration.reply("v1 SELF 5 iPad") }
+        XCTAssertFalse(otherGeneration.session.evidence.owned.contains(Self.size(92, 38)))
+        XCTAssertEqual(otherGeneration.session.presentation, .veiled(peerName: TmuxStamplessPeer.displayName))
+
+        var switched = relaunched(restoring: [record])
+        switched.send(.controlSessionChanged(replacedKnownSession: true))
+        switched.send(.attached)
+        switched.send(Self.window(1, Self.size(92, 38)))
+        switched.send(.windowSizePolicyReplied(windowID: 1, raw: "latest"))
+        XCTAssertEqual(switched.reply(Self.mine), [.authorityChanged(stamplessPeer), .raiseStamplessPeer])
+        XCTAssertEqual(switched.session.presentation, .veiled(peerName: TmuxStamplessPeer.displayName))
+    }
+
+    func test_aRestoreSentAgainOrHeldOverAResetStillDecidesTheRead() {
+        let record = TmuxOwnedGeometryRecord(generation: 3, sizes: [Self.size(92, 38)])
+        var twice = relaunched(restoring: [record])
+        twice.send(.restoreOwnedGeometry([record]))
+        XCTAssertEqual(twice.session.restoredOwnedGeometry, [record])
+        XCTAssertEqual(twice.reply(Self.mine), [
+            .authorityChanged(.mine(generation: 3)),
+            .releaseGeometry(.ownerReplay),
+        ])
+
+        var cleared = relaunched(restoring: [record])
+        cleared.send(.restoreOwnedGeometry([]))
+        XCTAssertEqual(cleared.session.restoredOwnedGeometry, [], "another scope's restore had nothing")
+        XCTAssertEqual(cleared.reply(Self.mine), [.authorityChanged(stamplessPeer), .raiseStamplessPeer])
+
+        // A remembered peer is no read: a claim of ours may have committed
+        // just before the channel went, so only the next read decides.
+        var remembered = yielded()
+        remembered.send(.restoreOwnedGeometry([record]))
+        XCTAssertEqual(remembered.session.restoredOwnedGeometry, [record])
+        var kept = relaunched(restoring: [record])
+        kept.send(.resetTransport(preservingPeer: true))
+        XCTAssertEqual(kept.session.restoredOwnedGeometry, [record], "no stamp was read yet")
+        kept.send(.attached)
+        kept.send(Self.window(1, Self.size(92, 38)))
+        kept.send(.windowSizePolicyReplied(windowID: 1, raw: "latest"))
+        XCTAssertEqual(kept.reply(Self.mine), [
+            .authorityChanged(.mine(generation: 3)),
+            .releaseGeometry(.ownerReplay),
+        ])
+        XCTAssertEqual(kept.session.presentation, .none)
+    }
+
+    /// Once the commit is sent the server may carry the new stamp before its
+    /// reply settles the claim; a process that dies in between relaunches
+    /// under that stamp at the claim's grid.
+    func test_aClaimKeepsItsGridOnceItsStampCanStand() throws {
+        var h = yielded()
+        h.send(.shown(source: .show, stepAt: 1_000), at: 1_000)
+        let generation = try XCTUnwrap(claims(in: h.reply(Self.mac, at: 1_200)).first?.generation)
+        h.confirmFence(generation: generation)
+        XCTAssertNil(h.session.ownedGeometryRecord, "nothing of ours can stand before the commit")
+        let grid = try XCTUnwrap(h.claim?.targetGrid)
+        let target = Self.size(grid.columns, grid.rows)
+        h.send(.repaintSucceeded(generation: generation))
+        XCTAssertEqual(h.session.ownedGeometryRecord?.generation, generation)
+        XCTAssertEqual(h.session.ownedGeometryRecord?.sizes.last, target)
+        let kept = try XCTUnwrap(h.session.ownedGeometryRecord)
+        h.send(.stampCommitSucceeded(generation: generation))
+        XCTAssertEqual(h.session.ownedGeometryRecord, kept)
+        h.send(.settleClaim(generation: generation))
+        XCTAssertEqual(h.session.ownedGeometryRecord, kept, "settling owns the same grid")
+
+        var relaunch = Harness()
+        relaunch.send(.restoreOwnedGeometry([kept]))
+        relaunch.send(.attached)
+        relaunch.send(.adoptShown)
+        relaunch.send(.localSize(Self.size(100, 40)))
+        relaunch.send(Self.window(1, target))
+        relaunch.send(.windowSizePolicyReplied(windowID: 1, raw: "latest"))
+        XCTAssertEqual(relaunch.reply("v1 SELF \(generation) iPad"), [
+            .authorityChanged(.mine(generation: generation)),
+            .releaseGeometry(.ownerReplay),
+        ])
+        XCTAssertEqual(relaunch.session.presentation, .none)
+    }
+
+    func test_keepingJoinsAGenerationsGrids() {
+        let earlier: [TmuxOwnedGeometryRecord] = [
+            .init(generation: 3, sizes: [Self.size(80, 24), Self.size(92, 38)]),
+            .init(generation: 2, sizes: [Self.size(120, 40)]),
+        ]
+        XCTAssertEqual(TmuxOwnedGeometryRecord.keeping(.init(generation: 3, sizes: [Self.size(100, 40), Self.size(80, 24)]),
+                                                       in: earlier), [
+            .init(generation: 3, sizes: [Self.size(92, 38), Self.size(100, 40), Self.size(80, 24)]),
+            .init(generation: 2, sizes: [Self.size(120, 40)]),
+        ], "the other window's grids rank older; a repeat moves to newest")
+        let full = (1...TmuxOwnedSizeHistory.limit).map { Self.size(80 + $0, 24) }
+        XCTAssertEqual(TmuxOwnedGeometryRecord.keeping(.init(generation: 3, sizes: [Self.size(200, 50)]),
+                                                       in: [.init(generation: 3, sizes: full)]).first?.sizes,
+                       Array(full.dropFirst()) + [Self.size(200, 50)])
     }
 
     func test_anUnstampedServerReleasesABareClientSizeOnly() {

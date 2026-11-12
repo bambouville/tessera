@@ -36,6 +36,12 @@ import org.json.JSONObject
 
 internal class AgentIngestionReadFailure(val status: SharedAgentReadStatus) : IllegalStateException(status.code)
 
+/** The host answered a request with an `error` frame (no read status). Its
+ * message stays the bounded diagnostic code, so callers that compare the
+ * message (`busy`) are unchanged; callers that must tell a host refusal from
+ * a local failure (a closed connection, a stale binding) check the type. */
+internal class AgentIngestionRemoteError(code: String) : IllegalStateException(code)
+
 /** Bounded multiplexing only; original page bytes go to the shared Swift
  * decoder/reducer. No provider parsing, lossy numeric conversion, or action
  * authority is implemented in Kotlin. */
@@ -46,8 +52,10 @@ internal class AgentIngestionConnection private constructor(
     parent: CoroutineScope,
     private val diagnostics: ((String, Map<String, String>) -> Unit)?,
 ) : AutoCloseable {
+    /** [recordIDs]: each page record's ID by its order. */
     data class Reply(val end: JSONObject, val wire: ByteArray? = null, val inventory: List<JSONObject> = emptyList(),
-        val sourceIdentity: String? = null, val firstOrder: String? = null)
+        val sourceIdentity: String? = null, val firstOrder: String? = null,
+        val recordIDs: Map<java.math.BigInteger, String> = emptyMap())
     data class WindowCommit(val snapshot: JSONObject, val accepted: Boolean)
     private class Transaction(val inventoryPage: Boolean) {
         val bytes = ByteArrayOutputStream()
@@ -55,6 +63,7 @@ internal class AgentIngestionConnection private constructor(
         val inventory = mutableListOf<JSONObject>()
         var sourceIdentity: String? = null
         var firstOrder: String? = null
+        val recordIDs = mutableMapOf<java.math.BigInteger, String>()
     }
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private val lock = Any()
@@ -72,6 +81,7 @@ internal class AgentIngestionConnection private constructor(
     private val pendingSubscriptions = mutableMapOf<String, SubscriptionRequest>()
     private val subscribedThreads = mutableSetOf<String>()
     private val pages = linkedMapOf<String, Transaction>() // reader-owned
+    private val searches = linkedMapOf<String, Transaction>() // reader-owned
     private val writer = Mutex()
     // A manual read must not cancel a watch transaction already committed by
     // Core but not yet ACKed on the wire. Never block the reader on a request.
@@ -90,6 +100,10 @@ internal class AgentIngestionConnection private constructor(
     var supportsOpenCodeSessions: Boolean = false; private set
     var supportsKimiSessions: Boolean = false; private set
     var supportsReadProgress: Boolean = false; private set
+    /** The host scans transcripts for a query itself (`search.v1`). */
+    var supportsSearch: Boolean = false; private set
+    /** The host reads a window page around a search match (`window.seek.v1`). */
+    var supportsWindowSeek: Boolean = false; private set
     /** Largest viewport this host accepts in `window.ack` (from its hello). */
     var maxWindowSegments: Int = LEGACY_WINDOW_SEGMENTS; private set
     fun supportsProvider(provider: String): Boolean = when (provider) {
@@ -131,6 +145,14 @@ internal class AgentIngestionConnection private constructor(
             if (kind == "inventory.thread") require(frames <= 501)
             require(bytes in 0..300_000)
             require(totalBytes in 0..1_048_576)
+        }
+
+        /** A `search` reply: the host keeps one well under 1 MiB, with a
+         * skipped frame for each thread it could not read. */
+        internal fun validateSearchFrame(kind: String, frames: Int, bytes: Int) {
+            require(kind in setOf("search.begin", "search.record", "search.skipped", "search.end"))
+            require(frames in 1..8194 && (kind == "search.begin") == (frames == 1))
+            require(bytes in 0..1_048_576)
         }
 
         internal fun validateHello(value: JSONObject) {
@@ -204,6 +226,12 @@ internal class AgentIngestionConnection private constructor(
                 connection.supportsKimiSessions = helloSupportsKimiSessions(reply.end)
                 connection.supportsReadProgress = reply.end.getJSONArray("capabilities").let { values ->
                     (0 until values.length()).any { values.opt(it) == "read.progress.v1" }
+                }
+                connection.supportsSearch = reply.end.getJSONArray("capabilities").let { values ->
+                    (0 until values.length()).any { values.opt(it) == "search.v1" }
+                }
+                connection.supportsWindowSeek = reply.end.getJSONArray("capabilities").let { values ->
+                    (0 until values.length()).any { values.opt(it) == "window.seek.v1" }
                 }
                 connection.maxWindowSegments = helloMaxWindowSegments(reply.end)
                 diagnostics?.invoke("agent_ingestion_opened", mapOf("transport" to binding.transport.name,
@@ -545,6 +573,21 @@ internal class AgentIngestionConnection private constructor(
             }
             return
         }
+        if (kind.startsWith("search.")) {
+            require(identifier(id))
+            if (kind == "search.begin") {
+                require(id !in searches && searches.size < 4)
+                searches[id] = Transaction(false)
+            }
+            val transaction = checkNotNull(searches[id])
+            validateSearchFrame(kind, ++transaction.frames, transaction.bytes.size() + raw.size + 4)
+            transaction.bytes.write(ByteBuffer.allocate(4).putInt(raw.size).array()); transaction.bytes.write(raw)
+            if (kind != "search.end") return
+            searches.remove(id)
+            // A search abandoned by its caller is dropped like a late page.
+            synchronized(lock) { pending.remove(id) }?.complete(Reply(value, transaction.bytes.toByteArray()))
+            return
+        }
         if (kind.startsWith("page.") || kind.startsWith("inventory.")) {
             require(identifier(id))
             if (kind == "page.begin" || kind == "inventory.begin") {
@@ -557,11 +600,12 @@ internal class AgentIngestionConnection private constructor(
             transaction.bytes.write(ByteBuffer.allocate(4).putInt(raw.size).array()); transaction.bytes.write(raw)
             if (kind == "page.begin") transaction.sourceIdentity = value.getString("sourceIdentity")
             if (kind == "page.record" && transaction.firstOrder == null) transaction.firstOrder = value.get("order").toString()
+            if (kind == "page.record") value.get("order").toString().toBigIntegerOrNull()?.let { transaction.recordIDs[it] = value.getString("recordID") }
             if (kind == "inventory.thread") transaction.inventory.add(value)
             if (kind != "page.end" && kind != "inventory.end") return
             pages.remove(id)
             val reply = Reply(value, if (kind == "page.end") transaction.bytes.toByteArray() else null, transaction.inventory,
-                transaction.sourceIdentity, transaction.firstOrder)
+                transaction.sourceIdentity, transaction.firstOrder, transaction.recordIDs)
             if (kind == "page.end") finishReadProgress(id, value.getString("thread"))
             val waiter = synchronized(lock) { pending.remove(id) }
             if (waiter != null) waiter.complete(reply)
@@ -621,7 +665,7 @@ internal class AgentIngestionConnection private constructor(
                 }
                 if (!thread.isNullOrEmpty()) onReadStatus?.invoke(thread, status)
                 waiter.completeExceptionally(AgentIngestionReadFailure(status))
-            } else waiter.completeExceptionally(IllegalStateException(AgentIngestionDiagnostics.code(value.optString("code"))))
+            } else waiter.completeExceptionally(AgentIngestionRemoteError(AgentIngestionDiagnostics.code(value.optString("code"))))
         }
         else waiter.complete(Reply(value))
     }

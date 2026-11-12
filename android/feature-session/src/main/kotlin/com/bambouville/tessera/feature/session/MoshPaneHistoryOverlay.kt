@@ -1,5 +1,6 @@
 package com.bambouville.tessera.feature.session
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
 import android.os.Build
@@ -14,6 +15,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +43,9 @@ import kotlin.math.min
  */
 internal fun moshPaneHistoryOverlaySurfaceId(paneId: Int): String = "overlay:$paneId"
 
+// The classification constant is inlined into the APK; it is compared only
+// once sdkInt shows Android 14, the first release that reports it.
+@SuppressLint("InlinedApi")
 internal fun moshSplitScrollAcceptsTouch(isMouseSource: Boolean, classification: Int, sdkInt: Int): Boolean =
     !isMouseSource || (sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
         classification == MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE)
@@ -539,10 +544,10 @@ internal class MoshPaneHistoryOverlayRuntime(
 ) {
     var lastNativeTopRow by mutableIntStateOf(0)
     var lastHistoryDistanceFromBottom by mutableIntStateOf(0)
-    var pendingPlacementSequence by mutableStateOf(0L)
+    var pendingPlacementSequence by mutableLongStateOf(0L)
     var pendingPlacementTopRow by mutableIntStateOf(0)
-    var appliedPlacementSequence by mutableStateOf(0L)
-    var acknowledgedPlacementSequence by mutableStateOf(0L)
+    var appliedPlacementSequence by mutableLongStateOf(0L)
+    var acknowledgedPlacementSequence by mutableLongStateOf(0L)
 
     fun recordNativeTopRow(topRow: Int) {
         lastNativeTopRow = topRow
@@ -735,6 +740,9 @@ internal fun MoshPaneHistoryOverlaySurface(
                 onNativeTopRowChanged(runtime.paneId, topRow, true)
             }
         }
+        // Returns false for every event, so taps still reach TerminalView,
+        // which handles both finger taps and accessibility clicks.
+        @SuppressLint("ClickableViewAccessibility")
         val touchListener = View.OnTouchListener listener@{ _, event ->
             if (!visible) return@listener false
             when (event.actionMasked) {
@@ -794,10 +802,10 @@ internal fun MoshPaneHistoryOverlayHost(
     onHistoryRequested: (surfaceId: String, pointsY: Double, isInertial: Boolean) -> Unit,
     onFindRequested: (surfaceId: String) -> Unit,
     onReturnedToLiveTail: (surfaceId: String) -> Unit,
-    onAltScreenScroll: (paneId: Int, rowsDown: Int) -> Unit = { _, _ -> },
     onHistoryDeliveryApplied: (surfaceId: String, deliveryToken: Long) -> Unit,
     onVisibleOverlaySurfaceChanged: (TermuxTerminalSurface?) -> Unit,
     modifier: Modifier = Modifier,
+    onAltScreenScroll: (paneId: Int, rowsDown: Int) -> Unit = { _, _ -> },
     /** P9: false while the session is hidden or veiled (see [TerminalDrawingGate]). */
     drawingEnabled: Boolean = true,
     paneContentRects: Map<Int, SharedTmuxCellRect> = emptyMap(),
@@ -806,7 +814,7 @@ internal fun MoshPaneHistoryOverlayHost(
     val historyPaneId = scrollPaneId ?: focusedPaneId
     LaunchedEffect(focusedPaneId) { scrollPaneId = null }
     val presentation = remember { MoshPaneHistoryOverlayPresentation() }
-    var observedDeliveryEpoch by remember { mutableStateOf(0L) }
+    var observedDeliveryEpoch by remember { mutableLongStateOf(0L) }
     var placedDeliveryTokens by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     // The local focused-pane state can lag a `%session-window-changed` by one
     // Compose frame. Keep membership derived from the new tmux snapshot, not
@@ -1044,6 +1052,9 @@ private fun MoshSplitScrollGestureObserver(
             startEvent?.recycle()
             startEvent = null
         }
+        // Consumes only scroll streams (a drag past the slop, or a touchpad
+        // two-finger swipe); taps and accessibility clicks stay TerminalView's.
+        @SuppressLint("ClickableViewAccessibility")
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -1148,6 +1159,9 @@ internal fun MoshPrimaryHistoryGestureObserver(
         var initialY = 0f
         var requestedInGesture = false
         val touchSlop = primaryTerminal.view.context.resources.displayMetrics.density * 8f
+        // Returns false for every event, so taps still reach TerminalView,
+        // which handles both finger taps and accessibility clicks.
+        @SuppressLint("ClickableViewAccessibility")
         val listener = View.OnTouchListener listener@{ _, event ->
             if (!enabled || surfaceId == null) return@listener false
             when (event.actionMasked) {
@@ -1210,8 +1224,8 @@ internal fun MoshPrimaryLiveHistoryController(
     val presentationLease = remember(primaryTerminal) { MoshHistoryPresentationLease() }
     var lastHistoryDistanceFromBottom by remember(primaryTerminal) { mutableIntStateOf(0) }
     var lastObservedTopRow by remember(primaryTerminal) { mutableIntStateOf(0) }
-    var appliedDeliveryToken by remember(primaryTerminal) { mutableStateOf(0L) }
-    var scheduledDeliveryToken by remember(primaryTerminal) { mutableStateOf(0L) }
+    var appliedDeliveryToken by remember(primaryTerminal) { mutableLongStateOf(0L) }
+    var scheduledDeliveryToken by remember(primaryTerminal) { mutableLongStateOf(0L) }
     DisposableEffect(primaryTerminal) {
         presentationLease.active = true
         onDispose { presentationLease.active = false }

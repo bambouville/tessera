@@ -37,8 +37,10 @@ sides of the JNI handoff.
    preserving the same password, host-key, Keystore authorization, recovery,
    and diagnostics contracts as SSH. Mosh+tmux retains an independent SSH
    control channel for metadata, history, authority, and window operations.
-4. Release packaging must provide the same two Gradle properties; the checked
-   installer is the reference local build path.
+4. Native Mosh is on by default (`android/networking/build.gradle.kts`
+   prepares the prefix itself when no root is passed), so release packaging
+   needs no extra properties; `scripts/android/bundle-release.sh` refuses a
+   Play bundle without `libtessera_mosh_jni.so`.
 
 The focused JVM tests validate parsing, credential lifetime at the Kotlin/JNI
 boundary, native start/resize delegation, and the transport-neutral contract.

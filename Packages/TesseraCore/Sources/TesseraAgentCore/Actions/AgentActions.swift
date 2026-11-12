@@ -26,6 +26,28 @@ public struct AgentActionLease: Equatable, Codable, Sendable {
     }
 }
 
+/// Revoked, under its own lock, the moment Core accepts a transition that
+/// changes which prompt waits, or the answer's lease ends. A platform commits
+/// each of an answer's writes on it as the last step before handing the bytes
+/// to its transport: a transition accepted before that stops the write; one
+/// accepted after it arrived too late for any check to stop.
+public final class AgentAnswerPermit: @unchecked Sendable {
+    private let lock = NSLock()
+    private var revoked = false
+
+    public init() {}
+
+    public func revoke() {
+        lock.lock(); revoked = true; lock.unlock()
+    }
+
+    /// Whether the write about to be handed over may go.
+    public func commitWrite() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !revoked
+    }
+}
+
 /// Typed action material carried across the ABI. Exactly one field is valid
 /// for the requested action; a platform must execute this plan, never infer a
 /// command from a display string.

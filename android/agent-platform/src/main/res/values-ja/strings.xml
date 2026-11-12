@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_platform_integration_check_failed">ホスト連携の確認に失敗しました。</string>
+    <string name="agent_platform_integration_shared_unavailable">共有のエージェント連携を利用できません。</string>
+    <string name="agent_platform_integration_probe_failed">ホスト連携の調査に失敗しました。</string>
+    <string name="agent_platform_integration_process_state_unverified">ターミナルのプロセス状態を検証できませんでした。</string>
+    <string name="agent_platform_integration_provider_settings_unreadable">プロバイダの設定を安全に読み取れませんでした。</string>
+    <string name="agent_platform_integration_provider_settings_too_large">プロバイダの設定が安全にインストールできる上限を超えています。</string>
+    <string name="agent_platform_integration_install_unconfirmed">Agent Center の連携を確認できませんでした。</string>
+    <string name="agent_platform_integration_install_unconfirmed_code">Agent Center の連携を確認できませんでした: %1$s</string>
+    <string name="agent_platform_integration_installed_shell_changed">連携はインストールされましたが、有効化の前にフォアグラウンドのシェルが変わりました。</string>
+    <string name="agent_platform_integration_installed_not_enabled">連携はインストールされましたが、ここでは有効にできませんでした: %1$s</string>
+    <string name="agent_platform_integration_provider_settings_changing">インストール中にプロバイダの設定が変わりました。設定が変化しなくなってから再試行してください。</string>
+    <string name="agent_platform_integration_shell_unverified">現在のシェルを検証できませんでした。</string>
+    <string name="agent_platform_integration_shell_changed">有効化の前にフォアグラウンドのシェルが変わりました。</string>
+    <string name="agent_platform_integration_install_not_verified">エージェント連携がインストールされたことをホストが確認しませんでした。</string>
+    <string name="agent_platform_integration_install_not_current">エージェント連携を書き込みましたが、ホストはまだ古いと報告しています。</string>
+    <string name="agent_platform_integration_newer_installed">このホストには、新しいバージョンの Tessera による新しい Agent Center 連携があります。代わりにこのアプリをアップデートしてください。</string>
+    <string name="agent_platform_endpoint_agent_runtime_unavailable">エージェントのランタイムを利用できません</string>
+    <string name="agent_platform_endpoint_terminal_uploads_unavailable">このターミナルではファイルをアップロードできません</string>
+    <string name="agent_platform_endpoint_uploads_unavailable">ファイルをアップロードできません</string>
+    <string name="agent_platform_endpoint_process_occupancy_unavailable">このターミナルではプロセスの使用状況を取得できません</string>
+    <string name="agent_platform_endpoint_process_root_unavailable">ルートプロセスを利用できません</string>
+    <string name="agent_platform_endpoint_mosh_process_root_unavailable">mosh のルートプロセスを利用できません</string>
+    <string name="agent_platform_endpoint_foreground_shell_proof_unavailable">フォアグラウンドのシェルを証明できません</string>
+    <string name="agent_platform_endpoint_fresh_terminal_evidence_unavailable">ターミナルの最新の状態を取得できません</string>
+    <string name="agent_platform_endpoint_terminal_capture_unavailable">ターミナルの画面を取得できません</string>
+    <string name="agent_platform_endpoint_launch_directory_unproven">起動には、検証済みの SSH+tmux ペインのディレクトリが必要です</string>
+    <string name="agent_platform_endpoint_raw_transport_one_focus">tmux を使わない接続では、フォーカスできるターミナルは 1 つだけです</string>
+    <string name="agent_platform_endpoint_raw_prompt_capture_unavailable">tmux を使わない接続では、まだプロンプトを確実に取得できません</string>
+    <string name="agent_platform_endpoint_raw_terminal_route_unavailable">ターミナルへの直接経路を利用できません</string>
+    <string name="agent_platform_endpoint_route_proof_rejected">リモートサーバーが経路証明のマーカーを受け付けませんでした</string>
+    <string name="agent_platform_endpoint_spawn_requires_tmux">起動と分岐には tmux が必要です</string>
+    <string name="agent_platform_endpoint_tmux_control_unavailable">tmux の制御を利用できません</string>
+    <string name="agent_platform_endpoint_tmux_control_route_unavailable">tmux の制御経路を利用できません</string>
+    <string name="agent_platform_endpoint_remote_data_unavailable">リモートのデータを利用できません</string>
+    <string name="agent_platform_endpoint_session_closed">セッションは終了しました</string>
+</resources>

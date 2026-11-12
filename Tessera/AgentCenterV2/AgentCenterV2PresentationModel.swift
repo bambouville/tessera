@@ -2,6 +2,129 @@ import Foundation
 import Observation
 import TesseraCore
 
+/// Sources name a conversation's state at one handoff, rather than a shared
+/// origin. Every reference in a replacement points to an older source.
+struct AgentThreadSuccession: Equatable {
+    static let maximumReplacements = 256
+    static let maximumRecords = 5 * maximumReplacements
+
+    struct Source: Hashable {
+        let threadID: AgentThreadID
+        let sequence: UInt64
+    }
+
+    struct Replacement: Equatable {
+        let own: Source
+        let followed: Source?
+        let predecessors: [Source]
+    }
+
+    let id = UUID()
+    private(set) var sequence: UInt64 = 0
+    private var baseSequence: UInt64 = 0
+    private(set) var sources: [AgentThreadID: Source] = [:]
+    private(set) var replacements: [Source: Replacement] = [:]
+    private(set) var pendingThreadIDs: Set<AgentThreadID> = []
+    private(set) var removedThreadIDs: Set<AgentThreadID> = []
+
+    var recordCount: Int { sources.count + replacements.count + pendingThreadIDs.count + removedThreadIDs.count }
+
+    func source(for threadID: AgentThreadID) -> Source {
+        sources[threadID] ?? Source(threadID: threadID, sequence: baseSequence)
+    }
+
+    mutating func record(_ successors: [AgentThreadID: AgentThreadID], following selected: AgentThreadID?,
+                         removed: Set<AgentThreadID>, retaining threadIDs: Set<AgentThreadID>) {
+        var followed = Set<AgentThreadID>()
+        var current = selected
+        while let id = current, followed.insert(id).inserted { current = successors[id] }
+        let predecessors = Dictionary(grouping: successors.keys.filter { successors[$0] != $0 }, by: { successors[$0]! })
+        var remaining = Set(predecessors.keys)
+        // Core can coalesce A → B → C into one publish. Apply B before C,
+        // independent of dictionary insertion or iteration order.
+        while !remaining.isEmpty {
+            let ready = remaining.filter { successor in
+                !predecessors[successor, default: []].contains { remaining.contains($0) }
+            }.sorted(by: Self.ordered)
+            let next = ready.isEmpty ? [remaining.sorted(by: Self.ordered)[0]] : ready
+            for successor in next {
+                let ordered = predecessors[successor, default: []].sorted {
+                    if followed.contains($0) != followed.contains($1) { return followed.contains($0) }
+                    return Self.ordered($0, $1)
+                }
+                sequence += 1
+                let source = Source(threadID: successor, sequence: sequence)
+                replacements[source] = Replacement(own: self.source(for: successor),
+                    followed: ordered.first(where: { followed.contains($0) }).map { self.source(for: $0) },
+                    predecessors: ordered.prefix(Self.maximumReplacements).map { self.source(for: $0) })
+                for predecessor in ordered {
+                    sources[predecessor] = Source(threadID: predecessor, sequence: sequence)
+                    pendingThreadIDs.remove(predecessor)
+                    removedThreadIDs.insert(predecessor)
+                }
+                sources[successor] = source
+                removedThreadIDs.remove(successor)
+                pendingThreadIDs.insert(successor)
+                remaining.remove(successor)
+            }
+        }
+        for id in removed.sorted(by: Self.ordered) where successors[id] == nil {
+            sequence += 1
+            sources[id] = Source(threadID: id, sequence: sequence)
+        }
+        removedThreadIDs.formUnion(removed)
+        removedThreadIDs.subtract(threadIDs)
+        pendingThreadIDs.subtract(removed)
+        pendingThreadIDs.subtract(threadIDs)
+        trim(retaining: threadIDs)
+    }
+
+    /// Called synchronously after the root materializes the same revision.
+    /// Pending successors remain writable before their first snapshot or row.
+    mutating func migrated() {
+        baseSequence = sequence
+        sources.removeAll()
+        replacements.removeAll()
+        removedThreadIDs.removeAll()
+    }
+
+    private mutating func trim(retaining threadIDs: Set<AgentThreadID>) {
+        func newest(_ lhs: AgentThreadID, _ rhs: AgentThreadID) -> Bool {
+            let left = source(for: lhs).sequence, right = source(for: rhs).sequence
+            return left != right ? left > right : Self.ordered(lhs, rhs)
+        }
+        pendingThreadIDs = Set(pendingThreadIDs.sorted(by: newest).prefix(Self.maximumReplacements))
+        removedThreadIDs = Set(removedThreadIDs.sorted(by: newest).prefix(Self.maximumReplacements))
+        var reachable = Set<Source>()
+        func visit(_ source: Source) {
+            guard reachable.insert(source).inserted, let replacement = replacements[source] else { return }
+            visit(replacement.own)
+            for predecessor in replacement.predecessors { visit(predecessor) }
+        }
+        for id in threadIDs.union(pendingThreadIDs) { visit(source(for: id)) }
+        replacements = replacements.filter { reachable.contains($0.key) }
+        var budget = Self.maximumReplacements
+        let newestSources = replacements.keys.sorted { $0.sequence > $1.sequence }
+        for source in newestSources {
+            let cost = 1 + (replacements[source]?.predecessors.count ?? 0)
+            if cost > budget { replacements.removeValue(forKey: source) }
+            else { budget -= cost }
+        }
+        let referenced = Set(reachable.map(\.threadID)).union(removedThreadIDs)
+        sources = sources.filter { referenced.contains($0.key) }
+        if sources.count > 2 * Self.maximumReplacements {
+            let keep = Set(sources.keys.sorted(by: newest).prefix(2 * Self.maximumReplacements))
+            sources = sources.filter { keep.contains($0.key) }
+        }
+    }
+
+    static func ordered(_ lhs: AgentThreadID, _ rhs: AgentThreadID) -> Bool {
+        if lhs.hostID != rhs.hostID { return lhs.hostID.uuidString < rhs.hostID.uuidString }
+        if lhs.providerID != rhs.providerID { return lhs.providerID.rawValue < rhs.providerID.rawValue }
+        return lhs.providerSessionID < rhs.providerSessionID
+    }
+}
+
 /// Apple presentation state only. The portable runtime remains the source of
 /// truth for thread reduction, action availability, ordering, and privacy.
 @MainActor
@@ -118,6 +241,17 @@ final class AgentCenterV2PresentationModel {
         let threadID: AgentThreadID
     }
 
+    /// A search result the detail opens at: its row once the transcript
+    /// holds the record, whether already loaded or read around the match.
+    struct SearchLanding: Equatable {
+        let id = UUID()
+        let threadID: AgentThreadID
+        let recordID: String
+        /// A match is marked for a moment; a reader's own place, read again
+        /// on another connection, is not.
+        var marked = true
+    }
+
     enum Action {
         case select(AgentThreadID)
         case selectCandidate(AgentSourceCandidateID)
@@ -129,6 +263,8 @@ final class AgentCenterV2PresentationModel {
         case answerCandidate(candidateID: AgentSourceCandidateID, token: AgentActionToken, optionID: String)
         case beginDictation(AgentThreadID)
         case search(String)
+        /// Reads the page around a search match unless it is already loaded.
+        case openSearchResult(AgentSearchResult)
         case setGrouping(AgentListGrouping)
         case setShowSystemEvents(Bool)
         /// How many characters of a title one list row can show, measured by
@@ -180,6 +316,8 @@ final class AgentCenterV2PresentationModel {
             if selectedThreadID != oldValue {
                 invalidateSendAnyway()
                 composerFocusRequest = nil
+                if searchLanding?.threadID != selectedThreadID { searchLanding = nil }
+                if latestOpening != selectedThreadID { latestOpening = nil }
             }
             refreshSelectedThread()
             invalidateChangedSendAnyway()
@@ -194,6 +332,10 @@ final class AgentCenterV2PresentationModel {
     /// re-diffed and re-laid out every rendered transcript row mid-scroll.
     /// Anything that needs the hidden fields reads `selectedThread`.
     private(set) var selectedThreadForDetail: AgentThreadSnapshot?
+
+    /// Only Core succession transfers a conversation's presentation state.
+    /// Published before selection, including successors without snapshots.
+    private(set) var succession = AgentThreadSuccession()
 
     /// Snapshot fields the detail never shows. `detailRendersSame` compares
     /// every other field; a test keeps the two lists covering the snapshot.
@@ -229,6 +371,10 @@ final class AgentCenterV2PresentationModel {
     var searchQuery = ""
     var isSearching = false
     var searchSnapshot = AgentSearchSnapshot(results: [])
+    private(set) var searchLanding: SearchLanding?
+    /// A thread whose detail opens at its newest page, whatever place its
+    /// reader kept (a notification opened it), until the detail does.
+    private(set) var latestOpening: AgentThreadID?
     var searchFocusRequest = 0
     var keyboardFocus: KeyboardFocus = .none
     private(set) var threadDetailVisible = false
@@ -267,6 +413,13 @@ final class AgentCenterV2PresentationModel {
     var promptOverflow: PromptOverflow?
     var launchDraft = LaunchDraft()
     var launchTargets: [LaunchTarget] = []
+    /// Each tmux-bound thread's pane directory, from the launch-target probe
+    /// that already runs. The Duo files context opens here.
+    struct ThreadFilesDirectory: Equatable {
+        let binding: AgentTerminalBinding
+        let path: String
+    }
+    var threadFilesDirectories: [AgentThreadID: ThreadFilesDirectory] = [:]
     var drafts: [AgentThreadID: String] = [:] { didSet { invalidateChangedSendAnyway() } }
     var pendingSends: [AgentThreadID: UUID] = [:]
     var answeringPromptThreads: Set<AgentThreadID> = []
@@ -372,10 +525,20 @@ final class AgentCenterV2PresentationModel {
     /// hides. A dropped thread without one leaves the reader on the first row.
     func apply(list: AgentCenterListSnapshot, changed: [AgentThreadSnapshot], removed: Set<AgentThreadID>,
                successors: [AgentThreadID: AgentThreadID] = [:]) {
+        if !successors.isEmpty || !removed.isEmpty || succession.recordCount > 0 {
+            var next = succession
+            let retained = Set(threadSnapshots.keys).union(list.threads.map(\.id))
+                .union(changed.map { $0.summary.id }).subtracting(removed)
+            next.record(successors, following: selectedThreadID, removed: removed, retaining: retained)
+            if succession != next { succession = next }
+        }
         let previous = selectedThreadID
         apply(list: list)
         for snapshot in changed { apply(thread: snapshot) }
-        for threadID in removed { threadSnapshots.removeValue(forKey: threadID) }
+        for threadID in removed {
+            threadSnapshots.removeValue(forKey: threadID)
+            threadFilesDirectories.removeValue(forKey: threadID)
+        }
         guard let previous, removed.contains(previous) || successors[previous] != nil else { return }
         // `/clear` twice between publishes chains the replacements.
         var successor = successors[previous]
@@ -391,11 +554,68 @@ final class AgentCenterV2PresentationModel {
         }
     }
 
+    func didMigrateSuccession(_ revision: AgentThreadSuccession) {
+        guard succession == revision else { return }
+        var next = succession
+        next.migrated()
+        if succession != next { succession = next }
+    }
+
     func select(_ threadID: AgentThreadID) {
         invalidateSendAnyway()
         selectedThreadID = threadID
         selectedCandidateID = nil
         onAction?(.select(threadID))
+    }
+
+    /// Opens the result's thread at its match.
+    func openSearchResult(_ result: AgentSearchResult) {
+        select(result.threadID)
+        onAction?(.openSearchResult(result))
+    }
+
+    /// The coordinator marks the match in the same turn it decides how the
+    /// match opens, so the detail never lands on a cached row a read is
+    /// about to replace. A reader who moved on keeps their selection.
+    func beginSearchLanding(_ result: AgentSearchResult, marked: Bool = true) -> Bool {
+        guard selectedThreadID == result.threadID else { return false }
+        searchLanding = SearchLanding(threadID: result.threadID, recordID: result.recordID, marked: marked)
+        return true
+    }
+
+    /// An index the host rebuilt since the search names the landed match
+    /// anew; the landing follows it.
+    func retargetSearchLanding(_ threadID: AgentThreadID, from recordID: String, to landed: String) -> Bool {
+        guard let landing = searchLanding, landing.threadID == threadID, landing.recordID == recordID else { return false }
+        searchLanding = SearchLanding(threadID: threadID, recordID: landed, marked: landing.marked)
+        return true
+    }
+
+    func finishSearchLanding(_ landing: SearchLanding) {
+        if searchLanding == landing { searchLanding = nil }
+    }
+
+    /// The match could not be read: the thread stays at its newest page,
+    /// and a later page holding the record must not move the reader there.
+    /// Without a thread or record, any landing still unread is abandoned.
+    func abandonSearchLanding(_ threadID: AgentThreadID? = nil, recordID: String? = nil) {
+        guard let landing = searchLanding, threadID.map({ $0 == landing.threadID }) ?? true,
+              recordID.map({ $0 == landing.recordID }) ?? true,
+              threadSnapshots[landing.threadID]?.messages.contains(where: { $0.recordID == landing.recordID }) != true else { return }
+        searchLanding = nil
+    }
+
+    /// The reader chose the newest page over a match still opening, or
+    /// (without a thread) every read was reset.
+    func dropSearchLanding(_ threadID: AgentThreadID? = nil) {
+        guard let landing = searchLanding, threadID.map({ $0 == landing.threadID }) ?? true else { return }
+        searchLanding = nil
+    }
+
+    func requestLatestOpening(_ threadID: AgentThreadID) { latestOpening = threadID }
+
+    func finishLatestOpening(_ threadID: AgentThreadID) {
+        if latestOpening == threadID { latestOpening = nil }
     }
 
     func requestNarrowThreadNavigation(_ threadID: AgentThreadID) {
@@ -439,31 +659,31 @@ final class AgentCenterV2PresentationModel {
     }
 
     func reportConversationEnded() {
-        reportUnavailable("This conversation has ended. Open its terminal to start or resume a conversation. Your draft is kept.")
+        reportUnavailable(String(localized: "This conversation has ended. Open its terminal to start or resume a conversation. Your draft is kept."))
     }
 
     func reportActionError(_ error: AgentActionError, promptAnswer: Bool = false) {
         switch error {
         case .unavailable:
-            reportUnavailable("This action is unavailable for the current terminal.")
+            reportUnavailable(String(localized: "This action is unavailable for the current terminal."))
         case .actionInFlight:
-            reportUnavailable("An action is already in progress for this thread.")
+            reportUnavailable(String(localized: "An action is already in progress for this thread."))
         case .staleBinding:
-            reportUnavailable("The terminal changed before the action could be completed.")
+            reportUnavailable(String(localized: "The terminal changed before the action could be completed."))
         case .invalidLaunch:
-            reportUnavailable("The requested launch configuration is invalid.")
+            reportUnavailable(String(localized: "The requested launch configuration is invalid."))
         case .stalePrompt:
-            reportUnavailable("That prompt has changed; review the current terminal state.")
+            reportUnavailable(String(localized: "That prompt has changed; review the current terminal state."))
         case .verificationFailed:
-            reportUnavailable("Tessera could not verify the terminal action.")
+            reportUnavailable(String(localized: "Tessera could not verify the terminal action."))
         case .cancelled:
-            reportUnavailable("The terminal action was cancelled.")
+            reportUnavailable(String(localized: "The terminal action was cancelled."))
         case .inputNotReady:
-            reportUnavailable("The agent's input wasn't ready, so nothing was typed into the terminal.")
+            reportUnavailable(String(localized: "The agent's input wasn't ready, so nothing was typed into the terminal."))
         case .terminalDraft:
             reportUnavailable(promptAnswer
-                ? "The question's text field in the terminal already has text. Clear it there before answering."
-                : "The terminal's prompt already has unsent text, so nothing was typed. Clear it in the terminal first.")
+                ? String(localized: "The question's text field in the terminal already has text. Clear it there before answering.")
+                : String(localized: "The terminal's prompt already has unsent text, so nothing was typed. Clear it in the terminal first."))
         }
     }
 
@@ -496,23 +716,56 @@ final class AgentCenterV2PresentationModel {
     /// `reason` is the adapter's content-free refusal code; the wording
     /// matches Android's `agentNotSentNotice`.
     func reportNotSent(_ error: AgentActionError, reason: String, providerName: String?, draft: NotSentDraft) {
-        let possessive = providerName.map { "\($0)'s" } ?? "the agent's"
-        let cause: String
-        switch (reason, error) {
-        case ("input-policy", _): cause = "this message can't be typed into \(possessive) prompt from here"
-        case (_, .cancelled): cause = "the send was cancelled"
-        case ("receipt", _): cause = "delivery tracking couldn't start"
-        case (_, .inputNotReady): cause = "\(possessive) input wasn't ready"
-        case (_, .terminalDraft): cause = "the terminal already has unsent text in \(possessive) prompt"
-        case (_, .staleBinding): cause = "the terminal changed"
-        case (_, .unavailable): cause = "this terminal can't take verified input right now"
-        default: cause = "the terminal wasn't ready"
+        // Keep each notice whole so translations can reorder the provider
+        // name and the draft outcome without an English possessive fragment.
+        let notice: String
+        switch (reason, error, providerName, draft) {
+        case ("input-policy", _, .some(let name), .restored):
+            notice = String(localized: "Not sent — this message can't be typed into \(name)'s prompt from here. Nothing was typed; your message is back in the box.")
+        case ("input-policy", _, .none, .restored):
+            notice = String(localized: "Not sent — this message can't be typed into the agent's prompt from here. Nothing was typed; your message is back in the box.")
+        case ("input-policy", _, .some(let name), .merged):
+            notice = String(localized: "Not sent — this message can't be typed into \(name)'s prompt from here. Nothing was typed; your message is back in the box above what you typed since.")
+        case ("input-policy", _, .none, .merged):
+            notice = String(localized: "Not sent — this message can't be typed into the agent's prompt from here. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, .cancelled, _, .restored):
+            notice = String(localized: "Not sent — the send was cancelled. Nothing was typed; your message is back in the box.")
+        case (_, .cancelled, _, .merged):
+            notice = String(localized: "Not sent — the send was cancelled. Nothing was typed; your message is back in the box above what you typed since.")
+        case ("receipt", _, _, .restored):
+            notice = String(localized: "Not sent — delivery tracking couldn't start. Nothing was typed; your message is back in the box.")
+        case ("receipt", _, _, .merged):
+            notice = String(localized: "Not sent — delivery tracking couldn't start. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, .inputNotReady, .some(let name), .restored):
+            notice = String(localized: "Not sent — \(name)'s input wasn't ready. Nothing was typed; your message is back in the box.")
+        case (_, .inputNotReady, .none, .restored):
+            notice = String(localized: "Not sent — the agent's input wasn't ready. Nothing was typed; your message is back in the box.")
+        case (_, .inputNotReady, .some(let name), .merged):
+            notice = String(localized: "Not sent — \(name)'s input wasn't ready. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, .inputNotReady, .none, .merged):
+            notice = String(localized: "Not sent — the agent's input wasn't ready. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, .terminalDraft, .some(let name), .restored):
+            notice = String(localized: "Not sent — the terminal already has unsent text in \(name)'s prompt. Nothing was typed; your message is back in the box.")
+        case (_, .terminalDraft, .none, .restored):
+            notice = String(localized: "Not sent — the terminal already has unsent text in the agent's prompt. Nothing was typed; your message is back in the box.")
+        case (_, .terminalDraft, .some(let name), .merged):
+            notice = String(localized: "Not sent — the terminal already has unsent text in \(name)'s prompt. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, .terminalDraft, .none, .merged):
+            notice = String(localized: "Not sent — the terminal already has unsent text in the agent's prompt. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, .staleBinding, _, .restored):
+            notice = String(localized: "Not sent — the terminal changed. Nothing was typed; your message is back in the box.")
+        case (_, .staleBinding, _, .merged):
+            notice = String(localized: "Not sent — the terminal changed. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, .unavailable, _, .restored):
+            notice = String(localized: "Not sent — this terminal can't take verified input right now. Nothing was typed; your message is back in the box.")
+        case (_, .unavailable, _, .merged):
+            notice = String(localized: "Not sent — this terminal can't take verified input right now. Nothing was typed; your message is back in the box above what you typed since.")
+        case (_, _, _, .restored):
+            notice = String(localized: "Not sent — the terminal wasn't ready. Nothing was typed; your message is back in the box.")
+        case (_, _, _, .merged):
+            notice = String(localized: "Not sent — the terminal wasn't ready. Nothing was typed; your message is back in the box above what you typed since.")
         }
-        let returned = switch draft {
-        case .restored: " Nothing was typed; your message is back in the box."
-        case .merged: " Nothing was typed; your message is back in the box above what you typed since."
-        }
-        reportUnavailable("Not sent — \(cause).\(returned)")
+        reportUnavailable(notice)
     }
 
     /// The offer is tied to one confirmed refusal, including its returned
@@ -579,6 +832,7 @@ final class AgentCenterV2PresentationModel {
         discardTranscriptLayoutCache()
         listSnapshot = AgentCenterListSnapshot(threads: [])
         threadSnapshots.removeAll()
+        succession = AgentThreadSuccession()
         summaryMetadataIssues.removeAll()
         selectedThreadID = nil
         selectedCandidateID = nil
@@ -593,6 +847,7 @@ final class AgentCenterV2PresentationModel {
         launchMode = nil
         promptOverflow = nil
         launchTargets.removeAll()
+        threadFilesDirectories.removeAll()
         drafts.removeAll()
         pendingSends.removeAll()
         uploadingThreads.removeAll()
@@ -617,7 +872,7 @@ final class AgentCenterV2PresentationModel {
             return
         }
         guard let binding = thread.binding, binding.capabilities.contains(.send), let onAction else {
-            reportUnavailable("Sending is unavailable because this terminal is no longer live.")
+            reportUnavailable(String(localized: "Sending is unavailable because this terminal is no longer live."))
             return
         }
         let request = ComposerSend(id: UUID(), threadID: id, binding: binding, text: text, queueWhenWorking: queueWhenWorking,
@@ -636,7 +891,7 @@ final class AgentCenterV2PresentationModel {
         invalidateSendAnyway()
         guard attachmentPickerRequest == nil, !uploadingThreads.contains(thread.summary.id), pendingSends[thread.summary.id] == nil else { return }
         guard var request = onPrepareAttachments?(thread) else {
-            reportUnavailable("The original upload terminal is unavailable.")
+            reportUnavailable(String(localized: "The original upload terminal is unavailable."))
             return
         }
         request.source = source
@@ -657,7 +912,7 @@ final class AgentCenterV2PresentationModel {
 
     func failPhotoAttachments(_ request: AttachmentPickerRequest, error: Error) {
         if attachmentPickerRequest?.id == request.id {
-            reportUnavailable("Photo attachment failed: \(error.localizedDescription)")
+            reportUnavailable(String(localized: "Photo attachment failed: \(error.localizedDescription)"))
         }
         completeAttachments(request, urls: [])
     }
@@ -800,7 +1055,7 @@ final class AgentCenterV2PresentationModel {
 
     func openLaunch(_ mode: LaunchMode) {
         guard !launchTargets.isEmpty else {
-            reportUnavailable("Launching requires an injected live session route.")
+            reportUnavailable(String(localized: "Agent Center launches new agents in a connected tmux session where it already follows an agent. Start Claude Code or Codex in tmux first, or update the host's agent integration if Tessera asks."))
             return
         }
         launchMode = mode
@@ -816,7 +1071,7 @@ final class AgentCenterV2PresentationModel {
                   AgentProviderRegistry.builtIn.manifest(for: source.providerID)?.actions.contains(.fork) == true
             else {
                 launchMode = nil
-                reportUnavailable("Forking requires the source agent's connected tmux target.")
+                reportUnavailable(String(localized: "Forking requires the source agent's tmux pane to be connected."))
                 return
             }
             target = matching

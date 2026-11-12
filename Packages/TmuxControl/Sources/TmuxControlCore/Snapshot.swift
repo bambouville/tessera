@@ -135,6 +135,25 @@ public struct TmuxWindowSnapshot: Codable, Equatable, Sendable {
             ?? windowID.description
     }
 
+    /// A chosen window name beats provider detection; automatic-rename's
+    /// current command yields to a verified agent on the active pane.
+    public static func agentDisplayName(
+        windowID: WindowId,
+        name: String?,
+        activePaneTitle: String?,
+        activePaneTitleIsDefault: Bool,
+        activePaneCurrentCommand: String?,
+        agentProvider: String?
+    ) -> String {
+        let name = nonEmpty(name)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = nonEmpty(activePaneCurrentCommand)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (activePaneTitleIsDefault ? nil : nonEmpty(activePaneTitle)?.trimmingCharacters(in: .whitespacesAndNewlines))
+            ?? (name != command ? name : nil)
+            ?? nonEmpty(agentProvider)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? name
+            ?? windowID.description
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
         guard let value,
               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

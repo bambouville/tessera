@@ -56,6 +56,43 @@ final class VisualCaptureProbe: XCTestCase {
     func testFollowerKeepsTheNewestRowsWhenARevisionSplitsItsRolledHeadOnPhone() throws { try exerciseHeadSplit(phone: true) }
     func testReadProgressNeverShiftsAShownTranscript() throws { try exerciseReadProgressPulses(phone: false) }
     func testReadProgressNeverShiftsAShownTranscriptOnPhone() throws { try exerciseReadProgressPulses(phone: true) }
+    func testSearchLandingStartsATallMatchAtItsTop() throws { try exerciseTallSearchLanding(phone: false) }
+    func testSearchLandingStartsATallMatchAtItsTopOnPhone() throws { try exerciseTallSearchLanding(phone: true) }
+
+    /// A search result opens with its match's first line at the top of the
+    /// viewport, also when the record is taller than the viewport (a long
+    /// reply on a phone, or in a narrow Duo pane), and the reader stays
+    /// there while the live head rolls.
+    private func exerciseTallSearchLanding(phone: Bool) throws {
+        try requireVisualCaptureRun()
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = phone ? .portrait : .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_AGENT_CENTER_V2_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_AGENT_CENTER_V2_HARNESS_SCENE"] = "ingestionWindow"
+        app.launchEnvironment["TESSERA_AGENT_WINDOW_FIXTURE_TALL"] = phone ? "4000" : "16000"
+        app.launchEnvironment["TESSERA_AGENT_WINDOW_FIXTURE_LAND"] = "401"
+        app.launch()
+        let row = app.buttons["agent-center-v2-thread-bounded-window-fixture"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        if phone { row.tap() }
+        let transcript = app.scrollViews["agent-center-v2-transcript"].firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 10))
+        let match = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "History record 401 ")).firstMatch
+        XCTAssertTrue(match.waitForExistence(timeout: 20), "The search result opens its record")
+        let viewport = transcript.frame
+        for moment in ["landed", "after-head-rolls"] {
+            // The fixture rolls the head every two seconds while the detail shows.
+            Thread.sleep(forTimeInterval: moment == "landed" ? 2 : 5)
+            let frame = match.frame
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "tall-search-landing-\(moment)"; shot.lifetime = .keepAlways; add(shot)
+            XCTAssertGreaterThan(frame.height, viewport.height, "The match must be taller than the viewport")
+            XCTAssertGreaterThanOrEqual(frame.minY, viewport.minY - 2, "\(moment): the match's first line is not above the viewport")
+            XCTAssertLessThanOrEqual(frame.minY, viewport.minY + 64,
+                "\(moment): the match starts the viewport (match \(frame), viewport \(viewport))")
+        }
+    }
 
     /// Only every hundredth record is visible, so each page adds one row and
     /// the transcript is shorter than the viewport. Nothing can be scrolled
@@ -649,8 +686,8 @@ final class VisualCaptureProbe: XCTestCase {
             app.launch()
             XCUIDevice.shared.orientation = orientation
 
-            for step in 0..<9 {
-                let counter = app.staticTexts["STEP \(step + 1) OF 9"]
+            for step in 0..<11 {
+                let counter = app.staticTexts["STEP \(step + 1) OF 11"]
                 XCTAssertTrue(
                     counter.waitForExistence(timeout: 5),
                     "missing onboarding step \(step + 1) in \(orientationName)"
@@ -660,7 +697,7 @@ final class VisualCaptureProbe: XCTestCase {
                 mark("onboarding-\(orientationName)-step-\(step + 1)")
                 usleep(1_500_000)
 
-                if step < 8 {
+                if step < 10 {
                     let next = app.buttons["onboarding-next"]
                     XCTAssertTrue(next.waitForExistence(timeout: 2), "next button is missing")
                     next.tap()
@@ -975,6 +1012,59 @@ final class VisualCaptureProbe: XCTestCase {
         for id in ["1", "2", "3", "4"] { XCTAssertTrue(answer(id).exists, "permission option \(id)") }
         captureAgentHistory("prompt-permission")
         answer("1").tap()
+    }
+
+    /// L-11 on the host-free laptop display at accessibility3: a question
+    /// taller than the space above the fold lands on its top, and the
+    /// reader's own drags still move the conversation both ways afterwards
+    /// (Duo retest M5 item 6).
+    func testAgentLaptopTallQuestionScrollsFreely() throws {
+        try requireVisualCaptureRun()
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchEnvironment["TESSERA_AGENT_CENTER_V2_HARNESS"] = "1"
+        app.launchEnvironment["TESSERA_AGENT_CENTER_V2_HARNESS_SCENE"] =
+            ProcessInfo.processInfo.environment["TESSERA_AGENT_LAPTOP_SCENE"] ?? "prompt"
+        app.launchEnvironment["TESSERA_AGENT_CENTER_V2_HARNESS_LAPTOP_STATE"] = "needs"
+        app.launchEnvironment["TESSERA_AGENT_CENTER_V2_HARNESS_LAPTOP"] = "1"
+        app.launchEnvironment["TESSERA_AGENT_CENTER_V2_HARNESS_DYNAMIC_TYPE"] = "accessibility3"
+        app.launch()
+        let transcript = app.scrollViews["agent-center-v2-transcript"].firstMatch
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8), "the thread is open above the fold")
+        let first = app.descendants(matching: .any)["agent-center-v2-answer-1"].firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 8), "the question's first choice")
+        Thread.sleep(forTimeInterval: 2)
+        captureAgentHistory("laptop-tall-question-landed")
+        let area = transcript.frame
+        print("TESSERA_LAPTOP_QUESTION transcript=\(area) first=\(first.frame)")
+        func drag(from: CGFloat, to: CGFloat) -> CGFloat {
+            let before = first.frame.minY
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: area.midX, dy: area.minY + area.height * from))
+                .press(forDuration: 0.1,
+                       thenDragTo: origin.withOffset(CGVector(dx: area.midX, dy: area.minY + area.height * to)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            Thread.sleep(forTimeInterval: 1)
+            let moved = first.frame.minY - before
+            print("TESSERA_LAPTOP_QUESTION drag \(from)->\(to) moved=\(moved) first=\(first.frame)")
+            return moved
+        }
+        /// The simulator sometimes loses part of a synthesized drag: the
+        /// synthesizer holds after a few moves, or a late system-gesture gate
+        /// keeps the moves from the scroll view. The conversation keeps what
+        /// it got, so a short drag is repeated; one pulled back to the
+        /// question would come back empty every time.
+        func drags(from: CGFloat, to: CGFloat) -> CGFloat {
+            var total: CGFloat = 0
+            for _ in 0..<3 where abs(total) <= 40 { total += drag(from: from, to: to) }
+            return total
+        }
+        XCTAssertLessThan(drags(from: 0.8, to: 0.3), -40, "dragging up shows more of the question")
+        captureAgentHistory("laptop-tall-question-dragged-up")
+        XCTAssertGreaterThan(drags(from: 0.3, to: 0.8), 40, "dragging down goes back toward the conversation")
+        XCTAssertGreaterThan(drags(from: 0.3, to: 0.8), 40, "and on into the conversation above the question")
+        captureAgentHistory("laptop-tall-question-dragged-down")
     }
 
     private func captureAgentHistory(_ name: String) {
@@ -2009,8 +2099,11 @@ final class VisualCaptureProbe: XCTestCase {
         before.name = "tmux-order-compact-before"
         before.lifetime = .keepAlways
         add(before)
+        // The handle's hold recognizes at 0.28 s; a 0.32 s hold let a loaded
+        // run deliver the drag first. Nothing else on the handle competes
+        // with a longer hold.
         source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.32, thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+            .press(forDuration: 0.6, thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
         expectation(for: NSPredicate(format: "value == %@", "@2,@1,@3"), evaluatedWith: order)
         waitForExpectations(timeout: 8)
         XCTAssertEqual(app.descendants(matching: .any)["tmux-window-active-value"].value as? String, "@1")

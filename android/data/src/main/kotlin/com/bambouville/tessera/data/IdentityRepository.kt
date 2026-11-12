@@ -25,11 +25,14 @@ interface IdentityRepository {
 class AndroidIdentityRepository private constructor(
     private val dao: IdentityDao,
     private val clock: () -> Long,
+    /** Resolves the validation messages the identity editor shows. */
+    private val appContext: Context,
     private val scope: CoroutineScope = repositoryScope(),
 ) : IdentityRepository {
     constructor(context: Context) : this(
         TesseraDatabase.get(context).identityDao(),
         System::currentTimeMillis,
+        context.applicationContext,
     )
 
     override val loadedIdentities: StateFlow<List<SavedIdentity>?> =
@@ -47,8 +50,8 @@ class AndroidIdentityRepository private constructor(
         id: String?,
     ): SavedIdentity {
         val name = displayName.trim()
-        require(name.isNotEmpty()) { "identity name is required" }
-        require(name.none(Char::isISOControl)) { "identity name cannot contain control characters" }
+        require(name.isNotEmpty()) { appContext.getString(R.string.data_identity_name_required) }
+        require(name.none(Char::isISOControl)) { appContext.getString(R.string.data_identity_name_control_characters) }
         require(credentialKind.isNotBlank())
         require(credentialReference.isNotBlank())
         val entity = IdentityEntity(

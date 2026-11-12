@@ -10,6 +10,15 @@
 // still paint opaque — the iTerm2 model.
 import SwiftUI
 
+extension EnvironmentValues {
+    /// The global rect one background picture spans when several surfaces
+    /// show it side by side: Duo's panes, the strip between them and the
+    /// rail. Each backdrop under it paints its aligned crop of that one
+    /// image, clipped to its own bleed-extended bounds, rather than fitting
+    /// the whole picture to itself. Nil keeps every backdrop self-contained.
+    @Entry var terminalBackdropCanvas: CGRect? = nil
+}
+
 struct TerminalBackdrop: View {
     let background: ResolvedTerminalBackground
     /// The theme background color — letterbox fill and scrim tint, so
@@ -19,6 +28,7 @@ struct TerminalBackdrop: View {
     /// mosh scrollback overlay uses this to reconstruct the full-session image
     /// crop from inside the inset terminal region without changing pane frames.
     let bleed: EdgeInsets
+    @Environment(\.terminalBackdropCanvas) private var canvas
 
     init(
         background: ResolvedTerminalBackground,
@@ -43,12 +53,20 @@ struct TerminalBackdrop: View {
         )
     }
 
+    /// The shared canvas in a backdrop's local space, given its global frame.
+    static func canvasFrame(_ canvas: CGRect, from frame: CGRect) -> CGRect {
+        canvas.offsetBy(dx: -frame.minX, dy: -frame.minY)
+    }
+
     var body: some View {
         GeometryReader { geo in
-            let contentFrame = Self.contentFrame(
+            let bounds = Self.contentFrame(
                 in: geo.size,
                 bleed: bleed
             )
+            let contentFrame = canvas.map {
+                Self.canvasFrame($0, from: geo.frame(in: .global))
+            } ?? bounds
             ZStack {
                 baseColor
                 if let image = TerminalBackgroundImageStore.image(
@@ -67,6 +85,9 @@ struct TerminalBackdrop: View {
             }
             .frame(width: contentFrame.width, height: contentFrame.height)
             .offset(x: contentFrame.minX, y: contentFrame.minY)
+            // A no-op without a canvas, where the content is these bounds.
+            // With one it keeps the canvas-sized image off neighbouring panes.
+            .clipShape(FixedRectShape(rect: bounds))
         }
         .allowsHitTesting(false)
     }

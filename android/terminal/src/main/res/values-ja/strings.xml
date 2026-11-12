@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="paste_text">ペースト</string>
+  <string name="copy_text">コピー</string>
+  <string name="text_selection_more">その他…</string>
+  <string name="quick_open_selected_path">成果物で開く</string>
+  <string name="reveal_selected_path">「ファイル」で表示</string>
+  <string name="terminal_page_up">ページアップ</string>
+  <string name="terminal_page_down">ページダウン</string>
+</resources>

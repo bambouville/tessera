@@ -83,15 +83,23 @@ struct AboutSettingsView: View {
                     .foregroundStyle(T.fgMuted)
                     .padding(.top, 4)
 
-                Btn(style: .default, compact: true, action: { onboarding.startTour() }) {
+                Btn(style: .default, action: { onboarding.startTour() }) {
                     HStack(spacing: 8) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 11))
                         Text("replay walkthrough")
                             .lineLimit(1)
                     }
+                    .frame(minHeight: 24)
                 }
                 .padding(.top, 16)
+
+                Btn(style: .default, action: { onboarding.showWhatsNew() }) {
+                    Text("what's new in 0.4.1")
+                        .frame(minHeight: 24)
+                }
+                .padding(.top, 8)
+                .accessibilityIdentifier("about-whats-new")
             }
             .frame(maxWidth: .infinity, alignment: .center)
 

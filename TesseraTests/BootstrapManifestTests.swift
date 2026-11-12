@@ -73,6 +73,12 @@ final class BootstrapManifestTests: XCTestCase {
         }
     }
 
+    func test_shortcutCheatSheetPreferenceStaysDeviceLocal() {
+        XCTAssertEqual(
+            BootstrapSyncClassification.appearancePreferences["shortcutCheatSheetEnabled"], .neverSyncs
+        )
+    }
+
     func test_decoderRejectsInheritedRestoreStateAndAutomaticConnectionFlags() throws {
         let encoded = try Self.makeManifestForCrossTest().encoded()
         let original = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])

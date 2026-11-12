@@ -9,8 +9,8 @@ sbom="$repo_root/docs/refactor/shared-platform-sbom.spdx.json"
 check_resolved() {
   jq -e '
     .version == 3
-    and (.pins | length) == 2
-    and ([.pins[].identity] | sort) == ["swift-asn1", "swift-crypto"]
+    and (.pins | length) == 4
+    and ([.pins[].identity] | sort) == ["swift-asn1", "swift-cmark", "swift-crypto", "swift-markdown"]
     and any(.pins[];
       .identity == "swift-crypto"
       and .kind == "remoteSourceControl"
@@ -23,6 +23,18 @@ check_resolved() {
       and .location == "https://github.com/apple/swift-asn1.git"
       and .state.version == "1.7.1"
       and .state.revision == "a9a5efd40eaf558a2bcd48d64b1d1646be686008")
+    and any(.pins[];
+      .identity == "swift-cmark"
+      and .kind == "remoteSourceControl"
+      and .location == "https://github.com/swiftlang/swift-cmark.git"
+      and .state.version == "0.8.0"
+      and .state.revision == "924936d0427cb25a61169739a7660230bffa6ea6")
+    and any(.pins[];
+      .identity == "swift-markdown"
+      and .kind == "remoteSourceControl"
+      and .location == "https://github.com/swiftlang/swift-markdown.git"
+      and .state.version == "0.8.0"
+      and .state.revision == "3c6f9523da3a1ec2fd829673e472d95b8097a3b8")
   ' "$1" >/dev/null
 }
 
@@ -43,11 +55,12 @@ check_git_checkout() {
 check_dependency_checkout() {
   local path="$1"
   local expected_revision="$2"
-  local expected_license_sha256="$3"
+  local license_file="$3"
+  local expected_license_sha256="$4"
   [[ -d "$path/.git" || -f "$path/.git" ]]
   [[ "$(git -C "$path" rev-parse HEAD)" == "$expected_revision" ]]
   [[ -z "$(git -C "$path" status --porcelain --untracked-files=all)" ]]
-  [[ "$(shasum -a 256 "$path/LICENSE.txt" | awk '{print $1}')" \
+  [[ "$(shasum -a 256 "$path/$license_file" | awk '{print $1}')" \
     == "$expected_license_sha256" ]]
 }
 
@@ -70,11 +83,23 @@ check_git_checkout \
 check_dependency_checkout \
   "$repo_root/Packages/TesseraCore/.build/checkouts/swift-crypto" \
   "95ba0316a9b733e92bb6b071255ff46263bbe7dc" \
+  LICENSE.txt \
   "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
 check_dependency_checkout \
   "$repo_root/Packages/TesseraCore/.build/checkouts/swift-asn1" \
   "a9a5efd40eaf558a2bcd48d64b1d1646be686008" \
+  LICENSE.txt \
   "8c6db340475136df3c1201d458fa5755698eace76e510471ecc9d857d6083dac"
+check_dependency_checkout \
+  "$repo_root/Packages/TesseraCore/.build/checkouts/swift-cmark" \
+  "924936d0427cb25a61169739a7660230bffa6ea6" \
+  COPYING \
+  "c22e885f33b821bddb24cf007145e5540655b6c0f403e49e6c76a93c28e6d9a9"
+check_dependency_checkout \
+  "$repo_root/Packages/TesseraCore/.build/checkouts/swift-markdown" \
+  "3c6f9523da3a1ec2fd829673e472d95b8097a3b8" \
+  LICENSE.txt \
+  "167beb36f181bd163c93c6feb45c68e5f9462fe1af55b278f7bfd1df20e673a3"
 
 test -f "$repo_root/LICENSE"
 test -f "$repo_root/COPYING.iOS"
@@ -102,7 +127,9 @@ jq -e '
     "mosh",
     "protobuf",
     "swift-asn1",
-    "swift-crypto"
+    "swift-cmark",
+    "swift-crypto",
+    "swift-markdown"
   ] | sort)
   and any(.packages[];
     .name == "swift-crypto"
@@ -114,6 +141,16 @@ jq -e '
     and .versionInfo == "1.7.1"
     and .licenseDeclared == "Apache-2.0"
     and .checksums == [{"algorithm":"SHA1","checksumValue":"a9a5efd40eaf558a2bcd48d64b1d1646be686008"}])
+  and any(.packages[];
+    .name == "swift-cmark"
+    and .versionInfo == "0.8.0"
+    and .licenseDeclared == "BSD-2-Clause AND MIT"
+    and .checksums == [{"algorithm":"SHA1","checksumValue":"924936d0427cb25a61169739a7660230bffa6ea6"}])
+  and any(.packages[];
+    .name == "swift-markdown"
+    and .versionInfo == "0.8.0"
+    and .licenseDeclared == "Apache-2.0 WITH Swift-exception"
+    and .checksums == [{"algorithm":"SHA1","checksumValue":"3c6f9523da3a1ec2fd829673e472d95b8097a3b8"}])
   and any(.packages[];
     .name == "mosh"
     and .versionInfo == "1.4.0-5-g64bea12"
@@ -133,6 +170,8 @@ jq -e '
   and ([.relationships[] | [.spdxElementId, .relationshipType, .relatedSpdxElement]] | sort) == ([
     ["SPDXRef-Package-TesseraSharedCore", "DEPENDS_ON", "SPDXRef-Package-SwiftCrypto"],
     ["SPDXRef-Package-SwiftCrypto", "DEPENDS_ON", "SPDXRef-Package-SwiftASN1"],
+    ["SPDXRef-Package-TesseraSharedCore", "DEPENDS_ON", "SPDXRef-Package-SwiftMarkdown"],
+    ["SPDXRef-Package-SwiftMarkdown", "DEPENDS_ON", "SPDXRef-Package-SwiftCmark"],
     ["SPDXRef-Package-TesseraSharedCore", "DEPENDS_ON", "SPDXRef-Package-Mosh"],
     ["SPDXRef-Package-Mosh", "DEPENDS_ON", "SPDXRef-Package-Protobuf"],
     ["SPDXRef-Package-Mosh", "DEPENDS_ON", "SPDXRef-Package-OpenSSL"]

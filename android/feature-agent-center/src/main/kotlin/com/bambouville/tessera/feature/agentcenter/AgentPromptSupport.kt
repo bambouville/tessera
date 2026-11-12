@@ -1,5 +1,6 @@
 package com.bambouville.tessera.feature.agentcenter
 
+import com.bambouville.tessera.agent.platform.AgentTerminalObservation
 import com.bambouville.tessera.agent.platform.withoutTerminalEscapes
 import java.lang.Long.toUnsignedString
 
@@ -14,11 +15,12 @@ internal fun livePromptActionToken(signature: String): String {
 
 /**
  * Keep complete terminal rows at the bottom, bounded by UTF-8 bytes. A tmux
- * capture keeps its SGR (`capture-pane -e`); the grammar reads the cells, so
- * escapes go before the rows are bounded (AgentPromptGrammar.promptText).
+ * capture keeps its SGR (`capture-pane -e`); the grammar reads the cells and
+ * their backgrounds (Claude's current tab), so the other escapes go before
+ * the rows are bounded (AgentPromptGrammar.promptText).
  */
 internal fun bottomPromptRows(tail: String, maximumBytes: Int = 16_384): String {
-    val rows = withoutTerminalEscapes(tail).split('\n')
+    val rows = withoutTerminalEscapes(tail, keepingBackgrounds = true).split('\n')
     var used = 0
     var first = rows.size
     for (index in rows.indices.reversed()) {
@@ -29,6 +31,11 @@ internal fun bottomPromptRows(tail: String, maximumBytes: Int = 16_384): String 
     }
     return if (first == rows.size) "" else rows.subList(first, rows.size).joinToString("\n")
 }
+
+/** A capture as a prompt request carries it: a local grid brings its cells'
+ * backgrounds in [AgentTerminalObservation.promptText]. */
+internal fun promptRows(observed: AgentTerminalObservation): String =
+    bottomPromptRows(observed.promptText ?: observed.visibleTail.decodeToString())
 
 internal fun boundedPromptCursor(line: String?): String? = line?.takeIf { it.isNotBlank() }
     ?.let { value ->

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_platform_integration_check_failed">主機整合檢查失敗。</string>
+    <string name="agent_platform_integration_shared_unavailable">共用的智慧體整合無法使用。</string>
+    <string name="agent_platform_integration_probe_failed">主機整合探測失敗。</string>
+    <string name="agent_platform_integration_process_state_unverified">無法驗證終端機的程序狀態。</string>
+    <string name="agent_platform_integration_provider_settings_unreadable">無法安全讀取提供者設定。</string>
+    <string name="agent_platform_integration_provider_settings_too_large">提供者設定超出了安全安裝上限。</string>
+    <string name="agent_platform_integration_install_unconfirmed">無法驗證 Agent Center 整合。</string>
+    <string name="agent_platform_integration_install_unconfirmed_code">無法驗證 Agent Center 整合：%1$s</string>
+    <string name="agent_platform_integration_installed_shell_changed">整合已安裝，但前景 shell 在啟用前已變更。</string>
+    <string name="agent_platform_integration_installed_not_enabled">整合已安裝，但無法在此處啟用：%1$s</string>
+    <string name="agent_platform_integration_provider_settings_changing">安裝期間提供者設定發生了變化。請在設定不再變動時重試。</string>
+    <string name="agent_platform_integration_shell_unverified">無法驗證目前的 shell。</string>
+    <string name="agent_platform_integration_shell_changed">前景 shell 在啟用前已變更。</string>
+    <string name="agent_platform_integration_install_not_verified">主機未確認智慧體整合已安裝。</string>
+    <string name="agent_platform_integration_install_not_current">智慧體整合已寫入，但主機仍回報其已過時。</string>
+    <string name="agent_platform_integration_newer_installed">此主機上有來自較新版本 Tessera 的較新 Agent Center 整合。請改為更新此 App。</string>
+    <string name="agent_platform_endpoint_agent_runtime_unavailable">智慧體執行階段無法使用</string>
+    <string name="agent_platform_endpoint_terminal_uploads_unavailable">此終端機無法上傳檔案</string>
+    <string name="agent_platform_endpoint_uploads_unavailable">無法上傳檔案</string>
+    <string name="agent_platform_endpoint_process_occupancy_unavailable">此終端機無法取得程序佔用狀態</string>
+    <string name="agent_platform_endpoint_process_root_unavailable">根程序無法使用</string>
+    <string name="agent_platform_endpoint_mosh_process_root_unavailable">mosh 根程序無法使用</string>
+    <string name="agent_platform_endpoint_foreground_shell_proof_unavailable">無法證明前景 shell</string>
+    <string name="agent_platform_endpoint_fresh_terminal_evidence_unavailable">無法取得終端機的最新狀態</string>
+    <string name="agent_platform_endpoint_terminal_capture_unavailable">無法擷取終端機畫面</string>
+    <string name="agent_platform_endpoint_launch_directory_unproven">啟動需要經過驗證的 SSH+tmux 窗格目錄</string>
+    <string name="agent_platform_endpoint_raw_transport_one_focus">未使用 tmux 時只有一個聚焦的終端機</string>
+    <string name="agent_platform_endpoint_raw_prompt_capture_unavailable">未使用 tmux 時尚無法可靠地擷取提示字元</string>
+    <string name="agent_platform_endpoint_raw_terminal_route_unavailable">終端機直連路由無法使用</string>
+    <string name="agent_platform_endpoint_route_proof_rejected">遠端伺服器未接受路由證明標記</string>
+    <string name="agent_platform_endpoint_spawn_requires_tmux">啟動和分支需要 tmux</string>
+    <string name="agent_platform_endpoint_tmux_control_unavailable">tmux 控制無法使用</string>
+    <string name="agent_platform_endpoint_tmux_control_route_unavailable">tmux 控制路由無法使用</string>
+    <string name="agent_platform_endpoint_remote_data_unavailable">遠端資料無法使用</string>
+    <string name="agent_platform_endpoint_session_closed">工作階段已關閉</string>
+</resources>

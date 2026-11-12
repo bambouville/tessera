@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -93,7 +94,7 @@ internal class TmuxWindowReorderState(
     private var containerOrigin by mutableStateOf(Offset.Zero)
     private var viewport by mutableStateOf(Rect.Zero)
     private var pointer by mutableStateOf(Offset.Zero)
-    private var grabInset by mutableStateOf(0f)
+    private var grabInset by mutableFloatStateOf(0f)
     private var sourceOrder: List<Int> = emptyList()
     private var expectedOrder: List<Int>? by mutableStateOf(null)
     private var contextKey: Any? = null

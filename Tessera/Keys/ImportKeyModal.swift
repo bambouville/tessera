@@ -131,6 +131,7 @@ struct ImportKeyModal: View {
             )
             .onTapGesture {}
             .padding(.horizontal, isPhone ? 18 : 0)
+            .modifier(KeyModalStage(onDismiss: close))
 
             if privacyShielded {
                 Color.black

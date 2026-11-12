@@ -1,5 +1,31 @@
 import SwiftUI
 import PortForwarding
+import TesseraDomainCore
+
+/// Only a service on this saved host's loopback can become its page tab.
+/// A rule targeting another machine must keep browsing through that rule.
+func forwardingArtifactRequest(
+    for rule: PortForwardRule,
+    hostID: UUID,
+    sessionID: UUID? = nil
+) -> ArtifactOpenRequest? {
+    guard let endpoint = rule.target,
+          let target = ForwardedWebPolicy.webTarget(for: rule) else { return nil }
+    let host = endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines)
+    let octets = host.split(separator: ".", omittingEmptySubsequences: false)
+    let ipv4Loopback = octets.count == 4 && octets.first == "127"
+        && octets.allSatisfy { part in
+            !part.isEmpty && part.utf8.allSatisfy { (48...57).contains($0) }
+                && UInt8(part) != nil
+        }
+    guard PortForwardRuleValidator.isLoopback(host) || ipv4Loopback else { return nil }
+    return ArtifactOpenRequest(
+        hostID: hostID,
+        target: .page(scheme: target.scheme, port: Int(endpoint.port), path: "/"),
+        origin: .forwarding,
+        sessionID: sessionID
+    )
+}
 
 /// Compact `⇄ N` chip that lives in the `SessionTopBar` between the
 /// find/magnifying-glass button and the trailing home button. Reads
@@ -22,6 +48,8 @@ struct ForwardingStatusChip: View {
     /// its session is the one on screen and the app is in front, since each
     /// look is a real connection to the target.
     var monitorsServices = true
+    var hostID: UUID? = nil
+    var sessionID: UUID? = nil
 
     @State private var sheetVisible = false
 
@@ -33,8 +61,8 @@ struct ForwardingStatusChip: View {
                     await manager.monitorServices()
                 }
                 .sheet(isPresented: $sheetVisible) {
-                    ForwardingStatusSheet(manager: manager)
-                        .presentationDetents([.medium, .large])
+                    ForwardingStatusSheet(manager: manager, hostID: hostID, sessionID: sessionID)
+                        .laptopSheetDetents([.medium, .large])
                         .presentationDragIndicator(.visible)
                 }
         }
@@ -103,6 +131,8 @@ struct CompactForwardingStatusButton: View {
     let T: DesignTokens
     /// See `ForwardingStatusChip.monitorsServices`.
     var monitorsServices = true
+    var hostID: UUID? = nil
+    var sessionID: UUID? = nil
 
     @State private var sheetVisible = false
 
@@ -128,8 +158,8 @@ struct CompactForwardingStatusButton: View {
                 await manager.monitorServices()
             }
             .sheet(isPresented: $sheetVisible) {
-                ForwardingStatusSheet(manager: manager, readOnly: true)
-                    .presentationDetents([.medium, .large])
+                ForwardingStatusSheet(manager: manager, readOnly: true, hostID: hostID, sessionID: sessionID)
+                    .laptopSheetDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
         }
@@ -147,16 +177,19 @@ struct CompactForwardingStatusButton: View {
 /// policy calls browsable also gets `↗ open in browser`, which presents the
 /// page inside Tessera, and a `safari` escape hatch for anything the in-app
 /// browser cannot do (a downloaded file, a password autofill).
-private struct ForwardingStatusSheet: View {
+struct ForwardingStatusSheet: View {
     let manager: PortForwarderManager?
     /// Whether rules can be created or edited from here. Opening a tunnel is
     /// not editing, so the browse actions stay available either way — the
     /// phone's sheet is where a tunnel is most useful to open, since the
     /// terminal beside it has the least room to show a page.
     var readOnly = false
+    var hostID: UUID? = nil
+    var sessionID: UUID? = nil
     @Environment(\.designTokens) private var T
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.openArtifact) private var openArtifact
     // Optional: the tunnel-browser harness presents this sheet without one.
     @Environment(ProgramStatusCenter.self) private var programStatusCenter: ProgramStatusCenter?
 
@@ -257,12 +290,22 @@ private struct ForwardingStatusSheet: View {
                 // it; the shared policy answers the address, this answers the
                 // liveness it deliberately does not hold.
                 if isLive(forwarder), let target = ForwardedWebPolicy.webTarget(for: rule) {
-                    Btn("\u{2197} open in browser", style: .primary, compact: true) {
-                        browsing = BrowsingTunnel(
-                            id: rule.id,
-                            target: target,
-                            label: rule.label
-                        )
+                    if let openArtifact, let hostID,
+                       let request = forwardingArtifactRequest(for: rule, hostID: hostID, sessionID: sessionID) {
+                        Btn(style: .primary, compact: true, action: {
+                            dismiss()
+                            openArtifact(request)
+                        }) {
+                            Text("\u{2197} open in artifacts").frame(minHeight: 32)
+                        }
+                    } else {
+                        Btn("\u{2197} open in browser", style: .primary, compact: true) {
+                            browsing = BrowsingTunnel(
+                                id: rule.id,
+                                target: target,
+                                label: rule.label
+                            )
+                        }
                     }
                     Btn("safari", compact: true) {
                         if let url = URL(string: target.url) { openURL(url) }

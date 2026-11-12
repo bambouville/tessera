@@ -12,6 +12,7 @@
 import AVFoundation
 import SwiftData
 import SwiftUI
+import TesseraArtifactsCore
 import UIKit
 import XCTest
 @testable import Tessera
@@ -388,6 +389,29 @@ final class SystemPresentationTests: XCTestCase {
         try finishSharing(sheet)
     }
 
+    /// The artifacts browser's share control sends its own copy of the
+    /// complete cached file, under the file's name, from a popover hung off
+    /// the control.
+    func testArtifactsFileShareSendsTheCachedFileFromItsButton() throws {
+        let store = ArtifactsBrowserPreviewStore(scene: "live")
+        let tab = try XCTUnwrap(store.tab("plan"))
+        guard case let .ready(cached) = store.shareableFile(for: tab.id) else { return XCTFail("the fixture's copy is whole") }
+        let box = ArtifactShareProbeBox()
+        try host(ArtifactShareProbe(store: store, tab: tab, box: box))
+        try activate("share file")
+        // A first share sheet in a process can take long to present on a
+        // loaded host; wait as long as the other share tests' worst case.
+        let sheet = try presented(UIActivityViewController.self, timeout: 60)
+        assertAnchoredInTestWindow(sheet)
+        let shared = try XCTUnwrap(box.shared.last, "the button handed the sheet no file")
+        XCTAssertEqual(box.shared.count, 1)
+        XCTAssertEqual(shared.lastPathComponent, "PLAN.md")
+        XCTAssertNotEqual(shared, cached)
+        XCTAssertEqual(try Data(contentsOf: shared), try Data(contentsOf: cached))
+        try finishSharing(sheet)
+        try waitUntil("the share request to clear") { box.request == nil }
+    }
+
     func testFilesShareWithdrawsTheRequestWhenTheSheetCloses() throws {
         let controller = FilesPanelController()
         let file = try scratchFile("report.txt", contents: "remote file\n")
@@ -470,10 +494,13 @@ final class SystemPresentationTests: XCTestCase {
 
     private func presented<Controller: UIViewController>(
         _ type: Controller.Type,
-        other previous: UIViewController? = nil
+        other previous: UIViewController? = nil,
+        timeout: TimeInterval = 30
     ) throws -> Controller {
         var found: Controller?
-        try waitUntil("a \(Controller.self) to present") {
+        // A process's first share sheet discovers its activities before it
+        // presents, which took over 10 s on a loaded simulator host.
+        try waitUntil("a \(Controller.self) to present", timeout: timeout) {
             guard let top = window?.rootViewController?.presentedViewController as? Controller,
                   top !== previous, !top.isBeingPresented else { return false }
             found = top
@@ -574,9 +601,20 @@ final class SystemPresentationTests: XCTestCase {
         try activate(matching: "\"\(label)\"") { $0 == label }
     }
 
+    /// A toolbar rebuilt as its document finishes loading replaces its
+    /// controls, and one found just before that refuses activation; a tap
+    /// would land on the replacement, so the control is found again.
     private func activate(matching what: String, _ matches: @escaping (String) -> Bool) throws {
-        let control = try element(what, matching: matches)
-        XCTAssertTrue(control.accessibilityActivate(), "\(what) did not activate")
+        var refusals = 0
+        try waitUntil("\(what) to activate") {
+            guard let control = window.flatMap({ Self.accessibilityElement(in: $0, matching: matches, depth: 0) }) else {
+                return false
+            }
+            if control.accessibilityActivate() { return true }
+            refusals += 1
+            return false
+        }
+        if refusals > 0 { NSLog("SystemPresentationTests: %@ refused activation %d times", what, refusals) }
     }
 
     private func element(_ what: String, matching matches: @escaping (String) -> Bool) throws -> NSObject {
@@ -771,5 +809,31 @@ private struct RebuildingShareHost: View {
             .frame(width: 44, height: 44)
             .systemShareSheet(isPresented: $probe.isPresented) { items }
             .id("\(probe.isPresented)-\(probe.rebuilds)")
+    }
+}
+
+/// The browser's share request, and every file it handed to a sheet.
+@MainActor @Observable
+private final class ArtifactShareProbeBox {
+    var request: ArtifactFileShareRequest?
+    var shared: [URL] = []
+}
+
+/// The toolbar's share control with the browser's request state.
+@MainActor
+private struct ArtifactShareProbe: View {
+    let store: ArtifactsBrowserPreviewStore
+    let tab: ArtifactTab
+    let box: ArtifactShareProbeBox
+
+    var body: some View {
+        let _ = box.request
+        ArtifactShareFileButton(store: store, tab: tab, request: Binding(
+            get: { box.request },
+            set: { value in
+                if let url = value?.fileURL { box.shared.append(url) }
+                box.request = value
+            }
+        ))
     }
 }

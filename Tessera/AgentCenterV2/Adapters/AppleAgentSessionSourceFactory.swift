@@ -219,7 +219,9 @@ enum AgentSessionSourceFactory {
         }
 
         let discover: @MainActor () async -> AgentDiscoveryResult = { await discoverForLifecycle(nil) }
-        let inspectInputTarget: @MainActor (AgentLocation, Int?) async -> AgentProbeTarget? = { location, expectedPID in
+        // `styled` reads a local grid's backgrounds too; only Claude's prompt
+        // reads need them (its current question tab), and they cost a pass.
+        let inspectTarget: @MainActor (AgentLocation, Int?, Bool) async -> AgentProbeTarget? = { location, expectedPID, styled in
             if let paneID = location.paneID, tmux.mode == .tmuxControl {
                 return await inspectTmux(
                     location: location,
@@ -228,12 +230,13 @@ enum AgentSessionSourceFactory {
                     tmux: tmux,
                     paneProcessProvider: paneProcessProvider,
                     bracketedPasteProvider: bracketedPasteProvider,
-                    terminalBox: terminalBox
+                    terminalBox: terminalBox,
+                    styled: styled
                 )
             }
             guard var processes = await inspectRawProcess(expectedPID) else { return nil }
             guard matchesAgent(processes.processNames, profiles: profiles()) else { return nil }
-            let ready = await readyTerminalSnapshot(terminalBox)
+            let ready = await readyTerminalSnapshot(terminalBox, styled: styled)
             guard !Task.isCancelled, ready.snapshot.text != nil else { return nil }
             if ready.waited {
                 // Waiting can outlive the previous PID proof. Re-prove, then
@@ -242,7 +245,7 @@ enum AgentSessionSourceFactory {
                       matchesAgent(fresh.processNames, profiles: profiles()) else { return nil }
                 processes = fresh
             }
-            let snapshot = ready.waited ? visibleTerminalSnapshot(terminalBox) : ready.snapshot
+            let snapshot = ready.waited ? visibleTerminalSnapshot(terminalBox, styled: styled) : ready.snapshot
             return AgentProbeTarget(
                 location: location,
                 processNames: processes.processNames,
@@ -253,9 +256,12 @@ enum AgentSessionSourceFactory {
                 cursorColumn: snapshot.cursorColumn,
                 cursorVisible: snapshot.cursorVisible,
                 screenEvidence: snapshot.screenEvidence,
+                promptText: snapshot.promptText,
                 bracketedPasteEnabled: terminalBox.view?.getTerminal().bracketedPasteMode ?? false
             )
         }
+        let inspectInputTarget: @MainActor (AgentLocation, Int?) async -> AgentProbeTarget? = { await inspectTarget($0, $1, false) }
+        let inspectPromptTarget: @MainActor (AgentLocation, Int?) async -> AgentProbeTarget? = { await inspectTarget($0, $1, true) }
 
         let inspect: @MainActor (AgentLocation) async -> AgentProbeTarget? = { location in
             await inspectInputTarget(location, nil)
@@ -456,7 +462,10 @@ enum AgentSessionSourceFactory {
                     agentIntegrationActive: lifecycleActive,
                     agentRequiresLifecycleHook: foreground == .agent
                         ? providerClassification.requiresLifecycleHook
-                        : nil
+                        : nil,
+                    // The pane option carries lifecycle on every transport,
+                    // mosh included.
+                    agentLifecycleDeliverable: true
                 )
             }
 
@@ -495,7 +504,7 @@ enum AgentSessionSourceFactory {
                 shellActive = false
             }
             DiagnosticLogStore.appendAgentCenter(
-                "current-target-read sid=\(diagnosticSessionID) pane=raw result=success commandClass=raw foreground=\(String(describing: foreground)) processCount=\(snapshot.processIDs.count) retainedEvent=none retainedPID=missing shellMarker=unavailable shellProbe=\(optionalBool(shellActive)) agentRuntime=false"
+                "current-target-read sid=\(diagnosticSessionID) pane=raw result=success commandClass=raw foreground=\(String(describing: foreground)) processCount=\(snapshot.processIDs.count) retainedEvent=none retainedPID=missing shellMarker=unavailable shellProbe=\(optionalBool(shellActive)) agentRuntime=false transport=\(readCarrierTransport(baseTransportLabel: baseTransportLabel, usesTmux: false))"
             )
             return AgentCurrentIntegrationTarget(
                 location: location,
@@ -505,7 +514,11 @@ enum AgentSessionSourceFactory {
                 agentIntegrationActive: false,
                 agentRequiresLifecycleHook: foreground == .agent
                     ? providerClassification.requiresLifecycleHook
-                    : nil
+                    : nil,
+                // mosh-server forwards no lifecycle escape, and plain mosh
+                // has no pane option to carry one.
+                agentLifecycleDeliverable: readCarrierTransport(
+                    baseTransportLabel: baseTransportLabel, usesTmux: false) != .mosh
             )
         }
 
@@ -809,6 +822,7 @@ enum AgentSessionSourceFactory {
             verifySend: verifySend,
             inspect: inspect,
             inspectInputTarget: inspectInputTarget,
+            inspectPromptTarget: inspectPromptTarget,
             lifecycleIntegrationCacheKey: lifecycleIntegrationCacheKey,
             automaticallyProbeLifecycleIntegration: automaticallyProbeLifecycleIntegration,
             probeLifecycleIntegrationOnCurrentCarrier: probeLifecycleIntegrationOnCurrentCarrier,
@@ -851,15 +865,23 @@ enum AgentSessionSourceFactory {
         // An attached control client always has at least one pane; an empty
         // reply is not evidence that every bound pane closed.
         guard !lines.isEmpty else { return nil }
+        // `-a` lists a pane once per session holding its window, and a view
+        // session shares all of its owner's, so a repeat with the same root
+        // is the same pane; only a different root is malformed.
         var roots: [Int: Int] = [:]
-        for line in lines.prefix(occupancyPaneLimit) {
+        for line in lines {
             let fields = line.split(whereSeparator: \.isWhitespace)
             guard fields.count == 2, fields[0].hasPrefix("%"),
                   let paneID = Int(fields[0].dropFirst()), paneID >= 0,
-                  let pid = Int(fields[1]), pid > 1,
-                  roots.updateValue(pid, forKey: paneID) == nil else { return nil }
+                  let pid = Int(fields[1]), pid > 1 else { return nil }
+            if let known = roots[paneID] {
+                guard known == pid else { return nil }
+                continue
+            }
+            guard roots.count < occupancyPaneLimit else { return .init(roots: roots, complete: false) }
+            roots[paneID] = pid
         }
-        return .init(roots: roots, complete: lines.count < occupancyPaneLimit)
+        return .init(roots: roots, complete: true)
     }
 
     static func occupancyPane(paneID: String?, snapshot: SwipePadPlainSSHProcessProbe.Snapshot) -> AgentOccupancyObservation.Pane {
@@ -1069,7 +1091,8 @@ enum AgentSessionSourceFactory {
         tmux: TmuxController,
         paneProcessProvider: PaneProcessProvider?,
         bracketedPasteProvider: BracketedPasteProvider,
-        terminalBox: TerminalBox
+        terminalBox: TerminalBox,
+        styled: Bool
     ) async -> AgentProbeTarget? {
         let command = "display-message -p -t \(paneID.description) '#{window_id}\t#{pane_pid}\t#{pane_current_command}\t#{@tessera_agent_state}\t#{window_name}'"
         guard case .success(let lines) = await control(tmux, command),
@@ -1100,7 +1123,7 @@ enum AgentSessionSourceFactory {
             || (tmux.controlPath == .sideChannel && tmux.activePaneId == paneID)
         let capture: PaneCapture?
         if actionInspectionUsesLocalGrid(controlPath: tmux.controlPath, renderedPaneID: tmux.renderedPaneId, paneID: paneID),
-           let local = visiblePaneCapture(terminalBox) {
+           let local = visiblePaneCapture(terminalBox, styled: styled) {
             capture = local
         } else {
             capture = await capturePane(tmux, paneID: paneID)
@@ -1115,6 +1138,7 @@ enum AgentSessionSourceFactory {
             cursorColumn: capture?.cursorColumn,
             cursorVisible: capture?.cursorVisible,
             screenEvidence: capture?.screenEvidence,
+            promptText: capture?.promptText,
             lifecycleEvent: record.lifecycleEvent,
             bracketedPasteEnabled: isRendered
                 ? terminalBox.view?.getTerminal().bracketedPasteMode ?? false
@@ -1364,13 +1388,18 @@ enum AgentSessionSourceFactory {
         let cursorColumn: Int?
         let cursorVisible: Bool?
         let screenEvidence: TerminalScreenEvidence?
-        init(text: String, currentInputLine: String?, cursorRow: Int? = nil, cursorColumn: Int? = nil, cursorVisible: Bool? = nil, screenEvidence: TerminalScreenEvidence? = nil) {
+        /// The local grid as a prompt observation reads it (see
+        /// `AgentProbeTarget.promptText`); nil for a tmux capture.
+        let promptText: String?
+        init(text: String, currentInputLine: String?, cursorRow: Int? = nil, cursorColumn: Int? = nil, cursorVisible: Bool? = nil,
+             screenEvidence: TerminalScreenEvidence? = nil, promptText: String? = nil) {
             self.text = text
             self.currentInputLine = currentInputLine
             self.cursorRow = cursorRow
             self.cursorColumn = cursorColumn
             self.cursorVisible = cursorVisible
             self.screenEvidence = screenEvidence
+            self.promptText = promptText
         }
     }
 
@@ -1418,10 +1447,10 @@ enum AgentSessionSourceFactory {
         )
     }
 
-    private static func visiblePaneCapture(_ box: TerminalBox) -> PaneCapture? {
-        let snapshot = visibleTerminalSnapshot(box)
+    private static func visiblePaneCapture(_ box: TerminalBox, styled: Bool = false) -> PaneCapture? {
+        let snapshot = visibleTerminalSnapshot(box, styled: styled)
         guard let text = snapshot.text else { return nil }
-        return PaneCapture(text: text, currentInputLine: snapshot.currentInputLine, cursorRow: snapshot.cursorRow, cursorColumn: snapshot.cursorColumn, cursorVisible: snapshot.cursorVisible, screenEvidence: snapshot.screenEvidence)
+        return PaneCapture(text: text, currentInputLine: snapshot.currentInputLine, cursorRow: snapshot.cursorRow, cursorColumn: snapshot.cursorColumn, cursorVisible: snapshot.cursorVisible, screenEvidence: snapshot.screenEvidence, promptText: snapshot.promptText)
     }
 
     private static func control(
@@ -1540,10 +1569,12 @@ enum AgentSessionSourceFactory {
         }
     }
 
-    private typealias LiveTerminalSnapshot = (text: String?, currentInputLine: String?, cursorRow: Int?, cursorColumn: Int?, cursorVisible: Bool?, screenEvidence: TerminalScreenEvidence?)
-    private static let unavailableTerminalSnapshot: LiveTerminalSnapshot = (nil, nil, nil, nil, nil, nil)
+    private typealias LiveTerminalSnapshot = (text: String?, currentInputLine: String?, cursorRow: Int?, cursorColumn: Int?, cursorVisible: Bool?, screenEvidence: TerminalScreenEvidence?, promptText: String?)
+    private static let unavailableTerminalSnapshot: LiveTerminalSnapshot = (nil, nil, nil, nil, nil, nil, nil)
 
-    private static func readyTerminalSnapshot(_ box: TerminalBox) async -> (snapshot: LiveTerminalSnapshot, waited: Bool) {
+    /// `styled` also reads the cells' backgrounds for a prompt observation,
+    /// which only action inspections make.
+    private static func readyTerminalSnapshot(_ box: TerminalBox, styled: Bool = false) async -> (snapshot: LiveTerminalSnapshot, waited: Bool) {
         guard let initial = box.view?.getTerminal() else { return (unavailableTerminalSnapshot, false) }
         var waited = false
         // Wait only for an in-progress synchronized frame. The caller re-proves
@@ -1556,30 +1587,30 @@ enum AgentSessionSourceFactory {
                 do { try await Task.sleep(nanoseconds: 50_000_000) }
                 catch { return (unavailableTerminalSnapshot, waited) }
             case .success(let live):
-                guard let capture = terminalCapture(live) else { return (unavailableTerminalSnapshot, waited) }
-                return ((capture.text, capture.currentInputLine, capture.cursorRow, capture.cursorColumn, capture.cursorVisible, capture.screenEvidence), waited)
+                guard let capture = terminalCapture(live, styled: styled) else { return (unavailableTerminalSnapshot, waited) }
+                return ((capture.text, capture.currentInputLine, capture.cursorRow, capture.cursorColumn, capture.cursorVisible, capture.screenEvidence, capture.promptText), waited)
             case .failure: return (unavailableTerminalSnapshot, waited)
             }
         }
         guard !Task.isCancelled, box.view?.getTerminal() === initial else { return (unavailableTerminalSnapshot, waited) }
-        return (visibleTerminalSnapshot(box), waited)
+        return (visibleTerminalSnapshot(box, styled: styled), waited)
     }
 
-    private static func visibleTerminalSnapshot(_ box: TerminalBox) -> LiveTerminalSnapshot {
-        guard let terminal = box.view?.getTerminal(), let capture = terminalCapture(terminal)
+    private static func visibleTerminalSnapshot(_ box: TerminalBox, styled: Bool = false) -> LiveTerminalSnapshot {
+        guard let terminal = box.view?.getTerminal(), let capture = terminalCapture(terminal, styled: styled)
         else { return unavailableTerminalSnapshot }
-        return (capture.text, capture.currentInputLine, capture.cursorRow, capture.cursorColumn, capture.cursorVisible, capture.screenEvidence)
+        return (capture.text, capture.currentInputLine, capture.cursorRow, capture.cursorColumn, capture.cursorVisible, capture.screenEvidence, capture.promptText)
     }
 
     /// SwiftTerm copies only the live grid on this terminal's MainActor owner.
     /// Typed immutable cells preserve physical positions and DIM without an
     /// ANSI round trip. Incomplete synchronized frames fail closed for retry.
-    static func terminalCapture(_ terminal: Terminal) -> PaneCapture? {
+    static func terminalCapture(_ terminal: Terminal, styled: Bool = false) -> PaneCapture? {
         guard case .success(let live) = terminal.liveScreenSnapshot() else { return nil }
-        return terminalCapture(live)
+        return terminalCapture(live, styled: styled)
     }
 
-    private static func terminalCapture(_ live: Terminal.LiveScreenSnapshot) -> PaneCapture? {
+    private static func terminalCapture(_ live: Terminal.LiveScreenSnapshot, styled: Bool = false) -> PaneCapture? {
         var rows: [[TerminalScreenEvidence.Cell]] = []
         rows.reserveCapacity(live.rows)
         for row in 0..<live.rows {
@@ -1595,6 +1626,50 @@ enum AgentSessionSourceFactory {
         let lines = text.components(separatedBy: "\n")
         let current = AgentTerminalText.normalized(lines[live.cursorRow])
         return PaneCapture(text: text, currentInputLine: current, cursorRow: live.cursorRow,
-            cursorColumn: live.cursorColumn, cursorVisible: live.cursorVisible, screenEvidence: screen)
+            cursorColumn: live.cursorColumn, cursorVisible: live.cursorVisible, screenEvidence: screen,
+            promptText: styled ? promptText(live) : nil)
+    }
+
+    /// The grid with each cell's background and reverse video, written as
+    /// `AgentPromptGrammar.promptText(fromCapture:)` leaves a `capture-pane -e`
+    /// text: `ESC[0;…m` where it changes, `ESC[0m` before a row ends in one,
+    /// and the bottom whole rows within `limit` UTF-8 bytes. Wide glyphs'
+    /// continuation cells hold no glyph, as in `TerminalScreenEvidence.plainText`.
+    private static func promptText(_ live: Terminal.LiveScreenSnapshot, limit: Int = 16_384) -> String {
+        var kept: [String] = []
+        var bytes = 0
+        for row in (0..<live.rows).reversed() {
+            var text = ""
+            var current = ""
+            var previous: (Attribute.Color, Bool)?
+            for cell in live.cells[(row * live.columns)..<((row + 1) * live.columns)] where cell.width > 0 {
+                // Most cells share the one before's background.
+                let key = (cell.attribute.bg, cell.attribute.style.contains(.inverse))
+                if previous.map({ $0 != key }) ?? true {
+                    previous = key
+                    let background = backgroundParameters(cell.attribute)
+                    if background != current { text += "\u{1b}[0\(background)m"; current = background }
+                }
+                text += cell.text
+            }
+            if !current.isEmpty { text += "\u{1b}[0m" }
+            let cost = text.utf8.count + (kept.isEmpty ? 0 : 1)
+            guard bytes + cost <= limit else { break }
+            kept.append(text)
+            bytes += cost
+        }
+        return kept.reversed().joined(separator: "\n")
+    }
+
+    /// SGR parameters, each after a ";", as the program wrote them, up to
+    /// the 8 and 16 colour codes that SwiftTerm keeps as 256-colour ones.
+    static func backgroundParameters(_ attribute: Attribute) -> String {
+        var parameters = attribute.style.contains(.inverse) ? ";7" : ""
+        switch attribute.bg {
+        case .ansi256(let code): parameters += code < 8 ? ";\(40 + Int(code))" : code < 16 ? ";\(92 + Int(code))" : ";48;5;\(code)"
+        case .trueColor(let red, let green, let blue): parameters += ";48;2;\(red);\(green);\(blue)"
+        case .defaultColor, .defaultInvertedColor: break
+        }
+        return parameters
     }
 }

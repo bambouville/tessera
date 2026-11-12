@@ -30,9 +30,11 @@ struct DraggableChipBar<Chip: View>: View {
     var accessibilityValue: (AccessoryBarItem) -> String? = { _ in nil }
     /// Builder for one chip view. `lifted` is true while this chip is the
     /// one being dragged — call site can highlight or scale to distinguish.
-    let chipView: (AccessoryBarItem, _ lifted: Bool) -> Chip
+    /// `pressed` is true while a finger rests on it, from touch-down on.
+    let chipView: (AccessoryBarItem, _ lifted: Bool, _ pressed: Bool) -> Chip
 
     @State private var draggingRaw: String?
+    @State private var pressedRaw: String?
     @State private var dragTranslation: CGSize = .zero
     @State private var dragStartLocation: CGPoint = .zero
     @State private var dragStartWindowLocation: CGPoint = .zero
@@ -56,7 +58,7 @@ struct DraggableChipBar<Chip: View>: View {
         ZStack(alignment: .topLeading) {
             HStack(spacing: 6) {
                 ForEach(chips) { chip in
-                    chipView(chip, false)
+                    chipView(chip, false, pressedRaw == chip.rawID)
                         .background(
                             GeometryReader { geo in
                                 Color.clear.preference(
@@ -73,7 +75,8 @@ struct DraggableChipBar<Chip: View>: View {
                                 onTap: { onTap(chip) },
                                 onLongPress: { phase in
                                     handleLongPress(phase, for: chip)
-                                }
+                                },
+                                onPress: { down in pressChanged(down, for: chip) }
                             )
                         }
                         .accessibilityElement(children: .ignore)
@@ -96,7 +99,7 @@ struct DraggableChipBar<Chip: View>: View {
             // frame and translated by the cumulative drag. Stays under the
             // user's finger even as the chip's array slot moves underneath.
             if let raw = draggingRaw, let chip = resolve(raw) {
-                chipView(chip, true)
+                chipView(chip, true, false)
                     .offset(
                         x: dragStartFrame.minX + dragTranslation.width,
                         y: dragStartFrame.minY + dragTranslation.height
@@ -132,6 +135,16 @@ struct DraggableChipBar<Chip: View>: View {
             )
             .transition(.scale.combined(with: .opacity))
             .animation(.easeInOut(duration: 0.15), value: hoveringTrash)
+    }
+
+    /// The press shows at once and fades after the finger lifts, so even a
+    /// quick tap is seen to land.
+    private func pressChanged(_ down: Bool, for chip: AccessoryBarItem) {
+        if down {
+            pressedRaw = chip.rawID
+        } else if pressedRaw == chip.rawID {
+            withAnimation(.easeOut(duration: 0.2)) { pressedRaw = nil }
+        }
     }
 
     private func handleLongPress(_ phase: ChipInteractionPhase, for chip: AccessoryBarItem) {
@@ -209,6 +222,7 @@ private enum ChipInteractionPhase {
 private struct ChipInteractionSurface: UIViewRepresentable {
     let onTap: () -> Void
     let onLongPress: (ChipInteractionPhase) -> Void
+    let onPress: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(surface: self)
@@ -233,6 +247,13 @@ private struct ChipInteractionSurface: UIViewRepresentable {
         )
         tap.require(toFail: longPress)
         view.addGestureRecognizer(tap)
+
+        let press = ChipPressRecognizer()
+        press.allowableMovement = longPress.allowableMovement
+        press.onPressChange = { [weak coordinator = context.coordinator] down in
+            coordinator?.surface.onPress(down)
+        }
+        view.addGestureRecognizer(press)
 
         return view
     }
@@ -269,6 +290,50 @@ private struct ChipInteractionSurface: UIViewRepresentable {
                 break
             }
         }
+    }
+}
+
+/// Follows a finger on a chip from touch-down: the tap only fires on lift,
+/// once the long press has failed. It never recognizes, so it takes the
+/// touch from neither of them nor from the bar's scroll, and whichever of
+/// them recognizes resets it. Moving as far as the long press allows ends it.
+private final class ChipPressRecognizer: UIGestureRecognizer {
+    var allowableMovement: CGFloat = 10
+    var onPressChange: ((Bool) -> Void)?
+
+    private var origin = CGPoint.zero
+    private var pressed = false
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        guard state == .possible, !pressed, let touch = touches.first else { return }
+        origin = touch.location(in: view?.window)
+        pressed = true
+        onPressChange?(true)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        guard state == .possible, let touch = touches.first else { return }
+        let location = touch.location(in: view?.window)
+        if hypot(location.x - origin.x, location.y - origin.y) > allowableMovement { state = .failed }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        if state == .possible { state = .failed }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        if state == .possible { state = .failed }
+    }
+
+    override func reset() {
+        super.reset()
+        guard pressed else { return }
+        pressed = false
+        onPressChange?(false)
     }
 }
 

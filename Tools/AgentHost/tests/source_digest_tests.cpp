@@ -9,6 +9,9 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#if defined(__x86_64__)
+#include <cpuid.h>
+#endif
 
 using tessera::SourceDigest;
 static_assert(sizeof(SourceDigest) <= 128 && std::is_copy_constructible_v<SourceDigest>);
@@ -106,6 +109,16 @@ int main() {
     // Every Apple arm64 CPU has SHA2. A kernel failing its startup self-check
     // must fail here instead of silently validating at portable speed.
     assert(std::string(SourceDigest::backendNameForTesting()) == "ARMv8 SHA2");
+#endif
+#if defined(__x86_64__)
+    // Likewise wherever an x86 CPU offers SHA-NI (SSSE3, SSE4.1 and SHA). Its
+    // kernel once failed the self-check on every such host, unnoticed because
+    // only arm64 ran this test.
+    unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+    const bool shaNi = __get_cpuid(1, &eax, &ebx, &ecx, &edx) &&
+        (ecx & ((1U << 9) | (1U << 19))) == ((1U << 9) | (1U << 19)) &&
+        __get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx) && (ebx & (1U << 29));
+    if (shaNi) assert(std::string(SourceDigest::backendNameForTesting()) == "x86 SHA-NI");
 #endif
     knownAnswer("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     knownAnswer("abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");

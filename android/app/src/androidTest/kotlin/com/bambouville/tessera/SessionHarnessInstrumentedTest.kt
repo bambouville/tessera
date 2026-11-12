@@ -7,6 +7,8 @@ import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -216,6 +218,34 @@ class SessionHarnessInstrumentedTest {
         assertEquals(1, probeValue(after, "cursor"))
         assertEquals("mouse", probeText(after, "fixture"))
         hideKeyboard()
+    }
+
+    /**
+     * The Find bar holds its place under the top bar while the keyboard lifts the session, so
+     * the lifted terminal, placed after it, overlaps the bar. The bar must stay the top layer:
+     * under the terminal it was invisible on screen and its taps went to the terminal. Opening
+     * it also takes the keyboard from the terminal, or the query is typed into the shell.
+     */
+    @Test
+    fun findBarStaysAboveTheLiftedTerminalWhileTheKeyboardIsUp() {
+        selectFixture("fresh")
+        showKeyboard()
+        compose.onNodeWithContentDescription("Find in terminal").performClick()
+        compose.onNodeWithContentDescription("Close find").assertIsDisplayed()
+        // The terminal had the keyboard; the query must not keep going to it.
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasTestTag("terminal-find-field") and isFocused())
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        awaitProbe("an open Find gives the terminal the whole lift") { probe ->
+            probeValue(probe, "ime") > 0 && probeValue(probe, "counter") == 0
+        }
+
+        compose.onNodeWithContentDescription("Close find").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithContentDescription("Close find").fetchSemanticsNodes().isEmpty()
+        }
+        hideKeyboardIfShown()
     }
 
     @Test

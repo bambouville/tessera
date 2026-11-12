@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="paste_text">貼上</string>
+  <string name="copy_text">複製</string>
+  <string name="text_selection_more">更多…</string>
+  <string name="quick_open_selected_path">在成果中開啟</string>
+  <string name="reveal_selected_path">在「檔案」中顯示</string>
+  <string name="terminal_page_up">上一頁</string>
+  <string name="terminal_page_down">下一頁</string>
+</resources>

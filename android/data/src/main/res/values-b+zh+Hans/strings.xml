@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_hostname_required">主机名为必填项</string>
+    <string name="data_hostname_whitespace">主机名不能包含空白字符</string>
+    <string name="data_hostname_control_characters">主机名不能包含控制字符</string>
+    <string name="data_username_required">用户名为必填项</string>
+    <string name="data_username_whitespace">用户名不能包含空白字符</string>
+    <string name="data_username_control_characters">用户名不能包含控制字符</string>
+    <string name="data_name_control_characters">名称不能包含控制字符</string>
+    <string name="data_port_range">端口必须介于 1 和 65535 之间</string>
+    <string name="data_host_text_too_long">主机文本超过 64 KiB 或包含 NUL 字符</string>
+    <string name="data_invalid_tmux_mode">无效的 tmux 模式</string>
+    <string name="data_invalid_transport_kind">无效的传输类型</string>
+    <string name="data_tmux_target_required">需要指定固定 tmux 的目标</string>
+    <string name="data_tmux_target_too_long">tmux 目标过长</string>
+    <string name="data_tmux_target_characters">tmux 目标只能使用字母、数字、下划线、短横线或点</string>
+    <string name="data_host_jump_through_itself">主机不能以自身为跳板</string>
+    <string name="data_jump_route_cycle">跳板路由中存在环路</string>
+    <string name="data_route_host_unavailable">路由中的主机不可用</string>
+    <string name="data_jump_host_unavailable">跳板主机不可用</string>
+    <string name="data_identity_name_required">身份名称为必填项</string>
+    <string name="data_identity_name_control_characters">身份名称不能包含控制字符</string>
+    <plurals name="data_jump_route_too_long">
+        <item quantity="other">跳板路由超过 %1$d 台主机</item>
+    </plurals>
+</resources>

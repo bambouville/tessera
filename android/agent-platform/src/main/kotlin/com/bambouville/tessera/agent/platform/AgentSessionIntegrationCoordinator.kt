@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -77,10 +78,42 @@ data class AgentSessionIntegrationStatus(
     val showsWarning: Boolean,
     val foreground: AgentSessionIntegrationForeground? = null,
     val agentRequiresLifecycleHook: Boolean? = null,
+    /** [detail]'s reason when it is one of this coordinator's own; null for a host's or endpoint's words. */
+    val detailReason: AgentSessionIntegrationReason? = null,
+    /** The one value [detailReason]'s text names (a transport code or an endpoint's reason), shown as it came. */
+    val detailArgument: String? = null,
+    /** False on plain mosh: no lifecycle event can reach this terminal. */
+    val agentLifecycleDeliverable: Boolean = true,
 ) {
 
     fun supports(action: AgentSessionIntegrationAction): Boolean =
         action == primaryAction || action == secondaryAction
+}
+
+/**
+ * Why an integration check is unavailable, as this module's string resource
+ * ([text]) so a screen can show it in the reader's language.
+ * [AgentSessionIntegrationStatus.detail] keeps the English for diagnostics.
+ */
+enum class AgentSessionIntegrationReason(val text: Int) {
+    CheckFailed(R.string.agent_platform_integration_check_failed),
+    SharedIntegrationUnavailable(R.string.agent_platform_integration_shared_unavailable),
+    ProbeFailed(R.string.agent_platform_integration_probe_failed),
+    ProcessStateUnverified(R.string.agent_platform_integration_process_state_unverified),
+    ProviderSettingsUnreadable(R.string.agent_platform_integration_provider_settings_unreadable),
+    ProviderSettingsTooLarge(R.string.agent_platform_integration_provider_settings_too_large),
+    InstallUnconfirmed(R.string.agent_platform_integration_install_unconfirmed),
+    /** [AgentSessionIntegrationStatus.detailArgument] is the transport's code. */
+    InstallUnconfirmedCode(R.string.agent_platform_integration_install_unconfirmed_code),
+    InstalledShellChanged(R.string.agent_platform_integration_installed_shell_changed),
+    /** [AgentSessionIntegrationStatus.detailArgument] is the endpoint's reason. */
+    InstalledNotEnabled(R.string.agent_platform_integration_installed_not_enabled),
+    ProviderSettingsChanging(R.string.agent_platform_integration_provider_settings_changing),
+    ShellUnverified(R.string.agent_platform_integration_shell_unverified),
+    ShellChanged(R.string.agent_platform_integration_shell_changed),
+    InstallNotVerified(R.string.agent_platform_integration_install_not_verified),
+    InstallNotCurrent(R.string.agent_platform_integration_install_not_current),
+    NewerInstalled(R.string.agent_platform_integration_newer_installed),
 }
 
 data class AgentSessionIntegrationActionRequest(
@@ -109,6 +142,8 @@ class AgentSessionIntegrationCoordinator(
         override fun supportsLifecycle(binding: AgentEndpointBinding, provider: AgentProofProvider): Boolean =
             provider == AgentProofProvider.CLAUDE || provider == AgentProofProvider.CODEX
     },
+    /** Records each change of a session's status: its kind and reason code, never a host's words. */
+    private val diagnostics: ((String, Map<String, String>) -> Unit)? = null,
 ) : AutoCloseable {
     private data class IntegrationCheckState(
         val binding: AgentEndpointBinding,
@@ -224,7 +259,7 @@ class AgentSessionIntegrationCoordinator(
                 }
             } catch (failure: Throwable) {
                 if (failure is CancellationException) throw failure
-                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The host integration check failed.")
+                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The host integration check failed.", reason = AgentSessionIntegrationReason.CheckFailed)
             } finally {
                 coroutineContext[Job]?.let { completed -> actionJobs.remove(key, completed) }
             }
@@ -337,19 +372,35 @@ class AgentSessionIntegrationCoordinator(
 
     private suspend fun monitorIntegration(endpoint: AgentSessionEndpoint, binding: AgentEndpointBinding) {
         val checkState = checkStates[binding.key] ?: return
-        while (bindingIsCurrent(endpoint, binding)) {
-            checkState.mutex.withLock {
-                if (!checkIsCurrent(endpoint, binding)) return@withLock
+        // This loop is the only recheck a plain shell gets (an agent's own
+        // hooks recheck its pane), so only `reconcile` ends it, for a new
+        // binding. The endpoint can visit another pane and come back before
+        // the directory publishes, and the directory keeps only its latest
+        // value: ending here on that visit froze the session's last status,
+        // a stale warning included, until the next pane switch.
+        while (ownsBinding(binding)) {
+            if (endpoint.binding.value != binding) {
+                endpoint.binding.first { it == binding }
+                continue
+            }
+            val checked = checkState.mutex.withLock {
+                if (!checkIsCurrent(endpoint, binding)) return@withLock false
                 try {
                     refreshIntegration(endpoint, binding)
                 } catch (failure: Throwable) {
                     if (failure is CancellationException) throw failure
-                    setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+                    setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
                 }
+                // A pane visit during the check left the status as it was:
+                // it is no failure to back off from, and the pane's return
+                // checks again at once rather than after a retry delay.
+                if (endpoint.binding.value != binding) return@withLock false
                 checkState.consecutiveFailures = if (statusValues[binding.key]?.kind == AgentSessionIntegrationKind.Unavailable) {
                     checkState.consecutiveFailures.coerceAtMost(Int.MAX_VALUE - 1) + 1
                 } else 0
+                true
             }
+            if (!checked) continue
             val nextDelay = runCatching {
                 SharedAgentIntegrationCheckPolicy.retryDelayMillis(checkState.consecutiveFailures)
             }.getOrElse { return } // A missing Core ABI cannot safely schedule or classify checks.
@@ -384,7 +435,7 @@ class AgentSessionIntegrationCoordinator(
     ): IntegrationInspection? {
         if (!checkIsCurrent(endpoint, binding)) return null
         val probeCommand = runCatching { AgentIntegrationCommand.probeFromSharedCore() }.getOrElse {
-            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
             return null
         }
         val checkState = checkStates[binding.key] ?: return null
@@ -408,7 +459,7 @@ class AgentSessionIntegrationCoordinator(
                 return null
             }
             is AgentEndpointResult.Failed -> {
-                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The host integration probe failed.")
+                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The host integration probe failed.", reason = AgentSessionIntegrationReason.ProbeFailed)
                 return null
             }
         }
@@ -417,6 +468,7 @@ class AgentSessionIntegrationCoordinator(
                 binding,
                 AgentSessionIntegrationKind.Unavailable,
                 "The terminal process state could not be verified.",
+                reason = AgentSessionIntegrationReason.ProcessStateUnverified,
             )
             return null
         }
@@ -428,7 +480,7 @@ class AgentSessionIntegrationCoordinator(
             val command = runCatching {
                 AgentIntegrationCommand.currentShellFromSharedCore(shellIDs)
             }.getOrElse {
-                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
                 return null
             }
             shellActive = when (val shell = endpoint.inspectCurrentShell(binding, command)) {
@@ -444,7 +496,7 @@ class AgentSessionIntegrationCoordinator(
                 lifecycleCapabilities,
             )
         }.getOrElse {
-            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
             return null
         }
         val agentIntegrationActive = hasFreshTrustedForegroundAgent(
@@ -461,11 +513,12 @@ class AgentSessionIntegrationCoordinator(
             agentRequiresLifecycleHook = if (foreground == SharedAgentIntegrationForeground.Agent) {
                 lifecycleProcessIDs.isNotEmpty()
             } else null,
+            agentLifecycleDeliverable = binding.transport != AgentEndpointTransport.MOSH,
         )
         val decision = runCatching {
             SharedAgentIntegrationDecisions.resolve(observation, requestedAction)
         }.getOrElse {
-            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
             return null
         }
         return IntegrationInspection(
@@ -503,12 +556,12 @@ class AgentSessionIntegrationCoordinator(
         val attempts = runCatching { SharedAgentIntegrationParsing.maximumInstallAttempts() }
             .getOrDefault(0)
         if (attempts <= 0) {
-            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
             return
         }
         repeat(attempts) {
             val readCommand = runCatching { AgentIntegrationCommand.readConfigsFromSharedCore() }.getOrElse {
-                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
                 return
             }
             val snapshots = endpoint.readIntegrationConfigs(binding, readCommand)
@@ -516,13 +569,13 @@ class AgentSessionIntegrationCoordinator(
             val values = (snapshots as? AgentEndpointResult.Success)?.value
             if (values == null) {
                 if (snapshots is AgentEndpointResult.StaleBinding) return
-                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "Provider settings could not be read safely.")
+                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "Provider settings could not be read safely.", reason = AgentSessionIntegrationReason.ProviderSettingsUnreadable)
                 return
             }
             val installCommand = runCatching {
                 AgentIntegrationCommand.installFromSharedCore(values.codex, values.claude, values.kimi)
             }.getOrElse {
-                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "Provider settings exceed the safe installation limit.")
+                setStatus(binding, AgentSessionIntegrationKind.Unavailable, "Provider settings exceed the safe installation limit.", reason = AgentSessionIntegrationReason.ProviderSettingsTooLarge)
                 return
             }
             val result = endpoint.installIntegration(binding, installCommand)
@@ -541,7 +594,7 @@ class AgentSessionIntegrationCoordinator(
                         refreshIntegration(endpoint, binding)
                         return
                     }
-                    setStatus(binding, AgentSessionIntegrationKind.Unavailable, outcome.reason.failureDetail)
+                    setStatus(binding, AgentSessionIntegrationKind.Unavailable, outcome.reason.failureDetail, reason = outcome.reason.failureReason)
                     return
                 }
                 // The route never delivered a classifiable install frame. Carry
@@ -560,6 +613,12 @@ class AgentSessionIntegrationCoordinator(
                         } else {
                             "Could not verify Agent Center integration: ${detail.take(160)}"
                         },
+                        reason = if (detail == null) {
+                            AgentSessionIntegrationReason.InstallUnconfirmed
+                        } else {
+                            AgentSessionIntegrationReason.InstallUnconfirmedCode
+                        },
+                        reasonArgument = detail?.take(160),
                     )
                     return
                 }
@@ -570,6 +629,7 @@ class AgentSessionIntegrationCoordinator(
                     binding,
                     AgentSessionIntegrationKind.Unavailable,
                     "The terminal process state could not be verified.",
+                    reason = AgentSessionIntegrationReason.ProcessStateUnverified,
                 )
                 return
             }
@@ -581,6 +641,7 @@ class AgentSessionIntegrationCoordinator(
                         binding,
                         AgentSessionIntegrationKind.Unavailable,
                         "Integration was installed, but the foreground shell changed before activation.",
+                        reason = AgentSessionIntegrationReason.InstalledShellChanged,
                     )
                     return
                 }
@@ -603,6 +664,8 @@ class AgentSessionIntegrationCoordinator(
                             binding,
                             AgentSessionIntegrationKind.Unavailable,
                             "Integration was installed, but could not be enabled here: ${activation.reason.take(160)}",
+                            reason = AgentSessionIntegrationReason.InstalledNotEnabled,
+                            reasonArgument = activation.reason.take(160),
                         )
                         return
                     }
@@ -612,6 +675,7 @@ class AgentSessionIntegrationCoordinator(
                             binding,
                             AgentSessionIntegrationKind.Unavailable,
                             "Integration was installed, but the foreground shell changed before activation.",
+                            reason = AgentSessionIntegrationReason.InstalledShellChanged,
                         )
                         return
                     }
@@ -628,6 +692,7 @@ class AgentSessionIntegrationCoordinator(
             binding,
             AgentSessionIntegrationKind.Unavailable,
             "Provider settings changed during installation. Retry when they are idle.",
+            reason = AgentSessionIntegrationReason.ProviderSettingsChanging,
         )
     }
 
@@ -637,12 +702,12 @@ class AgentSessionIntegrationCoordinator(
         persist: Boolean,
     ) {
         val discovery = discoverProcesses(endpoint, binding) ?: run {
-            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The terminal process state could not be verified.")
+            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The terminal process state could not be verified.", reason = AgentSessionIntegrationReason.ProcessStateUnverified)
             return
         }
         val processIDs = discovery.foregroundShellProcessIDs
         if (processIDs.isEmpty()) {
-            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The current shell could not be verified.")
+            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The current shell could not be verified.", reason = AgentSessionIntegrationReason.ShellUnverified)
             return
         }
         setStatus(binding, AgentSessionIntegrationKind.Repairing)
@@ -650,7 +715,7 @@ class AgentSessionIntegrationCoordinator(
             if (persist) AgentShellActivationCommand.persistAndApplyFromSharedCore()
             else AgentShellActivationCommand.applyFromSharedCore()
         }.getOrElse {
-            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.")
+            setStatus(binding, AgentSessionIntegrationKind.Unavailable, "The shared Agent integration is unavailable.", reason = AgentSessionIntegrationReason.SharedIntegrationUnavailable)
             return
         }
         val result = endpoint.activateCurrentShell(binding, processIDs, command)
@@ -670,6 +735,7 @@ class AgentSessionIntegrationCoordinator(
                 binding,
                 AgentSessionIntegrationKind.Unavailable,
                 "The foreground shell changed before activation.",
+                reason = AgentSessionIntegrationReason.ShellChanged,
             )
         }
     }
@@ -736,7 +802,10 @@ class AgentSessionIntegrationCoordinator(
     }
 
     private fun bindingIsCurrent(endpoint: AgentSessionEndpoint, binding: AgentEndpointBinding): Boolean =
-        enabled && applicationForeground && endpoint.binding.value == binding && bindings[binding.key] == binding
+        ownsBinding(binding) && endpoint.binding.value == binding
+
+    private fun ownsBinding(binding: AgentEndpointBinding): Boolean =
+        enabled && applicationForeground && bindings[binding.key] == binding
 
     private fun setStatus(
         binding: AgentEndpointBinding,
@@ -751,11 +820,14 @@ class AgentSessionIntegrationCoordinator(
         ),
         foreground: AgentSessionIntegrationForeground? = null,
         agentRequiresLifecycleHook: Boolean? = null,
+        reason: AgentSessionIntegrationReason? = null,
+        reasonArgument: String? = null,
     ) {
         if (!enabled || bindings[binding.key] != binding ||
             (!applicationForeground && kind != AgentSessionIntegrationKind.Checking)
         ) return
         val key = binding.key
+        val previous = statusValues[key]
         val resolvedPrimaryAction = primaryAction ?: when (kind) {
             AgentSessionIntegrationKind.Unavailable -> AgentSessionIntegrationAction.Retry
             AgentSessionIntegrationKind.ManualCheckRequired -> AgentSessionIntegrationAction.Check
@@ -770,7 +842,28 @@ class AgentSessionIntegrationCoordinator(
             showsWarning,
             foreground,
             agentRequiresLifecycleHook,
+            reason,
+            reasonArgument,
+            agentLifecycleDeliverable = binding.transport != AgentEndpointTransport.MOSH,
         )
+        if (previous?.kind != kind || previous.detailReason != reason || previous.detail != detail ||
+            previous.foreground != foreground
+        ) {
+            // A frozen or wrong warning was unreadable without this: the exec
+            // log shows what ran, not what the session concluded from it.
+            diagnostics?.invoke(
+                "agent_integration_status",
+                mapOf(
+                    "kind" to kind.name,
+                    "previous" to (previous?.kind?.name ?: "none"),
+                    "reason" to (reason?.name ?: detail?.let(::diagnosticDetailCode) ?: "none"),
+                    "foreground" to (foreground?.name ?: "none"),
+                    "transport" to binding.transport.name,
+                    // Tells sessions apart without naming a host or pane.
+                    "session" to binding.key.liveSessionID.take(8),
+                ),
+            )
+        }
         publishStatuses()
     }
 
@@ -818,6 +911,12 @@ class AgentSessionIntegrationCoordinator(
 
 }
 
+/** An endpoint's reason by name, or a transport code as it came; any other detail (a host's words) only as "detail". */
+private fun diagnosticDetailCode(detail: String): String =
+    AgentEndpointUnavailableReason.entries.firstOrNull { it.reason == detail }?.name
+        ?: detail.takeIf { code -> code.length in 1..64 && code.all { it in 'a'..'z' || it in '0'..'9' || it == '_' } }
+        ?: "detail"
+
 internal fun lifecycleCapableForegroundProcessIDs(
     binding: AgentEndpointBinding,
     discovery: AgentProcessDiscoverySnapshot,
@@ -843,7 +942,15 @@ internal val AgentIntegrationStatus.sharedInstallation: SharedAgentIntegrationIn
         is AgentIntegrationStatus.RequiresAppUpdate -> SharedAgentIntegrationInstallation.RequiresAppUpdate
     }
 
-/** User-facing detail for Core's bounded install-failure vocabulary. */
+/** [failureDetail]'s reason, which a screen shows translated. */
+internal val SharedAgentIntegrationInstallFailure.failureReason: AgentSessionIntegrationReason
+    get() = when (this) {
+        SharedAgentIntegrationInstallFailure.NotVerified -> AgentSessionIntegrationReason.InstallNotVerified
+        SharedAgentIntegrationInstallFailure.NotCurrent -> AgentSessionIntegrationReason.InstallNotCurrent
+        SharedAgentIntegrationInstallFailure.NewerInstalled -> AgentSessionIntegrationReason.NewerInstalled
+    }
+
+/** English detail for Core's bounded install-failure vocabulary, kept for diagnostics and tests. */
 internal val SharedAgentIntegrationInstallFailure.failureDetail: String
     get() = when (this) {
         SharedAgentIntegrationInstallFailure.NotVerified ->

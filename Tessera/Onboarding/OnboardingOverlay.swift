@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The top layer of the `ContentView` ZStack while the walkthrough runs. Reads
 /// the merged onboarding anchors (resolved through the enclosing
@@ -25,9 +26,13 @@ struct OnboardingOverlay: View {
     private let spotlightStrokeWidth: CGFloat = 1.5
     private let spotlightEdgeInset: CGFloat = 2
     // Wide enough that the footer (page dots + skip + back + next) stays on a
-    // single line even at nine steps — a narrower callout wrapped "skip tour"
+    // single line for the shorter release tour — a narrower callout wrapped "skip tour"
     // and "back" onto two lines once the dot row grew.
     @State private var calloutSize: CGSize = CGSize(width: 360, height: 188)
+    /// Laptop pose: centred cards sit above the fold, and callouts off the
+    /// hinge. Steps aimed at the tab bar, which laptop pose hides, keep their
+    /// centred card.
+    @State private var laptop = LaptopCardLayout()
 
     private var edgeMargin: CGFloat { compact ? 12 : 24 }
     private var usesCompactLandscapeLayout: Bool {
@@ -57,6 +62,8 @@ struct OnboardingOverlay: View {
                 EmptyView()
             case .welcome:
                 welcomeLayer
+            case .whatsNew:
+                whatsNewLayer
             case .touring(let index):
                 if index >= 0 && index < controller.steps.count {
                     tourLayer(
@@ -67,6 +74,33 @@ struct OnboardingOverlay: View {
             }
         }
         .environment(\.designTokens, tokens)
+        // Over the whole overlay even while it is inactive, so a card is
+        // above the fold from its first frame.
+        .background(alignment: .topLeading) {
+            Color.clear
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .readsLaptopCardLayout($laptop)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .onChange(of: controller.phase, initial: true) { _, phase in
+            guard phase != .inactive else { return }
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+    }
+
+    private var whatsNewLayer: some View {
+        ZStack {
+            dimBackdrop(opacity: 0.76)
+            WhatsNewCard(
+                isPhone: compact,
+                onShowMe: { controller.startWhatsNewTour(isPhone: compact) },
+                onDone: { controller.dismissWhatsNew() }
+            )
+            .frame(width: centeredCardWidth)
+            .frame(maxHeight: maximumCardHeight)
+            .laptopCardPlacement(laptop)
+        }
     }
 
     // MARK: - Welcome
@@ -113,6 +147,7 @@ struct OnboardingOverlay: View {
             // scaled body copy wraps taller instead of clipping.
             .frame(width: min(440, max(280, geometry.size.width - edgeMargin * 2)))
             .background(cardBackground)
+            .laptopCardPlacement(laptop, scrolls: true)
         }
     }
 
@@ -190,6 +225,7 @@ struct OnboardingOverlay: View {
             }
             .frame(width: centeredCardWidth)
             .frame(maxHeight: maximumCardHeight)
+            .laptopCardPlacement(laptop)
         }
     }
 
@@ -254,7 +290,7 @@ struct OnboardingOverlay: View {
 
     @ViewBuilder
     private func footer(index: Int, isLast: Bool) -> some View {
-        if compact {
+        if compact || controller.steps.count > 9 {
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     dots(current: index)
@@ -294,7 +330,7 @@ struct OnboardingOverlay: View {
                 .foregroundStyle(tokens.fgDim)
                 .lineLimit(1)
                 .fixedSize()
-                .frame(minHeight: compact ? 44 : 0)
+                .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("onboarding-skip")
@@ -318,8 +354,7 @@ struct OnboardingOverlay: View {
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.horizontal, 12)
-                .frame(minHeight: compact ? 44 : 0)
-                .padding(.vertical, compact ? 0 : 7)
+                .frame(minHeight: 44)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(filled ? tokens.accent : Color.clear)
@@ -350,6 +385,8 @@ struct OnboardingOverlay: View {
             ShortcutsIllustration(tokens: tokens)
         case .filesPanel:
             FilesPanelIllustration(tokens: tokens, compact: compact)
+        case .openInArtifacts:
+            OpenInArtifactsIllustration()
         case .shareInOut:
             ShareInOutIllustration(tokens: tokens, compact: compact)
         case .agentImagePaste:
@@ -393,7 +430,18 @@ struct OnboardingOverlay: View {
 
     private func resolvedRect(for target: OnboardingTarget) -> CGRect? {
         guard let anchor = anchors[target] else { return nil }
-        return geometry[anchor]
+        return Self.visibleSpotlightRect(
+            geometry[anchor],
+            in: CGRect(origin: .zero, size: geometry.size)
+        )
+    }
+
+    static func visibleSpotlightRect(_ rect: CGRect, in bounds: CGRect) -> CGRect? {
+        guard !rect.isNull, !rect.isInfinite, !rect.isEmpty,
+              rect.minX.isFinite, rect.minY.isFinite,
+              rect.maxX.isFinite, rect.maxY.isFinite else { return nil }
+        let visible = rect.intersection(bounds)
+        return visible.isNull || visible.isEmpty ? nil : visible
     }
 
     private func hole(for rect: CGRect) -> CGRect {
@@ -422,6 +470,9 @@ struct OnboardingOverlay: View {
         var x: CGFloat
         var y: CGFloat
         switch placement {
+        case .above:
+            x = hole.midX - calloutSize.width / 2
+            y = hole.minY - calloutSize.height - gap
         case .below:
             x = hole.midX - calloutSize.width / 2
             y = hole.maxY + gap
@@ -431,6 +482,7 @@ struct OnboardingOverlay: View {
         }
         x = max(12, min(x, geometry.size.width - calloutSize.width - 12))
         y = max(12, min(y, geometry.size.height - calloutSize.height - 12))
+        y = laptop.calloutY(y, height: calloutSize.height, target: hole, containerHeight: geometry.size.height)
         return CGSize(width: x, height: y)
     }
 
@@ -815,6 +867,7 @@ private struct ShortcutsIllustration: View {
             (Chord.cmd("d").rendered(n), "split pane"),
             (Chord.cmdShift("e").rendered(n), "files panel"),
             (Chord.cmdShift("a").rendered(n), "agent center"),
+            (Chord.cmdShift("b").rendered(n), "artifacts"),
             (Chord.cmd("k").rendered(n), "session switcher"),
             (Chord([.command], .character(",")).rendered(n), "settings")
         ]

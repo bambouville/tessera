@@ -177,7 +177,7 @@ void request(simdjson::dom::element object, Peer& peer, const std::string& servi
         }
         peer.hello = true;
         peer.expires = Clock::now() + std::chrono::milliseconds(leaseMs);
-        peer.enqueue(prefix + "\"kind\":\"hello\",\"v\":3,\"experimental\":true,\"capabilities\":[\"claude.hookPreview\",\"jsonl.pages\",\"jsonl.subscriptions\",\"bounded.windows\",\"window.partitions\",\"pi.sessions.v1-v3\",\"opencode.sqlite.v1-v2\",\"kimi.wire.v1.4-v1.5\",\"read.progress.v1\",\"read.status.v1\",\"receipt.frontier.v1\",\"window.capacity.v1\"],"
+        peer.enqueue(prefix + "\"kind\":\"hello\",\"v\":3,\"experimental\":true,\"capabilities\":[\"claude.hookPreview\",\"jsonl.pages\",\"jsonl.subscriptions\",\"bounded.windows\",\"window.partitions\",\"pi.sessions.v1-v3\",\"opencode.sqlite.v1-v2\",\"kimi.wire.v1.4-v1.5\",\"read.progress.v1\",\"read.status.v1\",\"receipt.frontier.v1\",\"window.capacity.v1\",\"window.seek.v1\",\"search.v1\"],"
             "\"maxFrameBytes\":65536,\"maxWindowSegments\":" + std::to_string(PageWindow::maximumViewportSegments) +
             ",\"maxRetainedBytes\":" + std::to_string(PageWindow::serviceGrowthLimit) +
             ",\"servicePID\":" + std::to_string(::getpid()) +
@@ -277,7 +277,7 @@ void request(simdjson::dom::element object, Peer& peer, const std::string& servi
             subscription.pendingCursor.clear();
             subscription.waiting.clear(); subscription.ackDeadline = Clock::time_point::max();
         }
-    } else if (kind == "resolve" || kind == "inventory" || kind == "bootstrap" || kind == "history" || kind == "updates" || kind == "summary" ||
+    } else if (kind == "resolve" || kind == "inventory" || kind == "search" || kind == "bootstrap" || kind == "history" || kind == "updates" || kind == "summary" ||
                kind == "window.read" || kind == "window.ack" || kind == "window.cancel" || kind == "window.release" || kind == "receipt.frontier") {
         if (peer.reads.count(id)) { peer.closed = true; return; }
         const bool control = kind == "window.ack" || kind == "window.cancel" || kind == "window.release" || kind == "receipt.frontier";

@@ -118,12 +118,12 @@ fi
 recorder_pid=$!
 test_classes=com.bambouville.tessera.feature.agentcenter.AgentIngestionWindowInstrumentedTest,com.bambouville.tessera.feature.agentcenter.AgentContextPoolInstrumentedTest,com.bambouville.tessera.feature.agentcenter.AgentDetectedConversationInstrumentedTest,com.bambouville.tessera.feature.agentcenter.AgentIntegrationRecoveryInstrumentedTest
 scenes='deep-history history-with-live-head history-with-resegmentation forward-history latest chat-initial-bottom chat-same-record-growth chat-detached-before chat-detached-growth chat-returned-to-latest chat-coalesced-tools short-transcript-filled'
-# Window 8 + context pool 8 + detected 3 + integration recovery 4.
-expected_tests=23
+# Window 8 + context pool 9 + detected 5 + integration recovery 6.
+expected_tests=28
 if [[ "${TESSERA_AGENT_DETECTED_TEST:-0}" == 1 ]]; then
     test_classes=com.bambouville.tessera.feature.agentcenter.AgentDetectedConversationInstrumentedTest
     scenes=''
-    expected_tests=3
+    expected_tests=5
 fi
 if [[ "${TESSERA_AGENT_CHAT_FOLLOW_TEST:-0}" == 1 ]]; then
     window_test=com.bambouville.tessera.feature.agentcenter.AgentIngestionWindowInstrumentedTest

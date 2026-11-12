@@ -65,6 +65,29 @@ final class AgentIntegrationVersioningTests: XCTestCase {
     /// shell it did not load as active, so a changed agent-lifecycle.sh must
     /// raise that floor; otherwise shells holding the old script's state
     /// would never be asked to reload it.
+    /// Each installed script is one sh program with others quoted inside it
+    /// (python3 -c '...'); a stray quote in an embedded program ends its
+    /// argument early, and only the host's shell would notice. Linux hosts
+    /// run them with dash.
+    func testEveryInstalledScriptParsesAsShell() throws {
+        let scripts = [
+            "hook": Installer.hookScript, "launcher": Installer.launcherScript, "projector": Installer.projectorScript,
+            "semantic-launch": Installer.semanticLaunchScript, "process-proof": Installer.processProofScript,
+            "codex-readiness": Installer.codexReadinessScript, "claude-shim": Installer.claudeShimScript,
+            "codex-shim": Installer.codexShimScript, "uninstall": Installer.uninstallScript,
+            "codex-recovery": Installer.codexConversationRecoveryScript, "lifecycle": Installer.shellIntegration,
+        ]
+        let shells = ["/bin/sh", "/bin/dash"].filter { FileManager.default.isExecutableFile(atPath: $0) }
+        XCTAssertFalse(shells.isEmpty)
+        for (name, script) in scripts {
+            let file = home.appendingPathComponent("\(name).sh")
+            try script.write(to: file, atomically: true, encoding: .utf8)
+            for shell in shells {
+                XCTAssertEqual(try run("\(shell) -n '\(file.path)' && echo parsed"), "parsed\n", "\(name) under \(shell)")
+            }
+        }
+    }
+
     func testShellFloorCoversTheShellScript() {
         let digest = SHA256.hash(data: Data(Installer.shellIntegration(version: 0).utf8))
         let fingerprint = digest.map { String(format: "%02x", $0) }.joined()
@@ -110,7 +133,9 @@ final class AgentIntegrationVersioningTests: XCTestCase {
         let recovery = Installer.codexConversationRecoveryScript
         XCTAssertTrue(recovery.contains("def is_codex_launcher(pid):"))
         XCTAssertTrue(recovery.contains("def native_codex_child(pid, start_token):"))
-        XCTAssertTrue(recovery.contains("if len(candidates) != 1:"))
+        // The first TUI's shared server and its tools are no candidates.
+        XCTAssertTrue(recovery.contains("servers = {child for child, _ in candidates if codex_server(child)}"))
+        XCTAssertTrue(recovery.contains("if len(clients) != 1:"))
         XCTAssertTrue(recovery.contains("child_lock = observer_lock(child_pid)"))
         XCTAssertTrue(recovery.contains("watch_loop(child_pid, child_start, bootstrap=child_pid != pid)"))
         XCTAssertTrue(Installer.hookScript.contains(#"if previous is not None: sys.exit(3)"#))
@@ -139,7 +164,7 @@ final class AgentIntegrationVersioningTests: XCTestCase {
         XCTAssertTrue(hook.contains("\nTESSERA_AGENT_INTEGRATION_VERSION=\(Installer.integrationVersion)\n"))
         XCTAssertTrue(hook.contains("\nTESSERA_AGENT_INTEGRATION_COMPATIBLE_FROM=\(Installer.integrationCompatibleFrom)\n"))
         XCTAssertTrue(hook.contains("\nTESSERA_AGENT_EVENT_VERSION=\(Installer.lifecycleEventVersion)\n"))
-        XCTAssertTrue(hook.contains(#""rootAgentId":"%s"}' "$TESSERA_AGENT_EVENT_VERSION""#))
+        XCTAssertTrue(hook.contains(#""rootAgentId":"%s","toolUseId":"%s"}' "$TESSERA_AGENT_EVENT_VERSION""#))
         XCTAssertFalse(hook.contains(#"}' "$TESSERA_AGENT_INTEGRATION_VERSION""#))
         XCTAssertTrue(AgentLifecycleEnvelope.compatibleVersions.contains(Installer.lifecycleEventVersion))
         var stamped = 0
@@ -380,6 +405,71 @@ final class AgentIntegrationVersioningTests: XCTestCase {
         }
     }
 
+    /// macOS writes a shell's identity with `ps -o lstart`, which prints in the
+    /// caller's locale and zone, and the probe arrives over SSH without the
+    /// terminal's LANG; Apple's shells hide that environment from `ps eww`. A
+    /// shell started under another locale or zone must still be recognised from
+    /// its own marker, and a marker older than the process on its PID must not.
+    func testShellStartedUnderAnotherLocaleOrZoneStaysActive() throws {
+        let bin = tesseraDirectory.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        for shim in ["claude", "codex"] {
+            let url = bin.appendingPathComponent(shim)
+            try Data("#!/bin/sh\n".utf8).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let script = tesseraDirectory.appendingPathComponent("agent-lifecycle.sh")
+        try Data(Installer.shellIntegration(version: Installer.integrationVersion).utf8).write(to: script)
+        let probeEnvironment: [String: String?] = ["LANG": "C", "LC_ALL": nil, "LC_TIME": nil, "TZ": nil]
+        let terminals: [[String: String]] = [
+            ["LANG": "zh_CN.UTF-8"], ["LC_ALL": "fr_FR.UTF-8", "TZ": "Asia/Tokyo"], ["LANG": "C", "TZ": "Asia/Kolkata"],
+        ]
+        for terminal in terminals {
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            child.arguments = ["-c", #". "$HOME/.config/tessera/agent-lifecycle.sh"; exec sleep 30"#]
+            var environment = ProcessInfo.processInfo.environment
+            environment["HOME"] = home.path
+            for key in ["TMUX", "TMUX_PANE", "TESSERA_AGENT_INTEGRATION_VERSION", "TESSERA_AGENT_SHIM_VERSION", "LANG", "LC_ALL", "LC_TIME", "TZ"] {
+                environment[key] = nil
+            }
+            environment.merge(terminal) { $1 }
+            child.environment = environment
+            try child.run()
+            defer { child.terminate(); child.waitUntilExit() }
+            let pid = Int(child.processIdentifier)
+            let marker = tesseraDirectory.appendingPathComponent("active-shells/\(pid)")
+            let deadline = Date().addingTimeInterval(10)
+            while (try? String(contentsOf: marker, encoding: .utf8))?.hasPrefix("\(Installer.integrationVersion)|") != true, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            let written = try String(contentsOf: marker, encoding: .utf8)
+            // The fixture must be the field case: the probe's own reading of
+            // this shell's start differs from the one its marker holds.
+            let probeStart = try processStart(pid, environment: probeEnvironment)
+            XCTAssertFalse(written.contains("|\(probeStart)|"), "\(terminal) wrote the probe's own start: \(written)")
+            for inherited in [false, true] {
+                let command = Installer.makeShellStatusCommand(processIDs: [pid], allowInheritedEnvironment: inherited)
+                let output = try run(command, environment: probeEnvironment)
+                XCTAssertEqual(Installer.parseShellStatus(output), true, "\(terminal), inherited environment \(inherited): \(output)")
+                if !inherited {
+                    XCTAssertTrue(output.contains("proof=process-identity"), output)
+                }
+            }
+            func probe() throws -> String {
+                try run(Installer.makeShellStatusCommand(processIDs: [pid], allowInheritedEnvironment: false), environment: probeEnvironment)
+            }
+            // A marker an earlier process on this PID left proves nothing.
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: marker.path)
+            let reused = try probe()
+            XCTAssertEqual(Installer.parseShellStatus(reused), false, reused)
+            // Nor does one that is not a marker.
+            try Data(written.replacingOccurrences(of: ":", with: ";").utf8).write(to: marker)
+            let malformed = try probe()
+            XCTAssertEqual(Installer.parseShellStatus(malformed), false, malformed)
+        }
+    }
+
     // MARK: - Native host
 
     func testNativeActivationNeverReplacesANewerIntegrationsHost() throws {
@@ -432,7 +522,7 @@ final class AgentIntegrationVersioningTests: XCTestCase {
             .first { $0.hasPrefix("TESSERA_AGENT_INTEGRATION_VERSION=") }
     }
 
-    private func run(_ command: String, shell: String = "/bin/sh") throws -> String {
+    private func run(_ command: String, shell: String = "/bin/sh", environment overrides: [String: String?] = [:]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = ["-c", command]
@@ -444,6 +534,7 @@ final class AgentIntegrationVersioningTests: XCTestCase {
         for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "KIMI_CODE_HOME", "TESSERA_AGENT_INTEGRATION_VERSION", "TESSERA_AGENT_SHIM_VERSION"] {
             environment[key] = nil
         }
+        for (key, value) in overrides { environment[key] = value }
         process.environment = environment
         let output = Pipe()
         process.standardOutput = output
@@ -476,8 +567,8 @@ final class AgentIntegrationVersioningTests: XCTestCase {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private func processStart(_ pid: Int) throws -> String {
-        let value = try run("ps -o lstart= -p \(pid) | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'")
+    private func processStart(_ pid: Int, environment: [String: String?] = [:]) throws -> String {
+        let value = try run("ps -o lstart= -p \(pid) | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'", environment: environment)
             .trimmingCharacters(in: .newlines)
         XCTAssertFalse(value.isEmpty)
         return "ps:" + value

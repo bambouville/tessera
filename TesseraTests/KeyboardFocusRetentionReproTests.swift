@@ -161,7 +161,9 @@ final class KeyboardFocusRetentionReproTests: XCTestCase {
             CompactLayout.isPhone(.compact),
             "a compact-width iPad is treated as a phone by the keyboard latch"
         )
-        XCTAssertFalse(CompactLayout.isPhone(.regular))
+        // The phone idiom stays a phone at every width (an iPhone Duo's inner
+        // display is regular); only a regular-width iPad leaves the branch.
+        XCTAssertEqual(CompactLayout.isPhone(.regular), UIDevice.current.userInterfaceIdiom == .phone)
     }
 
     /// `dismissSoftwareKeyboard()` latches, and the only two clears are
@@ -438,8 +440,12 @@ final class KeyboardFocusRetentionReproTests: XCTestCase {
         XCTAssertTrue(background.becomeFirstResponder())
         background.setSessionDrawingEnabled(false)
 
-        let isTextInput = background is UITextInput
-        let stillFirstResponder = background.isFirstResponder
+        let candidate = try XCTUnwrap(
+            window.rootViewController?.view.subviews.first { $0 === background }
+        )
+        let isTextInput = candidate is UITextInput
+        XCTAssertTrue(isTextInput, "the activation repair must recognize the mounted terminal as text input")
+        let stillFirstResponder = candidate.isFirstResponder
 
         print("""
         DEFECT2PROBE bailCondition hidden=\(background.isHidden) \
@@ -498,6 +504,12 @@ final class KeyboardFocusRetentionReproTests: XCTestCase {
 //   dependency. Scope: `onHardwareKey` is non-nil only on the mosh session
 //   surface (SessionView.swift:7792), so this needs two mosh sessions mounted,
 //   and it costs PageUp/PageDown only — not all keys.
+//   STATUS FIXED (2026-10-25): `HardwareKeyboardEvents` (Keyboard/) now owns
+//   the only `keyChangedHandler` assignment and fans out to every coordinator
+//   and the ⌘ cheat sheet; coordinators subscribe instead of writing the slot.
+//   Fan-out order, weak tokens and mid-delivery cancellation are pinned in
+//   ShortcutCheatSheetTests.testHub*. Two live mosh sessions on a real
+//   keyboard remain a device check.
 //
 // Defect 6 — app-lock unlock has no reclaim of its own.
 //   `LockScreenView.onAppear` resigns app-wide (Security/LockScreenView.swift:100);

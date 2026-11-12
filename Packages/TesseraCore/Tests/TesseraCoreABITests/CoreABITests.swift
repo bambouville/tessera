@@ -942,7 +942,7 @@ final class CoreABITests: XCTestCase {
     func testCDestroyIsAContextLifetimeBarrier() throws {
         let counter = CallbackCounter()
         var capture: DestroyBarrierContext? = DestroyBarrierContext(counter: counter)
-        weak var weakCapture = capture
+        weak let weakCapture = capture
         let callbackEntered = capture!.callbackEntered
         let allowCallbackToReturn = capture!.allowCallbackToReturn
         let context = Unmanaged.passRetained(capture!).toOpaque()
@@ -986,7 +986,7 @@ final class CoreABITests: XCTestCase {
     func testReentrantCDestroySuppressesEveryLaterContextCallback() throws {
         let counter = CallbackCounter()
         var capture: ReentrantDestroyContext? = ReentrantDestroyContext(counter: counter)
-        weak var weakCapture = capture
+        weak let weakCapture = capture
         let callbackExited = capture!.callbackExited
         let context = Unmanaged.passRetained(capture!).toOpaque()
         let callback: TesseraCoreABIEventCallback = { _, _, context in

@@ -91,11 +91,22 @@ struct AppearanceSettingsView: View {
                     sub: "the full theme preview gallery remains available on iPad"
                 ) {
                     Menu {
+                        Button {
+                            appearance.terminalThemeSelection = TerminalTheme.automaticID
+                        } label: {
+                            if appearance.terminalThemeSelection == TerminalTheme.automaticID {
+                                Label("automatic", systemImage: "checkmark")
+                            } else {
+                                Text("automatic")
+                            }
+                            Text("follows light and dark mode")
+                        }
+                        Divider()
                         ForEach(TerminalTheme.all) { theme in
                             Button {
-                                appearance.terminalThemeID = theme.id
+                                appearance.terminalThemeSelection = theme.id
                             } label: {
-                                if appearance.terminalThemeID == theme.id {
+                                if appearance.terminalThemeSelection == theme.id {
                                     Label(theme.name, systemImage: "checkmark")
                                 } else {
                                     Text(theme.name)
@@ -104,9 +115,18 @@ struct AppearanceSettingsView: View {
                         }
                     } label: {
                         HStack {
-                            Text(TerminalTheme.find(id: appearance.terminalThemeID).name)
-                                .font(Typography.tesseraMono(size: 13))
-                                .foregroundStyle(T.fg)
+                            if appearance.terminalThemeSelection == TerminalTheme.automaticID {
+                                Text("automatic")
+                                    .font(Typography.tesseraMono(size: 13))
+                                    .foregroundStyle(T.fg)
+                                Text(verbatim: TerminalTheme.find(id: appearance.terminalThemeID).name)
+                                    .font(Typography.tesseraMono(size: 13))
+                                    .foregroundStyle(T.fgDim)
+                            } else {
+                                Text(TerminalTheme.find(id: appearance.terminalThemeID).name)
+                                    .font(Typography.tesseraMono(size: 13))
+                                    .foregroundStyle(T.fg)
+                            }
                             Spacer()
                             Image(systemName: "chevron.up.chevron.down")
                                 .font(.system(size: 11, weight: .semibold))

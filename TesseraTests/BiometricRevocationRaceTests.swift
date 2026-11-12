@@ -99,9 +99,11 @@ struct BiometricRevocationRaceTests {
                 window.rootViewController = nil
             }
 
+            @MainActor
             func installedAnchors() async throws -> Int {
                 try await Task.sleep(nanoseconds: 150_000_000)
                 host.view.layoutIfNeeded()
+                @MainActor
                 func count(_ view: UIView) -> Int {
                     (view is AppSwitcherPrivacyCover.Anchor ? 1 : 0)
                         + view.subviews.reduce(0) { $0 + count($1) }

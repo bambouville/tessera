@@ -22,6 +22,10 @@ public struct AgentABICommand: Codable, Equatable, Sendable {
         case projection
         case select
         case viewportAnchor
+        /// Where the reader of `threadID` stands in its history, for a read on
+        /// a new connection to open there. Replies a `readerPlace` event with
+        /// none or one result, echoing `ingestionRequestID` as its tag.
+        case readerPlace
         case releaseIngestionWindow
         case filter
         case search
@@ -31,6 +35,9 @@ public struct AgentABICommand: Codable, Equatable, Sendable {
         case action
         case armOutgoing
         case outgoingDispatched
+        /// Before each of an answer's writes: whether the prompt its lease was
+        /// granted for still waits. Replies "promptCurrent" or "promptChanged".
+        case promptAnswerCurrent
         case launch
         case result
         case acknowledge
@@ -90,6 +97,7 @@ public struct AgentABICommand: Codable, Equatable, Sendable {
     public let searchSnapshot: AgentSearchSnapshot?
     public let promptObservation: AgentPromptObservationRequest?
     /// With `promptObservation`: plan the next answer step on that capture.
+    /// A `threadID` reads it as that thread's answer does (`answerScreen`).
     public let promptAnswerPlan: AgentPromptAnswerPlanInput?
     /// With `promptObservation`: echoed on its reply, so a platform that
     /// stopped waiting for one request never takes its late reply for the
@@ -302,6 +310,8 @@ public struct AgentABICommand: Codable, Equatable, Sendable {
             break
         case .viewportAnchor:
             guard threadID != nil, recordID.map({ !$0.isEmpty && $0.utf8.count <= 256 }) ?? true else { throw AgentABIError.invalidField }
+        case .readerPlace:
+            guard threadID != nil, ingestionRequestID.map(AgentIngestionRange.identifier) == true else { throw AgentABIError.missingField }
         case .releaseIngestionWindow:
             guard threadID != nil else { throw AgentABIError.missingField }
         case .filter:
@@ -340,7 +350,7 @@ public struct AgentABICommand: Codable, Equatable, Sendable {
             // after token resolution in `apply`.
         case .armOutgoing:
             guard lease != nil, (projection != nil) != (frontier != nil), bindingToken != nil, binding == nil else { throw AgentABIError.missingField }
-        case .outgoingDispatched:
+        case .outgoingDispatched, .promptAnswerCurrent:
             guard lease != nil, bindingToken != nil, binding == nil, frontier == nil, projection == nil else { throw AgentABIError.missingField }
         case .launch:
             guard threadID != nil, launch != nil, bindingToken != nil, binding == nil else { throw AgentABIError.missingField }
@@ -400,6 +410,8 @@ public struct AgentABIEvent: Codable, Equatable, Sendable {
         case commandRejected
         case destroyed
         case routesRetired
+        /// The reply to a `readerPlace` command: `search` holds the place.
+        case readerPlace
     }
 
     public let version: Int
@@ -1361,7 +1373,7 @@ public final class AgentABIRuntime: @unchecked Sendable {
                   (await center.snapshot(for: threadID))?.binding == authority.binding
             else { throw AgentABIError.invalidField }
             let proof = AgentLifecycleBindingProof(hostID: authority.hostID, binding: authority.binding, sourceIdentity: authority.sourceIdentity, processIDs: authority.processIDs)
-            // Protect this holder while the actor reduces its first frame.
+            // Protect this holder while its first frame is reduced.
             // Proof registration is synchronous and may race that await.
             let previousLive = lock.withLock { livePlatformBindings.updateValue(authority.binding, forKey: threadID) }
             let acceptance = await center.applyLifecycle(lifecycle, proof: proof, expectedSourceIdentity: authority.sourceIdentity)
@@ -1480,6 +1492,11 @@ public final class AgentABIRuntime: @unchecked Sendable {
         case .viewportAnchor:
             guard let threadID = command.threadID else { throw AgentABIError.missingField }
             await center.setIngestionViewportAnchor(command.recordID, for: threadID)
+        case .readerPlace:
+            guard let threadID = command.threadID else { throw AgentABIError.missingField }
+            let place = await center.ingestionReaderPlace(for: threadID)
+            emit(.init(kind: .readerPlace, generation: nextGeneration(), search: AgentSearchSnapshot(results: place.map { [$0] } ?? []),
+                       ingestionRequestID: command.ingestionRequestID))
         case .hostCapacity:
             for (key, segments) in command.hostWindowSegments ?? [:] {
                 if let hostID = UUID(uuidString: key) { await center.setIngestionHostSegments(segments, for: hostID, thread: command.threadID) }
@@ -1503,7 +1520,14 @@ public final class AgentABIRuntime: @unchecked Sendable {
             emit(.init(kind: .searchSnapshot, generation: nextGeneration(), search: snapshot))
         case .promptObservation:
             guard let request = command.promptObservation else { throw AgentABIError.missingField }
-            let observed = AgentPromptGrammar.observe(request)
+            // An answer reads the screen it writes to. A dialog whose question
+            // scrolled off is its thread's prompt only through the call that
+            // names it; without the thread, its bare signature answers nothing.
+            let observed = if let threadID = command.threadID {
+                await center.answerScreen(request, threadID: threadID)
+            } else {
+                AgentPromptGrammar.observe(request, allowingCroppedTop: true)
+            }
             let plan = command.promptAnswerPlan.map { input in
                 AgentPromptAnswerPlanner.next(provider: request.providerID, goal: input.goal,
                     expectedSignature: input.expectedSignature, anchor: input.anchor,
@@ -1575,6 +1599,16 @@ public final class AgentABIRuntime: @unchecked Sendable {
             } else { throw AgentABIError.invalidField }
             emit(.init(kind: .threadSnapshot, generation: nextGeneration(), thread: await center.snapshot(for: lease.threadID), lease: lease,
                 code: command.kind == .outgoingDispatched ? "outgoingDispatched" : "outgoingArmed"))
+        case .promptAnswerCurrent:
+            // Every refusal is a reply, so a write waits on no timeout.
+            guard let lease = command.lease else { throw AgentABIError.missingField }
+            var current = false
+            if let authority = platformBinding(token: command.bindingToken, threadID: lease.threadID),
+               authority.mode == .actionable, authority.binding == lease.binding {
+                current = (try? await center.requirePromptCurrent(lease)) != nil
+            }
+            emit(.init(kind: .threadSnapshot, generation: nextGeneration(), thread: await center.snapshot(for: lease.threadID), lease: lease,
+                code: current ? "promptCurrent" : "promptChanged"))
         case .launch:
             guard let threadID = command.threadID, let intent = command.launch else { throw AgentABIError.missingField }
             guard let authority = platformBinding(token: command.bindingToken, threadID: threadID),

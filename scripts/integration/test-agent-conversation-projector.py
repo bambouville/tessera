@@ -37,7 +37,7 @@ elif len(sys.argv) == 1:
     PROJECTOR.chmod(0o700)
 else:
     raise SystemExit("usage: test-agent-conversation-projector.py [/path/to/dumped-projector.sh]")
-START_MARKER = 'exec "$tessera_python" -c \'\n'
+START_MARKER = 'exec "$tessera_python" -I -c \'\n'
 END_MARKER = '\ntry:\n    raw = sys.stdin.buffer.read(MAX_REQUEST + 1)'
 
 

@@ -77,10 +77,10 @@ extension SSHClient {
 
         defer { session.inboundChannelHandler.unregisterForwardedTCPIP(host: host, port: port) }
 
-        let response = try await eventLoop.flatSubmit {
-            let responsePromise = self.eventLoop.makePromise(of: GlobalRequest.TCPForwardingResponse?.self)
-            self.logger.debug("Sending TCP forwarding request", metadata: ["host": "\(host)", "port": "\(port)"])
-            self.session.sshHandler.value.sendTCPForwardingRequest(
+        let response = try await eventLoop.flatSubmit { [eventLoop, logger, sshHandler = session.sshHandler] in
+            let responsePromise = eventLoop.makePromise(of: GlobalRequest.TCPForwardingResponse?.self)
+            logger.debug("Sending TCP forwarding request", metadata: ["host": "\(host)", "port": "\(port)"])
+            sshHandler.value.sendTCPForwardingRequest(
                 .listen(host: host, port: port),
                 promise: responsePromise
             )
@@ -143,7 +143,9 @@ extension SSHClient {
     /// ```swift
     /// try await client.withRemotePortForward(
     ///     host: "0.0.0.0",
-    ///     port: 8080
+    ///     port: 8080,
+    ///     inboundType: ByteBuffer.self,
+    ///     outboundType: ByteBuffer.self
     /// ) { (channel: NIOAsyncChannel<ByteBuffer, ByteBuffer>) in
     ///     // Handle each connection using structured concurrency
     ///     try await channel.executeThenClose { inbound, outbound in
@@ -168,8 +170,8 @@ extension SSHClient {
     public func withRemotePortForward<Inbound: Sendable, Outbound: Sendable>(
         host: String,
         port: Int,
-        inboundType: Inbound.Type = ByteBuffer.self,
-        outboundType: Outbound.Type = ByteBuffer.self,
+        inboundType: Inbound.Type,
+        outboundType: Outbound.Type,
         configure: @escaping @Sendable (Channel) -> EventLoopFuture<Void> = { $0.eventLoop.makeSucceededVoidFuture() },
         onOpen: @escaping @Sendable (SSHRemotePortForward) async throws -> Void = { _ in },
         onAccept: @escaping @Sendable (NIOAsyncChannel<Inbound, Outbound>) async throws -> Void
@@ -258,6 +260,8 @@ extension SSHClient {
         try await withRemotePortForward(
             host: host,
             port: port,
+            inboundType: ByteBuffer.self,
+            outboundType: ByteBuffer.self,
             onOpen: onOpen
          ) { inboundClient in
             let outboundClient = try await ClientBootstrap(group: inboundClient.channel.eventLoop)

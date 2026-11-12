@@ -46,7 +46,7 @@ public enum AgentHostDeployment {
             integration: RemoteAgentLifecycleIntegrationInstaller.integrationVersion
         )
         let payload = try encoder.encode(stamped).base64EncodedString()
-        return "python3 -c " + quote(program) + " <<'TESSERA_ARTIFACT_REQUEST'\n" + payload + "\nTESSERA_ARTIFACT_REQUEST"
+        return "python3 -I -c " + quote(program) + " <<'TESSERA_ARTIFACT_REQUEST'\n" + payload + "\nTESSERA_ARTIFACT_REQUEST"
     }
 
     private static func quote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }

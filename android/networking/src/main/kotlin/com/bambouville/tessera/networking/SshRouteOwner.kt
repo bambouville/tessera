@@ -43,6 +43,11 @@ class SshRouteOwner internal constructor(
     private val children = linkedSetOf<Closeable>()
     private var closed = false
 
+    // Sessions forward over the route they run on. Without this, every SSH and
+    // SSH+tmux session refused forwarding as a "shared SSH route"; the
+    // controller detaches its listeners before it closes the route.
+    private val forwardingRuntimeFactory = AuthenticatedForwardingRuntimeFactory(finalClient)
+
     /** Live child count, unlike the endpoint's lifetime count of open attempts. */
     val activeExecChannels: Int
         get() = synchronized(lifecycleLock) { children.count { it is SshExecStream } }
@@ -80,6 +85,7 @@ class SshRouteOwner internal constructor(
                     owner = this@SshRouteOwner,
                     session = session,
                     shell = shell,
+                    forwardingRuntimeFactory = forwardingRuntimeFactory,
                     closeRouteOnClose = closeRouteOnClose,
                     routeMarker = acceptedRouteMarker,
                 ),
@@ -118,6 +124,7 @@ class SshRouteOwner internal constructor(
                     owner = this,
                     session = session,
                     command = command,
+                    forwardingRuntimeFactory = forwardingRuntimeFactory,
                     closeRouteOnClose = closeRouteOnClose,
                 ),
             )
@@ -130,7 +137,7 @@ class SshRouteOwner internal constructor(
     suspend fun openFiles(closeRouteOnClose: Boolean = false): SshFileConnection = acquireSshResource {
         val sftp = finalClient.newSFTPClient()
         try {
-            register(SshFileConnection(this@SshRouteOwner, sftp, closeRouteOnClose))
+            register(SshFileConnection(this@SshRouteOwner, sftp, closeRouteOnClose, forwardingRuntimeFactory))
         } catch (failure: Throwable) {
             runCatching { sftp.close() }
             throw failure
@@ -221,7 +228,7 @@ class SshRouteOwner internal constructor(
         }
         if (closeImmediately) {
             child.close()
-            throw IllegalStateException("SSH route is closed")
+            throw SshRouteClosedException()
         }
         return child
     }
@@ -323,6 +330,9 @@ data class SshExecRequest(
 }
 
 data class SshExecExitStatus(val code: Int?)
+
+/** A channel was asked of a route that had already closed. */
+class SshRouteClosedException : IllegalStateException("SSH route is closed")
 
 class SshExecStreamLimitExceeded(val stream: String, val limit: Int) : IllegalStateException(
     "$stream exceeded its bounded SSH exec limit",

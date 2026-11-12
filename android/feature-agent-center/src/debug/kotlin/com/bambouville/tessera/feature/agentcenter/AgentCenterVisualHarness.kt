@@ -76,8 +76,12 @@ fun AgentCenterVisualHarness(scene: AgentCenterHarnessScene, modifier: Modifier 
             modifier = modifier,
         )
         AgentCenterHarnessScene.TabletSplit -> Box(modifier.background(LocalTesseraTokens.current.bg)) {
+            // The selected thread is open beside the list, so its row folds its
+            // answers; the other waiting thread shows them on its row.
+            var answerFolds by remember { mutableStateOf(AgentRowAnswerFolds()) }
             Row(Modifier.fillMaxSize()) {
-                AgentListPane(fixture.state, port::search, port::select, port::grouping, { port.launch(AgentLaunchKind.Spawn) }, Modifier.width(320.dp).fillMaxHeight())
+                AgentListPane(fixture.tabletState, port::search, port::select, port::grouping, { port.launch(AgentLaunchKind.Spawn) }, Modifier.width(320.dp).fillMaxHeight(),
+                    detailBeside = true, answerFolds = answerFolds, onToggleAnswers = { key, open -> answerFolds = answerFolds.choosing(key, open) })
                 TesseraHairline(Modifier.width(1.dp).fillMaxHeight())
                 AgentDetailPane(
                     detail = fixture.actionableDetail, draft = "", onDraftChange = port::draft, onSend = port::send,
@@ -196,6 +200,20 @@ private class AgentHarnessFixture {
         threads = listOf(actionableDetail.row),
         selectedThreadKey = actionableDetail.row.key,
         detail = actionableDetail,
+    )
+    /** A second waiting thread that is not the one open beside the list. */
+    private val otherWaitingDetail = actionableDetail.copy(
+        row = actionableDetail.row.copy(
+            key = canonicalAgentThreadKey("fixture-host", "claude", "fixture-billing"),
+            providerSessionID = "fixture-billing",
+            title = "Migrate billing tables",
+            preview = "Run the migration now?",
+        ),
+        prompt = actionableDetail.prompt?.copy(actionToken = "fixture-token-billing", title = "Run the migration now?"),
+    )
+    val tabletState = state.copy(
+        threads = listOf(actionableDetail.row, otherWaitingDetail.row),
+        projectedDetails = listOf(actionableDetail, otherWaitingDetail).associateBy { it.row.key },
     )
 }
 

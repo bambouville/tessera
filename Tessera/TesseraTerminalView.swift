@@ -72,9 +72,13 @@ final class TesseraResponderAwareTerminalView: TerminalView {
             return
         }
         let grid = TerminalResizeCoalescer.Size(cols: getTerminal().cols, rows: getTerminal().rows)
-        // Font changes and explicit grid ownership can resize outside layout.
-        // A return to the old bounds must reconcile those changes too.
+        // Explicit grid ownership can resize outside layout, so a return to
+        // the old bounds must reconcile that too. A new font arrives here as a
+        // new cell size under the same bounds and grid.
         guard newSize != appliedLayoutSize || grid != appliedLayoutGrid || getOptimalFrameSize() != appliedGridFrame else { return }
+        // Only the cells changed: nothing to wait out but the rest of this
+        // pass, in which a host that sizes the view in cells moves its frame.
+        let cellsOnly = newSize == appliedLayoutSize && grid == appliedLayoutGrid
         let gridFrame = getOptimalFrameSize()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.bounds.size == newSize else { return }
@@ -85,14 +89,447 @@ final class TesseraResponderAwareTerminalView: TerminalView {
             self.commitLayoutSize(newSize)
         }
         pendingLayoutResize = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + TerminalResizeCoalescer.settleSeconds, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (cellsOnly ? 0 : TerminalResizeCoalescer.settleSeconds), execute: work)
     }
 
     private func commitLayoutSize(_ size: CGSize) {
+        // The bounds already hold the new size; the reader sat in the old.
+        let placedUnder = appliedLayoutSize?.height ?? 0
+        // The width and cells the columns were fitted to: a new height alone
+        // rewraps nothing.
+        let rewraps = size.width != appliedLayoutSize?.width || getTerminal().cols != appliedLayoutGrid?.cols
+            || getOptimalFrameSize().width != appliedGridFrame?.width
         appliedLayoutSize = size
+        let before = readerBeforeChange(placedUnder: placedUnder, rewraps: rewraps)
+        let grid = TerminalResizeCoalescer.Size(cols: getTerminal().cols, rows: getTerminal().rows)
         super.layoutTerminalSizeChanged(to: size)
         appliedLayoutGrid = .init(cols: getTerminal().cols, rows: getTerminal().rows)
         appliedGridFrame = getOptimalFrameSize()
+        guard appliedLayoutGrid != grid else { return }
+        let top = before.anchor.flatMap(readerTop(for:))
+        if let top { place(top) }
+        if pendingParks > 0 {
+            // A host that answers the new grid with its own resize queued
+            // another park, measured while the scroller still held the old
+            // rows: the place before this change stands for both.
+            pendingChange = PendingChange(top: top, geometry: before.geometry)
+        } else {
+            onGeometryChanged?(before.geometry, geometry())
+        }
+    }
+
+    /// A grid the host sets outright. SwiftTerm parks the scroller at the
+    /// live tail a turn later, even for the grid it already has; the reader
+    /// goes back on their row after that. The row is found right after the
+    /// change, so output before the park doesn't move it.
+    func resizeKeepingReader(cols: Int, rows: Int) {
+        let before = readerBeforeChange(rewraps: cols != getTerminal().cols)
+        resize(cols: cols, rows: rows)
+        pendingChange = PendingChange(top: before.anchor.flatMap(readerTop(for:)), geometry: before.geometry)
+    }
+
+    /// SwiftTerm keeps a reader's row in the new font's offsets.
+    func setFontKeepingReader(_ newFont: UIFont) {
+        // A queued park re-places the reader and reports the whole change,
+        // from the geometry before it.
+        guard pendingChange == nil else {
+            font = newFont
+            return
+        }
+        let reading = pendingParks == 0 && readerTop() != nil
+        let before = geometry()
+        font = newFont
+        // SwiftTerm keeps the top row in the new cells, which puts a reader
+        // who was on the live tail above it, where the refit that follows
+        // would keep them as one reading history.
+        if pendingParks == 0, !reading, !getTerminal().isCurrentBufferAlternate {
+            contentOffset.y = max(0, contentSize.height - getOptimalFrameSize().height)
+        }
+        onGeometryChanged?(before, geometry())
+        // A fresh view's first font has no reader for the host to follow.
+        if reading { onReaderReplaced?() }
+    }
+
+    /// The host's retained reader offset follows a re-placement made here.
+    var onReaderReplaced: (() -> Void)?
+
+    /// A host put the reader back in a page it repainted (a tmux rebuild);
+    /// `held`: the host held their place through output before the rebuild.
+    var onReaderPlaced: ((_ held: Bool) -> Void)?
+
+    /// Whether the host holds the reader's place through output.
+    var holdsReader: (() -> Bool)?
+
+    /// A new font or grid, for a place recorded in the old one.
+    var onGeometryChanged: ((Geometry, Geometry) -> Void)?
+
+    struct Geometry: Equatable {
+        var cellHeight: CGFloat
+        var rows: Int
+        var cursorRow: Int
+        /// Rows above the screen.
+        var historyRows: Int
+        var alternateScreen: Bool
+    }
+
+    private func geometry() -> Geometry {
+        let terminal = getTerminal()
+        let cell = getOptimalFrameSize().height / CGFloat(max(1, terminal.rows))
+        return Geometry(
+            cellHeight: cell,
+            rows: terminal.rows,
+            cursorRow: terminal.getCursorLocation().y,
+            historyRows: cell > 0 ? max(0, Int((contentSize.height / cell).rounded()) - terminal.rows) : 0,
+            alternateScreen: terminal.isCurrentBufferAlternate
+        )
+    }
+
+    /// Parks SwiftTerm has queued and not yet made.
+    private var pendingParks = 0
+    /// Where the reader goes when they are made, and the geometry before the
+    /// first of the changes they follow: until SwiftTerm parks, the scroller
+    /// still holds the old rows.
+    private var pendingChange: PendingChange?
+
+    private struct PendingChange {
+        var top: ReaderTop?
+        var geometry: Geometry
+    }
+
+    private func readerBeforeChange(
+        placedUnder height: CGFloat = 0,
+        rewraps: Bool
+    ) -> (anchor: ReaderAnchor?, geometry: Geometry) {
+        if let pendingChange { return (pendingChange.top.flatMap { anchor(for: $0, rewraps: rewraps) }, pendingChange.geometry) }
+        let top = pendingParks > 0 ? nil : readerTop(placedUnder: height)
+        return (top.flatMap { anchor(for: $0, rewraps: rewraps) }, geometry())
+    }
+
+    override func sizeChanged(source: Terminal) {
+        pendingParks += 1
+        super.sizeChanged(source: source)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pendingParks -= 1
+            guard self.pendingParks == 0, let change = self.pendingChange else { return }
+            self.pendingChange = nil
+            if let top = change.top { self.place(top) }
+            self.onGeometryChanged?(change.geometry, self.geometry())
+        }
+    }
+
+    /// SwiftTerm parks the scroller at the live tail after every grid change,
+    /// so a font change or refit dropped a reader in history at the tail,
+    /// where a tmux rebuild then recorded them. A grid change keeps the
+    /// cursor's line and the lines above it, but a shorter grid drops the
+    /// blank rows below the cursor and a narrower one rewraps lines, so the
+    /// reader is kept as the lines from theirs down to the cursor's and the
+    /// cells into their line where their top row starts. A new height alone
+    /// keeps every row from theirs down to the cursor's: those rows are
+    /// enough, and don't walk the transcript's lines.
+    private struct ReaderAnchor {
+        let columns: Int
+        let rowsAboveCursor: Int
+        let line: (linesAboveCursor: Int, column: Int)?
+        let fraction: CGFloat
+    }
+
+    /// The reader's top row, counted as `getScrollInvariantLine` counts so
+    /// that rows the scrollback limit trims don't move it, and the part of
+    /// it above the view.
+    private struct ReaderTop {
+        let invariantRow: Int
+        let fraction: CGFloat
+    }
+
+    /// Nil at the live tail and on the alternate screen. `height`: bounds
+    /// the reader was placed under before a refit changed them.
+    private func readerTop(placedUnder height: CGFloat = 0) -> ReaderTop? {
+        guard let rows = BufferRows(self) else { return nil }
+        let tail = contentSize.height - getOptimalFrameSize().height
+        // SwiftTerm parks at the grid's tail, a host's clamp at the bounds':
+        // a frame taller than its rows leaves a reader between the two. Less
+        // than a row above the grid's tail is on it, as SwiftTerm's output
+        // rule has it (`historyEdgeOffsetY`), unless the host holds them
+        // there through output (a trackpad or VoiceOver page): its next
+        // output puts them back, so a new font or grid must keep them too.
+        let gridEdge = holdsReader?() == true ? tail - 1 : (tail - rows.cell).nextUp
+        guard contentOffset.y < min(contentSize.height - max(bounds.height, height) - 1, gridEdge) else { return nil }
+        let row = min(rows.cursor, max(0, Int((contentOffset.y / rows.cell).rounded(.down))))
+        return ReaderTop(
+            invariantRow: rows.firstInvariantRow + row,
+            fraction: min(max(0, contentOffset.y / rows.cell - CGFloat(row)), 1)
+        )
+    }
+
+    private func anchor(for top: ReaderTop, rewraps: Bool) -> ReaderAnchor? {
+        guard let rows = BufferRows(self) else { return nil }
+        let row = min(rows.cursor, max(0, top.invariantRow - rows.firstInvariantRow))
+        guard rewraps else {
+            return ReaderAnchor(columns: rows.columns, rowsAboveCursor: rows.cursor - row, line: nil, fraction: top.fraction)
+        }
+        let start = rows.lineStart(row)
+        var lines = 0
+        if start < rows.cursor {
+            for later in (start + 1)...rows.cursor where !rows.continuesLine(later) { lines += 1 }
+        }
+        return ReaderAnchor(
+            columns: rows.columns,
+            rowsAboveCursor: rows.cursor - row,
+            line: (lines, (row - start) * rows.columns),
+            fraction: top.fraction
+        )
+    }
+
+    private func readerTop(for anchor: ReaderAnchor) -> ReaderTop? {
+        guard let rows = BufferRows(self) else { return nil }
+        // The same columns keep every row from the reader's down to the
+        // cursor's; rows the scrollback limit trimmed went from the top.
+        guard let line = anchor.line, rows.columns != anchor.columns else {
+            return ReaderTop(
+                invariantRow: rows.firstInvariantRow + max(0, rows.cursor - anchor.rowsAboveCursor),
+                fraction: anchor.fraction
+            )
+        }
+        var start = rows.lineStart(rows.cursor)
+        var lines = line.linesAboveCursor
+        while lines > 0, start > 0 {
+            start = rows.lineStart(start - 1)
+            lines -= 1
+        }
+        var end = start
+        while end < rows.cursor, rows.continuesLine(end + 1) { end += 1 }
+        return ReaderTop(
+            invariantRow: rows.firstInvariantRow + min(end, start + line.column / rows.columns),
+            fraction: anchor.fraction
+        )
+    }
+
+    private func place(_ top: ReaderTop) {
+        guard let rows = BufferRows(self) else { return }
+        let tail = contentSize.height - getOptimalFrameSize().height
+        let offsetY = max(0, (CGFloat(top.invariantRow - rows.firstInvariantRow) + top.fraction) * rows.cell)
+        if offsetY < tail - 0.5 { contentOffset.y = offsetY }
+        onReaderReplaced?()
+    }
+
+    /// The text the reader sees at the top of the view, without its blanks.
+    /// A tmux rebuild after a new width repaints history in tmux's rows,
+    /// which need not be the ones SwiftTerm rewrapped, but the characters
+    /// keep their order.
+    struct ReaderText: Equatable {
+        let characters: [Character]
+        /// Rows from the reader's top row down to the first character's.
+        let leadRows: Int
+        let fraction: CGFloat
+    }
+
+    /// Nil at the live tail, on the alternate screen and above blank rows.
+    func readerText() -> ReaderText? {
+        guard let rows = BufferRows(self), let top = readerTop() else { return nil }
+        let row = top.invariantRow - rows.firstInvariantRow
+        var characters: [Character] = []
+        var leadRows: Int?
+        rowsBelow: for later in row...min(rows.cursor, row + Self.readerTextRows) {
+            for character in rows.text(later) where BufferRows.isInk(character) {
+                if leadRows == nil { leadRows = later - row }
+                characters.append(character)
+                if characters.count == Self.readerTextLength { break rowsBelow }
+            }
+        }
+        // A lone prompt sign would match the nearest other one.
+        guard let leadRows, characters.count >= Self.readerTextMinimum else { return nil }
+        return ReaderText(characters: characters, leadRows: leadRows, fraction: top.fraction)
+    }
+
+    private static let readerTextRows = 16
+    private static let readerTextLength = 48
+    private static let readerTextMinimum = 8
+
+    /// The offset that puts `text` back at the top of the view, where it is
+    /// nearest to `estimate` and no farther from it than `distance`; nil
+    /// when the transcript doesn't have it there.
+    func offsetY(of text: ReaderText, near estimate: CGFloat, within distance: CGFloat) -> CGFloat? {
+        guard let rows = BufferRows(self), !text.characters.isEmpty else { return nil }
+        let target = Int((estimate / rows.cell).rounded(.down)) + text.leadRows
+        let screens = 2 * getTerminal().rows
+        let reach = max(screens, Int((distance / rows.cell).rounded(.up)))
+        // Nearby first; the whole reach only when that misses.
+        for span in reach > screens ? [screens, reach] : [reach] {
+            let low = max(0, target - span)
+            let high = min(rows.cursor, target + span + Self.readerTextRows)
+            if low <= high, let found = rows.row(of: text.characters, in: low...high, nearest: target) {
+                return max(0, (CGFloat(found - text.leadRows) + text.fraction) * rows.cell)
+            }
+        }
+        return nil
+    }
+
+    /// The last search, which a placement retried before the page grew
+    /// would repeat over the same rows.
+    private var lastReaderSearch: (text: ReaderText, estimate: CGFloat, height: CGFloat, offsetY: CGFloat?)?
+
+    /// Where a rebuilt page puts a reader recorded at `anchor`: their text,
+    /// found near their distance from the tail, else that distance.
+    /// `matched` is nil when there was no text to look for.
+    func offsetY(
+        restoring anchor: InlineTmuxHistoryRequestState.ScrollAnchor,
+        text: ReaderText?
+    ) -> (offsetY: CGFloat, matched: Bool?) {
+        let maxOffsetY = max(0, contentSize.height - bounds.height)
+        let distanceY = anchor.restoredOffsetY(newMaxOffsetY: maxOffsetY)
+        guard let text else { return (distanceY, nil) }
+        let matchedY: CGFloat?
+        if let last = lastReaderSearch, last.text == text, last.estimate == distanceY, last.height == contentSize.height {
+            matchedY = last.offsetY
+        } else {
+            matchedY = offsetY(of: text, near: distanceY, within: anchor.distanceFromBottom)
+            lastReaderSearch = (text, distanceY, contentSize.height, matchedY)
+        }
+        return (min(matchedY ?? distanceY, maxOffsetY), matchedY != nil)
+    }
+
+    private var firstInvariantRowHint = 0
+
+    /// The primary buffer's rows as SwiftTerm keeps them, row 0 the oldest,
+    /// for walking lines. Nil on the alternate screen. These are the live
+    /// rows: a synchronized-output frame shows the scroller an older copy,
+    /// whose rows the live buffer has kept and added to, so the reader's row
+    /// is the same in both, but the cursor is only right in the live one.
+    /// Once the scrollback is full, rows the frame scrolled out of it shift
+    /// the reader's row by as many until the frame ends.
+    private struct BufferRows {
+        let terminal: Terminal
+        let cell: CGFloat
+        let columns: Int
+        let cursor: Int
+        /// `getScrollInvariantLine`'s row for row 0: it counts the rows the
+        /// scrollback limit has trimmed too.
+        let firstInvariantRow: Int
+
+        init?(_ view: TesseraResponderAwareTerminalView) {
+            let terminal = view.getTerminal()
+            let grid = view.getOptimalFrameSize().height
+            guard !terminal.isCurrentBufferAlternate, terminal.rows > 0, terminal.cols > 0, grid > 0,
+                  let first = Self.firstInvariantRow(terminal, hint: view.firstInvariantRowHint)
+            else { return nil }
+            view.firstInvariantRowHint = first
+            let count = Self.rowCount(terminal, from: first)
+            guard count >= terminal.rows else { return nil }
+            self.terminal = terminal
+            cell = grid / CGFloat(terminal.rows)
+            columns = terminal.cols
+            cursor = count - terminal.rows + min(max(0, terminal.getCursorLocation().y), terminal.rows - 1)
+            firstInvariantRow = first
+        }
+
+        /// SwiftTerm keeps at least a screen of rows, from its first
+        /// invariant one on: a step of a screen can't pass over them. Rows
+        /// the scrollback limit trims move the first one past the hint; a
+        /// buffer cleared since starts again below it.
+        private static func firstInvariantRow(_ terminal: Terminal, hint: Int) -> Int? {
+            func kept(_ row: Int) -> Bool { terminal.getScrollInvariantLine(row: row) != nil }
+            let step = terminal.rows
+            var found: Int?
+            if kept(hint) {
+                found = hint
+            } else {
+                var up = hint, down = 0
+                while found == nil {
+                    if down < hint, kept(down) {
+                        found = down
+                    } else if kept(up) {
+                        found = up
+                    } else {
+                        guard up <= Int.max - step else { return nil }
+                        up += step
+                        down += step
+                    }
+                }
+            }
+            guard let found else { return nil }
+            // Kept from the first row through `found`, none before it.
+            var low = found == hint ? 0 : max(0, found - step), high = found
+            while low < high {
+                let mid = low + (high - low) / 2
+                if kept(mid) { high = mid } else { low = mid + 1 }
+            }
+            return low
+        }
+
+        private static func rowCount(_ terminal: Terminal, from first: Int) -> Int {
+            func kept(_ count: Int) -> Bool { terminal.getScrollInvariantLine(row: first + count - 1) != nil }
+            var low = 1, high = max(2, terminal.rows)
+            while kept(high) {
+                guard high <= Int.max / 2 - first else { return high }
+                low = high
+                high *= 2
+            }
+            while high - low > 1 {
+                let mid = low + (high - low) / 2
+                if kept(mid) { low = mid } else { high = mid }
+            }
+            return low
+        }
+
+        private func bufferLine(_ row: Int) -> BufferLine? {
+            terminal.getScrollInvariantLine(row: row + firstInvariantRow)
+        }
+
+        /// The row's wrap flag, which SwiftTerm's own rewrap keeps lines by.
+        func continuesLine(_ row: Int) -> Bool {
+            row > 0 && bufferLine(row)?.isWrapped == true
+        }
+
+        func lineStart(_ row: Int) -> Int {
+            var start = row
+            while continuesLine(start) { start -= 1 }
+            return start
+        }
+
+        /// Not a blank, nor an empty cell.
+        static func isInk(_ character: Character) -> Bool {
+            !character.isWhitespace && character != "\0"
+        }
+
+        func text(_ row: Int) -> String {
+            bufferLine(row)?.translateToString(trimRight: true, skipNullCellsFollowingWide: true) ?? ""
+        }
+
+        /// The row holding the first character of the occurrence of
+        /// `characters`, blanks aside, whose row is nearest to `target`. One
+        /// pass (Knuth–Morris–Pratt) that keeps only the rows of the last
+        /// `characters.count` characters, however many rows it reads.
+        func row(of characters: [Character], in rows: ClosedRange<Int>, nearest target: Int) -> Int? {
+            let count = characters.count
+            guard count > 0 else { return nil }
+            // How much of `characters` still matches after a mismatch.
+            var fallback = [Int](repeating: 0, count: count)
+            var length = 0
+            for index in 1..<count {
+                while length > 0, characters[index] != characters[length] { length = fallback[length - 1] }
+                if characters[index] == characters[length] { length += 1 }
+                fallback[index] = length
+            }
+            var recentRows = [Int](repeating: 0, count: count)
+            var seen = 0
+            var matched = 0
+            var best: Int?
+            for row in rows {
+                for character in text(row) where Self.isInk(character) {
+                    recentRows[seen % count] = row
+                    seen += 1
+                    while matched > 0, character != characters[matched] { matched = fallback[matched - 1] }
+                    if character == characters[matched] { matched += 1 }
+                    guard matched == count else { continue }
+                    // The first of the last `count` characters.
+                    let start = recentRows[seen % count]
+                    if best.map({ abs(start - target) < abs($0 - target) }) ?? true { best = start }
+                    matched = fallback[matched - 1]
+                }
+            }
+            return best
+        }
     }
 
     /// SwiftTerm sends a bracketed paste as three writes: opening delimiter,
@@ -497,10 +934,20 @@ final class TesseraResponderAwareTerminalView: TerminalView {
         NSLog("[Tessera][KeyboardDiag] %@", message)
     }
 
+    /// VoiceOver's vertical page, routed like a reader's own scroll.
+    /// UIScrollView's page scroll moved contentOffset behind every reader
+    /// hook: the next output snapped back to the tail and a rebuild saw a
+    /// reader at the bottom. Returns whether the page moved; the handler
+    /// announces the new position.
+    var onAccessibilityPageScroll: ((UIAccessibilityScrollDirection) -> Bool)?
+
     override func accessibilityScroll(
         _ direction: UIAccessibilityScrollDirection
     ) -> Bool {
         guard agentScrollBlockingActive else {
+            if direction == .up || direction == .down, let onAccessibilityPageScroll {
+                return onAccessibilityPageScroll(direction)
+            }
             return super.accessibilityScroll(direction)
         }
         onAgentScrollBlocked?()
@@ -649,7 +1096,7 @@ final class TesseraTerminalContainer: UIView {
     var onFilesShortcut: (() -> Void)?
 
     /// Invoked when the user picks a path action from the selection
-    /// edit menu ("Quick Look" / "Reveal in Files"). Carries the raw
+    /// edit menu ("Open in Artifacts" / "Reveal in Files"). Carries the raw
     /// selected text; the owner normalizes and resolves it over the
     /// file bridge. nil hides both items (see canPerformAction).
     var onSelectionPathAction: ((TesseraTerminalSelectionPathAction, String) -> Void)?
@@ -725,15 +1172,15 @@ final class TesseraTerminalContainer: UIView {
         ])
 
         // §3 selection path actions. SwiftTerm rebuilds its menu items on
-        // every presentation, so the fork exposes `additionalMenuItems`
+        // every presentation, so the fork exposes `additionalMenuCommands`
         // (appended each show). Per-presentation availability is gated in
         // canPerformAction below: UIKit validates each item against the
         // responder chain, and SwiftTerm's own canPerformAction returns
         // false for foreign selectors, so the walk lands here — the same
         // mechanism the tmux key commands ride (see the class comment).
-        terminalView.additionalMenuItems = [
-            UIMenuItem(title: String(localized: "Quick Look"), action: #selector(selectionQuickLook(_:))),
-            UIMenuItem(title: String(localized: "Reveal in Files"), action: #selector(selectionRevealInFiles(_:))),
+        terminalView.additionalMenuCommands = [
+            UICommand(title: String(localized: "Open in Artifacts"), action: #selector(selectionQuickLook(_:))),
+            UICommand(title: String(localized: "Reveal in Files"), action: #selector(selectionRevealInFiles(_:))),
         ]
     }
 
@@ -782,6 +1229,15 @@ final class TesseraTerminalContainer: UIView {
         // Registry order is `ShortcutAction.allCases`, which is stable: with a
         // user-editable keymap, the array's order stops being an implementation
         // detail and starts deciding which of two overlapping chords wins.
+        //
+        // A Duo context pane the user last touched holds the browser's focus
+        // while this terminal stays first responder. Its chords come first
+        // and the terminal's own chords on the same keys step aside; touching
+        // the terminal gives them back (`ArtifactsKeyboardFocus`).
+        let browserCommands = ArtifactsKeyboardFocus.shared.relay(in: window) == nil ? []
+            : ArtifactsBrowserKeyCommands.make(selector: #selector(browserShortcutFired(_:))) { resolvedBinding(for: $0) }
+        let browserChords = Set(browserCommands.map(ArtifactsBrowserKeyCommands.Chord.init))
+        commands += browserCommands
         for action in ShortcutAction.terminalActions {
             guard let selector = Self.shortcutSelector(for: action),
                   let binding = resolvedBinding(for: action) else { continue }
@@ -797,6 +1253,7 @@ final class TesseraTerminalContainer: UIView {
                     )
                     command.wantsPriorityOverSystemBehavior =
                         action.wantsPriorityOverSystemBehavior
+                    guard !browserChords.contains(.init(command)) else { continue }
                     commands.append(command)
                 }
                 continue
@@ -808,6 +1265,7 @@ final class TesseraTerminalContainer: UIView {
                 action: selector
             )
             command.wantsPriorityOverSystemBehavior = action.wantsPriorityOverSystemBehavior
+            guard !browserChords.contains(.init(command)) else { continue }
             commands.append(command)
         }
 
@@ -826,6 +1284,7 @@ final class TesseraTerminalContainer: UIView {
                     propertyList: shortcut.id.uuidString
                 )
                 command.wantsPriorityOverSystemBehavior = true
+                guard !browserChords.contains(.init(command)) else { continue }
                 commands.append(command)
             }
         }
@@ -847,6 +1306,7 @@ final class TesseraTerminalContainer: UIView {
         case .nextSession:         return #selector(switcherCycleNext)
         case .openSettings:        return #selector(openSettings)
         case .toggleAgentCenter:   return #selector(openAgentCenter)
+        case .toggleArtifacts:     return #selector(openArtifacts)
         case .toggleFilesPanel:    return #selector(filesToggle)
         case .refreshTerminal:     return #selector(forceRefresh)
         case .findOpen:            return #selector(findOpen)
@@ -865,6 +1325,12 @@ final class TesseraTerminalContainer: UIView {
         case .paneNext:            return #selector(tmuxPaneCycleNext)
         case .paneZoom:            return #selector(tmuxZoomPane)
         case .newHost, .connect:   return nil
+        // The browser's chords belong to the focused browser; a terminal
+        // only relays them (`browserShortcutFired`).
+        case .browserNewTab, .browserEditAddress, .browserReload, .browserBack, .browserForward,
+             .browserCloseTab, .browserReopenTab, .browserPreviousTab, .browserNextTab,
+             .browserSelectTab, .browserTabOverview, .browserFind, .browserShareFile:
+            return nil
         }
     }
 
@@ -882,6 +1348,12 @@ final class TesseraTerminalContainer: UIView {
     /// responder chain.
     static let customShortcutSelector = #selector(customShortcutFired(_:))
 
+    /// A browser chord relayed to the Duo context pane holding its focus.
+    @objc func browserShortcutFired(_ sender: UIKeyCommand) {
+        guard let command = ArtifactsBrowserKeyCommands.command(for: sender) else { return }
+        ArtifactsKeyboardFocus.shared.relay(in: window)?.fire(command)
+    }
+
     @objc private func customShortcutFired(_ sender: UIKeyCommand) {
         guard let raw = sender.propertyList as? String,
               let id = UUID(uuidString: raw),
@@ -895,6 +1367,10 @@ final class TesseraTerminalContainer: UIView {
         withSender sender: Any?
     ) -> Bool {
         switch action {
+        case #selector(browserShortcutFired(_:)):
+            guard let relay = ArtifactsKeyboardFocus.shared.relay(in: window) else { return false }
+            guard let command = (sender as? UIKeyCommand).flatMap(ArtifactsBrowserKeyCommands.command(for:)) else { return true }
+            return relay.available.contains(command)
         case #selector(customShortcutFired(_:)):
             return onCustomShortcut != nil
         case #selector(tmuxNewWindow),

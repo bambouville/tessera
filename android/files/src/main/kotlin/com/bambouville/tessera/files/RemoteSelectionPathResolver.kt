@@ -88,6 +88,18 @@ object RemoteSelectionPathResolver {
     fun isPlausiblePath(selection: String): Boolean =
         pathCandidates(selection).any(::looksLikePath)
 
+    /**
+     * The first reading that is already absolute, lexically normalized — the
+     * only form that names a remote file without a home or a directory to
+     * anchor it, so the only form a caller with no live connection can use.
+     */
+    fun absoluteCandidate(selection: String): String? =
+        pathCandidates(selection).firstNotNullOfOrNull { expand(it, homePath = null, currentDirectory = null) }
+
+    /** The terminal's miss for a selection no directory signal can anchor. */
+    fun noDirectoryMessage(candidate: String): String =
+        "Can't resolve $candidate — no terminal directory is available for a relative path."
+
     private fun looksLikePath(candidate: String): Boolean =
         candidate.startsWith('/') ||
             candidate.startsWith('~') ||

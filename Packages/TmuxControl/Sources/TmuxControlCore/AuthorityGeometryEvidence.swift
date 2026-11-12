@@ -53,6 +53,48 @@ public struct TmuxOwnedSizeHistory: Equatable, Sendable {
         guard !sizes.isEmpty else { return }
         sizes.removeAll()
     }
+
+    /// Grids owned before this history began (a restored record): they
+    /// rank older than every grid already here.
+    public mutating func adoptOlder(_ older: [TmuxGridSize]) {
+        self = TmuxOwnedSizeHistory(older + sizes)
+    }
+}
+
+/// The grids this device owned under one of its own stamps, which the
+/// adapters keep across a process death. The owned history lives in memory,
+/// so without this a relaunch that finds its own stamp still standing would
+/// judge the window, still at a grid it owned, as another client's (§6.9,
+/// reads without an intent).
+public struct TmuxOwnedGeometryRecord: Codable, Equatable, Sendable {
+    /// How many records the session takes back: one per stamp generation,
+    /// and only the newest generations can still stand on a server.
+    public static let restoreLimit = 16
+
+    /// The stamp generation the grids were owned under.
+    public var generation: UInt64
+    /// Oldest first, at most `TmuxOwnedSizeHistory.limit`.
+    public var sizes: [TmuxGridSize]
+
+    public init(generation: UInt64, sizes: [TmuxGridSize]) {
+        self.generation = generation
+        self.sizes = sizes
+    }
+
+    /// `records` with `record` kept, as an adapter's store keeps one tmux
+    /// session's records: it joins its generation's earlier record, whose
+    /// grids rank older (two windows of this device can read one stamp as
+    /// theirs, and each owns its grids), and only the newest `restoreLimit`
+    /// generations stay, newest first.
+    public static func keeping(_ record: Self, in records: [Self]) -> [Self] {
+        var kept = record
+        if let earlier = records.first(where: { $0.generation == record.generation }) {
+            kept.sizes = TmuxOwnedSizeHistory(earlier.sizes + record.sizes).sizes
+        }
+        return Array(([kept] + records.filter { $0.generation != record.generation })
+            .sorted { $0.generation > $1.generation }
+            .prefix(restoreLimit))
+    }
 }
 
 /// The adapter's facts about the window this device renders, from which the

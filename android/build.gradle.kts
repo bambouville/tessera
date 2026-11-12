@@ -22,6 +22,12 @@ subprojects {
         systemProperty("java.library.path", hostCore.asFile.absolutePath)
     }
 
+    // javac otherwise sums deprecated calls up in one note that names neither
+    // the call nor the line, which a warning sweep cannot act on.
+    tasks.withType<JavaCompile>().configureEach {
+        options.compilerArgs.add("-Xlint:deprecation")
+    }
+
     pluginManager.withPlugin("com.android.application") {
         extensions.configure<ApplicationExtension> {
             compileSdk {
@@ -43,6 +49,9 @@ subprojects {
             lint {
                 abortOnError = true
                 warningsAsErrors = true
+                // Whether a newer release exists depends on the day, not the
+                // code; upgrades are deliberate changes with their own gates.
+                disable += setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable")
             }
         }
     }
@@ -68,6 +77,9 @@ subprojects {
             lint {
                 abortOnError = true
                 warningsAsErrors = true
+                // Whether a newer release exists depends on the day, not the
+                // code; upgrades are deliberate changes with their own gates.
+                disable += setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable")
             }
         }
     }

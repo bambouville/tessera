@@ -161,6 +161,7 @@ final class TerminalBoxOwnershipTests: XCTestCase {
         let snapshot = box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect)
         XCTAssertEqual(snapshot?.offsetY, readerOffsetY, "a foreign take must not consume the binder's snapshot")
         XCTAssertEqual(snapshot?.maxOffsetY, maxOffsetY)
+        XCTAssertEqual(snapshot?.keepsPane, true, "a new epoch of the same pane rebuilds the reader's transcript")
         XCTAssertNil(
             box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect),
             "the snapshot is consumed once"
@@ -223,6 +224,7 @@ final class TerminalBoxOwnershipTests: XCTestCase {
         let carried = box.takeScrollPositionBeforeRebind(for: ownerB)
         XCTAssertEqual(carried?.offsetY, readerOffsetY)
         XCTAssertEqual(carried?.maxOffsetY, maxOffsetY)
+        XCTAssertEqual(carried?.keepsPane, false, "carried to another pane, the distance is not that pane's")
 
         // Once content has arrived, a later bind samples the live view again.
         box.feed(owner: ownerB, bytes("CONTENT\r\n"))
@@ -230,6 +232,255 @@ final class TerminalBoxOwnershipTests: XCTestCase {
         let sampled = box.takeScrollPositionBeforeRebind(for: ownerA)
         XCTAssertNotNil(sampled)
         XCTAssertNotEqual(sampled, carried, "a filled buffer is sampled, not carried")
+        XCTAssertEqual(sampled?.keepsPane, false, "a switch back from another pane is not a rebuild of it")
+    }
+
+    /// A fold or a new font between a rebuild's bind and its page moves the
+    /// place that bind recorded as the pane's history moves (Duo retest M5
+    /// item 4): a shorter grid pushes the screen's top rows into history, a
+    /// taller one pulls them back, from the pane's own history when the
+    /// emptied buffer has none, and a new font measures the rows in its own
+    /// height.
+    func testARecordedRebuildPlaceFollowsTheGridAndTheFont() async throws {
+        let (box, view) = makeReaderBox()
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        func cell() -> CGFloat { view.getOptimalFrameSize().height / CGFloat(terminal.rows) }
+        let before = cell()
+        view.contentOffset.y -= 100 * before
+        let recorded = max(0, view.contentSize.height - view.bounds.height) - view.contentOffset.y
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows - 10)
+        try await Task.sleep(for: .milliseconds(100))
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows)
+        try await Task.sleep(for: .milliseconds(100))
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows + 5)
+        try await Task.sleep(for: .milliseconds(100))
+        view.setFontKeepingReader(view.font.withSize(view.font.pointSize * 1.5))
+        let after = cell()
+        XCTAssertGreaterThan(after, before)
+
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, (recorded / before - 5) * after, accuracy: 0.5)
+        XCTAssertTrue(place.keepsPane)
+    }
+
+    /// A reader on the live tail when a rebuild binds stays on it.
+    func testARecordedPlaceOnTheLiveTailStaysThere() async throws {
+        let (box, view) = makeReaderBox()
+        let terminal = view.getTerminal()
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+        view.resizeKeepingReader(cols: terminal.cols, rows: terminal.rows - 10)
+        try await Task.sleep(for: .milliseconds(100))
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, 0, accuracy: 0.5)
+    }
+
+    /// A font set before SwiftTerm's park for a grid change belongs to that
+    /// change: the park reports both at once, from the geometry before it.
+    func testAFontChangeBeforeTheParkMovesTheRecordedPlaceOnce() async throws {
+        let (box, view) = makeReaderBox()
+        let terminal = view.getTerminal()
+        func cell() -> CGFloat { view.getOptimalFrameSize().height / CGFloat(terminal.rows) }
+        let before = cell()
+        view.contentOffset.y -= 100 * before
+        let recorded = max(0, view.contentSize.height - view.bounds.height) - view.contentOffset.y
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+
+        view.resizeKeepingReader(cols: terminal.cols, rows: terminal.rows + 5)
+        view.setFontKeepingReader(view.font.withSize(view.font.pointSize * 1.5))
+        try await Task.sleep(for: .milliseconds(100))
+        let after = cell()
+        XCTAssertGreaterThan(after, before)
+
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, (recorded / before - 5) * after, accuracy: 0.5)
+    }
+
+    /// A taller grid pulls the pane's history back over a reader a few rows
+    /// up, below the tail, where the emptied buffer adds blank rows instead.
+    /// A shorter grid before the page drops those blank rows here and pushes
+    /// the rows back in the pane: the reader is a few rows up again.
+    func testARecordedPlacePulledBelowTheTailComesBack() async throws {
+        let (box, view) = makeReaderBox()
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        let cell = view.getOptimalFrameSize().height / CGFloat(rows)
+        view.contentOffset.y = max(0, view.contentSize.height - view.bounds.height) - 5 * cell
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows + 15)
+        try await Task.sleep(for: .milliseconds(100))
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, 5 * cell, accuracy: 0.5)
+        XCTAssertEqual(place.belowTail, 0)
+        XCTAssertEqual(place.pulledRows, 0)
+    }
+
+    /// A reader a part of a point above the tail is on it, as the view
+    /// keeps them: a taller pane leaves them there, not below it.
+    func testARecordedPlaceAHairAboveTheTailStaysOnIt() async throws {
+        let (box, view) = makeReaderBox()
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        view.contentOffset.y = max(0, view.contentSize.height - view.bounds.height) - 0.5
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows + 5)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, 0, accuracy: 0.5)
+        XCTAssertEqual(place.belowTail, 0)
+        XCTAssertEqual(place.pulledRows, 0)
+    }
+
+    /// After `clear` the pane's cursor sits near its top. A taller pane
+    /// pulls its history back over the new rows all the same, and a shorter
+    /// one then drops its blank rows below the cursor and pushes nothing
+    /// back: the reader stays pulled below the tail.
+    func testARecordedPlaceFollowsThePaneOverBlankRows() async throws {
+        let (box, view) = makeReaderBox()
+        box.feed(owner: ownerA, bytes("\u{1B}[2J\u{1B}[Hprompt$ "))
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        let cell = view.getOptimalFrameSize().height / CGFloat(rows)
+        view.contentOffset.y = max(0, view.contentSize.height - view.bounds.height) - 5 * cell
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows + 10)
+        try await Task.sleep(for: .milliseconds(100))
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows + 5)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, 0, accuracy: 0.5)
+        XCTAssertEqual(place.belowTail, 5 * cell, accuracy: 0.5)
+        XCTAssertEqual(place.pulledRows, 10)
+    }
+
+    /// A pane with history pulls it back over a taller grid wherever its
+    /// cursor is, as this view does once the page has filled it: nothing is
+    /// left pulled below the tail.
+    func testARecordedPlaceFollowsAPanePullingHistoryAboveItsCursor() async throws {
+        let (box, view) = makeReaderBox()
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        let cell = view.getOptimalFrameSize().height / CGFloat(rows)
+        view.contentOffset.y = max(0, view.contentSize.height - view.bounds.height) - 50 * cell
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+        fillHistory(in: box, owner: ownerAAfterReconnect, rows: 100)
+        box.feed(owner: ownerAAfterReconnect, bytes("\u{1B}[H"))
+
+        view.resizeKeepingReader(cols: terminal.cols, rows: rows + 10)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(view.getTerminal().buffer.y, 10, "this view pulls its history back too")
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, 40 * cell, accuracy: 0.5)
+        XCTAssertEqual(place.belowTail, 0)
+        XCTAssertEqual(place.pulledRows, 0)
+    }
+
+    /// The grid a layout fits, which rotations, folds and the keyboard set,
+    /// moves the recorded place as an explicit grid does.
+    func testALayoutRefitMovesTheRecordedPlace() throws {
+        let (box, view) = makeReaderBox()
+        view.layoutIfNeeded()
+        let terminal = view.getTerminal()
+        let rows = terminal.rows
+        let cell = view.getOptimalFrameSize().height / CGFloat(rows)
+        view.contentOffset.y -= 100 * cell
+        let maxAtBind = max(0, view.contentSize.height - view.bounds.height)
+        let recorded = maxAtBind - view.contentOffset.y
+        box.bind(owner: ownerAAfterReconnect, restoringScrollbackLimit: 2_000)
+
+        view.frame.size.height += 5 * cell
+        view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(TerminalResizeCoalescer.settleSeconds + 0.2))
+        XCTAssertEqual(terminal.rows, rows + 5)
+
+        let place = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: ownerAAfterReconnect))
+        XCTAssertEqual(place.maxOffsetY - place.offsetY, recorded - 5 * cell, accuracy: 0.5)
+        XCTAssertEqual(place.maxOffsetY, maxAtBind, accuracy: 0.5, "the emptied buffer's tail would clamp the place")
+    }
+
+    /// A box over the app's own view, with history under `ownerA`.
+    private func makeReaderBox() -> (TerminalBox, TesseraResponderAwareTerminalView) {
+        let view = TesseraResponderAwareTerminalView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        let box = TerminalBox(traceLabel: "reader-place-test")
+        box.attach(view)
+        box.markRenderReady()
+        box.bind(owner: ownerA, restoringScrollbackLimit: 2_000)
+        fillHistory(in: box, owner: ownerA, rows: 300)
+        return (box, view)
+    }
+
+    /// A fold or a resize sends two rebuilds of the same pane before the
+    /// first one's deep capture. The second bind finds only that rebuild's
+    /// visible rows, plus the few a repaint into a surface taller than its
+    /// pane scrolls off the top: nothing the reader could have read, so the
+    /// place recorded before the first clear travels on. Input before any
+    /// row arrives travels with it; a reader who moved among the rows that
+    /// did, or a buffer with history again, is sampled.
+    func testRebindOverOnlyVisibleRowsCarriesTheReaderSnapshotForward() throws {
+        let (box, _) = makeBox()
+        let view = try XCTUnwrap(box.view)
+        view.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        view.layoutIfNeeded()
+        let terminal = view.getTerminal()
+        let epoch = { TerminalRenderOwner(windowId: WindowId(1), paneId: PaneId(11), epoch: $0) }
+        let visibleRepaint = "\u{1B}[H\u{1B}[2JVISIBLE" + String(repeating: "\r\n", count: terminal.rows + 2)
+        func readMidHistory(_ owner: TerminalRenderOwner) -> CGFloat {
+            fillHistory(in: box, owner: owner, rows: terminal.rows * 6)
+            let maxOffsetY = max(0, view.contentSize.height - view.bounds.height)
+            XCTAssertGreaterThan(maxOffsetY, view.bounds.height)
+            let readerOffsetY = (maxOffsetY / 2).rounded()
+            view.contentOffset = CGPoint(x: 0, y: readerOffsetY)
+            return readerOffsetY
+        }
+
+        box.bind(owner: epoch(1), restoringScrollbackLimit: 128)
+        var readerOffsetY = readMidHistory(epoch(1))
+        box.bind(owner: epoch(2), restoringScrollbackLimit: 128)
+        XCTAssertTrue(box.feed(owner: epoch(2), bytes(visibleRepaint)))
+        XCTAssertFalse(box.isAwaitingContentAfterRebind, "the first rebuild's visible rows arrived")
+        XCTAssertGreaterThan(view.contentSize.height - view.bounds.height, 0, "the repaint scrolled surplus rows off the top")
+        box.bind(owner: epoch(3), restoringScrollbackLimit: 128)
+        let carried = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: epoch(3)))
+        XCTAssertEqual(carried.offsetY, readerOffsetY, "only visible rows since the clear: the place travels on")
+        XCTAssertTrue(carried.keepsPane)
+        XCTAssertFalse(carried.readerMoved)
+
+        readerOffsetY = readMidHistory(epoch(3))
+        box.bind(owner: epoch(4), restoringScrollbackLimit: 128)
+        box.noteReaderInput()
+        box.bind(owner: epoch(5), restoringScrollbackLimit: 128)
+        let moved = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: epoch(5)))
+        XCTAssertEqual(moved.offsetY, readerOffsetY)
+        XCTAssertTrue(moved.readerMoved, "input before any row arrived travels with the place")
+
+        readerOffsetY = readMidHistory(epoch(5))
+        box.bind(owner: epoch(6), restoringScrollbackLimit: 128)
+        XCTAssertTrue(box.feed(owner: epoch(6), bytes(visibleRepaint)))
+        box.noteReaderInput()
+        box.bind(owner: epoch(7), restoringScrollbackLimit: 128)
+        let resampled = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: epoch(7)))
+        XCTAssertNotEqual(resampled.offsetY, readerOffsetY, "moved among the visible rows: the view is sampled")
+        XCTAssertLessThan(resampled.maxOffsetY, view.bounds.height)
+        XCTAssertFalse(resampled.readerMoved)
+
+        fillHistory(in: box, owner: epoch(7), rows: terminal.rows * 6)
+        let refilledMaxOffsetY = max(0, view.contentSize.height - view.bounds.height)
+        XCTAssertGreaterThan(refilledMaxOffsetY, view.bounds.height)
+        box.bind(owner: epoch(8), restoringScrollbackLimit: 128)
+        let sampled = try XCTUnwrap(box.takeScrollPositionBeforeRebind(for: epoch(8)))
+        XCTAssertEqual(sampled.maxOffsetY, refilledMaxOffsetY, "history since the clear: the view is sampled")
+        XCTAssertFalse(sampled.readerMoved)
     }
 
     func testBindToSameOwnerIsNoOp() {
@@ -1352,6 +1603,60 @@ final class TerminalBoxOwnershipTests: XCTestCase {
         XCTAssertFalse(harness.liveText.contains("PRE_BIND_QUEUED"))
     }
 
+    /// tmux's frame for a switch crossed the driver before the side-channel
+    /// bind, so it sits at the bind's floor, and the quiet window sends
+    /// nothing newer. With the link up the quiet canvas is the selection and
+    /// is snapshotted; while the link is down the painter keeps waiting.
+    func testMoshOwnerIdentityChangeSettlesAQuietCanvasOnceTheLinkIsUp() async throws {
+        let harness = MoshRepaintFenceHarness()
+        harness.adapter.painterCausalTimeoutNanoseconds = 50_000_000
+
+        harness.controller.renderBindSurface?(.live, harness.ownerA)
+        await waitForRepaintCount(1, in: harness)
+        try XCTUnwrap(harness.repaintCompletions.first)(1)
+        XCTAssertTrue(harness.deliver("OWNER_A_FRAME", deliveryID: 1, repaintRequestID: 1))
+
+        harness.transportReachable = false
+        XCTAssertTrue(harness.deliver("SWITCH_FRAME", deliveryID: 2, repaintRequestID: nil))
+        harness.controller.renderBindSurface?(.live, harness.ownerB)
+        XCTAssertFalse(harness.liveBox.painterFeedsAdmitted)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(harness.repaintCompletions.count, 1, "an unreachable link proves nothing about the canvas")
+        XCTAssertFalse(harness.liveBox.painterFeedsAdmitted)
+
+        harness.transportReachable = true
+        await waitForRepaintCount(2, in: harness)
+        XCTAssertEqual(harness.repaintCompletions.count, 2, "a quiet canvas with the link up is the selection")
+        try XCTUnwrap(harness.repaintCompletions.last)(3)
+        XCTAssertTrue(harness.deliver("OWNER_B_FRAME", deliveryID: 3, repaintRequestID: 2))
+        XCTAssertTrue(harness.liveBox.painterFeedsAdmitted)
+        XCTAssertTrue(harness.liveText.contains("OWNER_B_FRAME"))
+        XCTAssertTrue(harness.adapter.painterStateForTesting.contains("quiet-settle"))
+    }
+
+    /// A layout notification advances the epoch of a switch still waiting
+    /// for its frame; the quiet wait moves to the new epoch with the handoff.
+    func testMoshQuietCanvasWaitFollowsASamePaneEpochTransfer() async throws {
+        let harness = MoshRepaintFenceHarness()
+        harness.adapter.painterCausalTimeoutNanoseconds = 50_000_000
+        let ownerBNextEpoch = RenderOwner(windowID: WindowId(2), paneID: PaneId(22), epoch: 3)
+
+        harness.controller.renderBindSurface?(.live, harness.ownerA)
+        await waitForRepaintCount(1, in: harness)
+        try XCTUnwrap(harness.repaintCompletions.first)(1)
+        XCTAssertTrue(harness.deliver("OWNER_A_FRAME", deliveryID: 1, repaintRequestID: 1))
+
+        harness.controller.renderBindSurface?(.live, harness.ownerB)
+        harness.controller.renderBindSurface?(.live, ownerBNextEpoch)
+        XCTAssertTrue(harness.adapter.painterStateForTesting.contains("bind-transfer"))
+        await waitForRepaintCount(2, in: harness)
+        XCTAssertEqual(harness.repaintCompletions.count, 2, "the transferred epoch was left waiting for a frame")
+        try XCTUnwrap(harness.repaintCompletions.last)(2)
+        XCTAssertTrue(harness.deliver("EPOCH_THREE_FRAME", deliveryID: 2, repaintRequestID: 2))
+        XCTAssertTrue(harness.liveBox.painterFeedsAdmitted)
+        XCTAssertTrue(harness.liveText.contains("EPOCH_THREE_FRAME"))
+    }
+
     func testMoshOwnerChangeRetiresPreviousOwnersScrollIntent() async throws {
         let harness = MoshRepaintFenceHarness()
 
@@ -1830,7 +2135,7 @@ final class LiveScrollInitialRenderProbeTests: XCTestCase {
 /// Minimal SwiftTerm delegate so a test can act inside the synchronous
 /// `scrolled` callback that `changeScrollback` issues from `TerminalBox.bind`.
 @MainActor
-private final class ReentrantBindTerminalViewDelegate: NSObject, TerminalViewDelegate {
+private final class ReentrantBindTerminalViewDelegate: NSObject, @MainActor TerminalViewDelegate {
     var onScrolled: (() -> Void)?
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
@@ -1874,6 +2179,8 @@ private final class MoshRepaintFenceHarness {
     let ownerB = RenderOwner(windowID: WindowId(2), paneID: PaneId(22), epoch: 2)
     var repaintCompletions: [RepaintCompletion] = []
     var producedDeliveryHighWater: UInt64 = 0
+    /// Mosh's link, as `MoshSession.transportState` reports it.
+    var transportReachable = true
     var canceledRepaintRequestIDs: [UInt64] = []
     var retiredThroughRequestIDs: [UInt64] = []
     var ready: [(surfaceID: SurfaceId, history: MoshLedgerHistory)] = []
@@ -1953,6 +2260,9 @@ private final class MoshRepaintFenceHarness {
             currentTransportOutputDeliveryID: { [weak self] in
                 self?.producedDeliveryHighWater ?? 0
             },
+            transportIsReachable: { [weak self] in
+                self?.transportReachable ?? false
+            },
             onSaveWindowModes: { _, _ in }
         )
     }
@@ -1965,12 +2275,12 @@ private final class MoshRepaintFenceHarness {
     }
 
     func stageHistory(surfaceID: SurfaceId, owner: RenderOwner, text: String) {
-        controller.renderFeedSurface?(
+        XCTAssertEqual(controller.renderFeedSurface?(
             surfaceID,
             owner,
             Array(text.utf8)[...],
             .moshHistory
-        )
+        ), true)
         controller.requestTransportFullFrame?()
         controller.renderHistoryReady?(
             surfaceID,

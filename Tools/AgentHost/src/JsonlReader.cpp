@@ -42,40 +42,23 @@ JsonlReader::JsonlReader(const std::string& path, const std::string& provider, i
 #endif
     mutationStamp_ = std::to_string(modified.tv_sec) + ":" + std::to_string(modified.tv_nsec) + ":" +
         std::to_string(changed.tv_sec) + ":" + std::to_string(changed.tv_nsec);
-    mtimeNanoseconds_ = static_cast<int64_t>(modified.tv_sec) * 1000000000 + modified.tv_nsec;
-    ctimeNanoseconds_ = static_cast<int64_t>(changed.tv_sec) * 1000000000 + changed.tv_nsec;
     continuationSource_ = {path_, identity_, mutationStamp_, provider_, snapshotFileSize_};
 }
 JsonlReader::~JsonlReader() { if (descriptor_ >= 0) ::close(descriptor_); }
 
-SourceValidation::Result JsonlReader::validatePrefix(SourceValidation& state, size_t byteSlice,
-        SourceValidation::Clock::time_point now, uint64_t minimumEnd,
-        SourceValidation::WallClock::time_point wallNow) {
-    unchanged();
-    const SourceValidation::Source source{identity_, mutationStamp_, sourceLimit_, mtimeNanoseconds_, ctimeNanoseconds_};
-    const auto result = state.advance(source, [&](uint64_t offset, char* bytes, size_t count) {
-        if (cancelled_ && cancelled_()) throw std::runtime_error("cancelled");
-        if (auto* context = JsonlContinuation::active()) context->check(count, false);
-        ssize_t received;
-        do { received = ::pread(descriptor_, bytes, count, static_cast<off_t>(offset)); }
-        while (received < 0 && errno == EINTR);
-        if (received < 0 || static_cast<size_t>(received) != count) throw std::runtime_error("sourceChanged");
-        readBytes_ += count;
-        if (auto* context = JsonlContinuation::active()) context->charge(count);
-    }, byteSlice, now, JsonlContinuation::active() ? JsonlContinuation::active()->observationToken() : 0,
-       minimumEnd, validationRefresh_, wallNow);
-    unchanged();
-    if (result.ready) {
-        size_ = result.validatedEnd;
-        cacheSize_ = previousSize_ = 0;
-        continuationSource_.stamp = mutationStamp_ + ":observed:" + std::to_string(result.revision);
-        continuationSource_.size = size_;
-        continuationSource_.observedRevision = result.revision;
-    }
+SourceValidation::Result JsonlReader::validatePrefix(SourceValidation& state, uint64_t minimumEnd) {
+    const auto current = unchanged();
+    const auto result = state.advance({identity_, mutationStamp_, sourceLimit_, snapshotFileSize_, current > snapshotFileSize_},
+        JsonlContinuation::active() ? JsonlContinuation::active()->observationToken() : 0, minimumEnd);
+    size_ = result.validatedEnd;
+    cacheSize_ = previousSize_ = 0;
+    continuationSource_.stamp = mutationStamp_ + ":observed:" + std::to_string(result.revision);
+    continuationSource_.size = size_;
+    continuationSource_.observedRevision = result.revision;
     return result;
 }
 
-void JsonlReader::unchanged() {
+uint64_t JsonlReader::unchanged() {
     struct stat info{};
     if (::lstat(path_.c_str(), &info) || !S_ISREG(info.st_mode) ||
         static_cast<uint64_t>(info.st_dev) != device_ || static_cast<uint64_t>(info.st_ino) != inode_ ||
@@ -91,10 +74,13 @@ void JsonlReader::unchanged() {
         std::to_string(modified.tv_sec) + ":" + std::to_string(modified.tv_nsec) + ":" +
         std::to_string(changed.tv_sec) + ":" + std::to_string(changed.tv_nsec) != mutationStamp_)
         throw std::runtime_error("sourceChanged");
+    return static_cast<uint64_t>(info.st_size);
 }
 
 void JsonlReader::block(uint64_t position) {
-    if (cancelled_ && cancelled_()) throw std::runtime_error("cancelled");
+    // A witness (at most two blocks) completes under cancellation: an index
+    // whose page was cancelled still records where its scan stopped.
+    if (!readingWitness_ && cancelled_ && cancelled_()) throw std::runtime_error("cancelled");
     if (position >= size_) throw std::runtime_error("invalidCursor");
     if (cacheSize_ && position >= cacheStart_ && position < cacheStart_ + cacheSize_) return;
     if (previousSize_ && position >= previousStart_ && position < previousStart_ + previousSize_) {
@@ -159,9 +145,10 @@ PositionedRecord JsonlReader::record(uint64_t start, uint64_t end, bool locateEn
     PositionedRecord result;
     result.start = start; result.end = end; result.sourceByteOffset = start;
     result.receiptSourceIdentity = identity_; result.receiptSourceOffset = start;
-    // Only the default normalizer's output is a function of the bytes alone.
-    const bool remembered = context && !locateEnd && !normalizer_;
-    if (remembered) if (const auto* value = context->result(continuationSource(), start, end)) {
+    // Only the default and named normalizers' output is a function of the
+    // bytes alone.
+    const bool remembered = context && !locateEnd && (!normalizer_ || !normalizerKind_.empty());
+    if (remembered) if (const auto* value = context->result(continuationSource(), start, end, normalizerKind_)) {
         result.value = *value; return result;
     }
     JsonlContinuation::Record local(provider_ == "codex");
@@ -171,6 +158,11 @@ PositionedRecord JsonlReader::record(uint64_t start, uint64_t end, bool locateEn
     auto* state = context ? context->find(continuationSource(), start, end, locateEnd) : nullptr;
     if (!state && context && local.oversized) local.source = continuationSource();
     if (!state) state = context && local.oversized ? &context->retain(std::move(local)) : &local;
+    // An index scan decodes every record: reuse one line buffer rather than
+    // allocate and grow one per record, which musl's allocator makes costly.
+    // Only a record decoded here borrows it: a retained one would carry its
+    // spare capacity into the continuation's budget.
+    if (state == &local) { local.raw.swap(lineBuffer_); local.raw.clear(); }
     if (state->complete) end = state->end;
     bool foundEnd = !locateEnd || state->complete;
     while (!state->complete && state->position < (locateEnd ? end : end - 1)) {
@@ -215,7 +207,8 @@ PositionedRecord JsonlReader::record(uint64_t start, uint64_t end, bool locateEn
         result.value.disposition = unsupported ? "unsupported" : "malformed";
     } else result.value = normalizer_ ? normalizer_(value, oversized && bounded.truncated()) :
         normalize(provider_, value, oversized && bounded.truncated(), provider_ == "pi" || provider_ == "kimi" ? "v1:" + std::to_string(start) : "");
-    if (remembered) context->remember(continuationSource(), start, end, result.value);
+    if (remembered) context->remember(continuationSource(), start, end, result.value, normalizerKind_);
+    if (state == &local) lineBuffer_.swap(local.raw);
     return result;
 }
 

@@ -47,8 +47,18 @@ object SharedAgentMarkdown {
         cache.resize((heapClassMiB / 32).coerceIn(4, 16) * 1024 * 1024)
     }
 
+    /**
+     * Artifacts documents keep every link, so they never share agent output's
+     * cache. A few documents cover switching tabs and returning to one.
+     */
+    private val documentCache = SharedAgentMarkdownCache(DOCUMENT_CACHE_BYTES)
+    private const val DOCUMENT_CACHE_BYTES = 4 * 1024 * 1024
+
     /** Memory pressure and disabling Agent Center drop every parsed tree. */
-    fun clearCache() = cache.clear()
+    fun clearCache() {
+        cache.clear()
+        documentCache.clear()
+    }
 
     fun parse(source: String): SharedAgentMarkdownDocument? {
         cache[source]?.let { return it }
@@ -56,14 +66,22 @@ object SharedAgentMarkdown {
         return parseUncached(source)?.also { cache.put(source, it) }
     }
 
-    private fun parseUncached(source: String): SharedAgentMarkdownDocument? {
+    /**
+     * A document shown in Artifacts: every link destination is kept as written,
+     * for its viewer to resolve against the document's host.
+     */
+    fun parseDocument(source: String): SharedAgentMarkdownDocument? {
+        documentCache[source]?.let { return it }
+        return parseUncached(source, document = true)?.also { documentCache.put(source, it) }
+    }
+
+    private fun parseUncached(source: String, document: Boolean = false): SharedAgentMarkdownDocument? {
         return try {
             val (input, clipped) = clippedInputForNative(source)
             NativeLibraries.ensureLoaded()
-            val json = NativeCoreBindings.agentMarkdownParse(
-                if (input.isEmpty()) null else input.toDirectBuffer(),
-                input.size,
-            )
+            val buffer = if (input.isEmpty()) null else input.toDirectBuffer()
+            val json = if (document) NativeCoreBindings.agentMarkdownParseDocument(buffer, input.size)
+                else NativeCoreBindings.agentMarkdownParse(buffer, input.size)
             if (json == null) null else decodeJSON(json, clipped)
         } catch (_: LinkageError) {
             null

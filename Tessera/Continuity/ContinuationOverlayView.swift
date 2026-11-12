@@ -34,6 +34,7 @@ struct ContinuationOverlayView: View {
     let onDismiss: () -> Void
 
     @Environment(\.designTokens) private var T
+    @State private var laptop = LaptopCardLayout()
 
     var body: some View {
         Group {
@@ -84,7 +85,10 @@ struct ContinuationOverlayView: View {
             }
             .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
             .padding(24)
+            // Laptop pose: above the fold, where close is never on the hinge.
+            .laptopCardPlacement(laptop, scrolls: true)
         }
+        .readsLaptopCardLayout($laptop)
     }
 
     private var attachedToast: some View {

@@ -54,6 +54,16 @@ class AgentCenterStateReductionTest {
         assertSame(sibling, next.projectedDetails["b"])
     }
 
+    /** A list tick that moves the selection off a thread ends a match still opening there. */
+    @Test fun aListTickThatMovesTheSelectionDropsItsSearchLanding() {
+        val landing = AgentSearchLanding("a", "a-1", 1)
+        val waiting = state.copy(searchLanding = landing)
+        assertEquals(landing, waiting.tick(listOf(selected.row, sibling.row)).searchLanding)
+        val moved = waiting.tick(listOf(sibling.row))
+        assertEquals("b", moved.selectedThreadKey)
+        assertNull(moved.searchLanding)
+    }
+
     @Test fun siblingThreadSnapshotLeavesTheSelectedDetail() {
         val update = detail(row("b", status = "waitingForInput", preview = "needs input"))
         val next = state.withThreadSnapshot(update)
@@ -76,7 +86,7 @@ class AgentCenterStateReductionTest {
         val snapshot = shown.copy(prompt = shown.prompt!!.copy(fresh = null))
         val next = current.withThreadSnapshot(snapshot)
         assertTrue(next.detail!!.canAnswerPrompt())
-        assertSame(shown.prompt!!.fresh, next.projectedDetails["a"]!!.prompt!!.fresh)
+        assertSame(shown.prompt.fresh, next.projectedDetails["a"]!!.prompt!!.fresh)
     }
 
     @Test fun changedPromptOrBindingCannotInheritDisplayCapability() {
@@ -85,7 +95,7 @@ class AgentCenterStateReductionTest {
         val cold = shown.copy(prompt = shown.prompt!!.copy(fresh = null))
         val changed = listOf(cold.copy(binding = null),
             cold.copy(prompt = cold.prompt!!.copy(actionToken = "new-token")),
-            cold.copy(prompt = cold.prompt!!.copy(kind = "question")),
+            cold.copy(prompt = cold.prompt.copy(kind = "question")),
             cold.copy(row = cold.row.copy(actionAvailable = false)), cold.copy(prompt = null))
         changed.forEach { snapshot -> assertNull(current.withThreadSnapshot(snapshot).detail!!.prompt?.fresh) }
     }

@@ -41,8 +41,8 @@
  * wise caller could do; we just do it for you.
  */
 
-#define BCRYPT_WORDS 8
-#define BCRYPT_HASHSIZE (BCRYPT_WORDS * 4)
+#define BCRYPT_KDF_WORDS 8
+#define BCRYPT_HASHSIZE (BCRYPT_KDF_WORDS * 4)
 
 static void
 bcrypt_hash(uint8_t *sha2pass, uint8_t *sha2salt, uint8_t *out)
@@ -50,7 +50,7 @@ bcrypt_hash(uint8_t *sha2pass, uint8_t *sha2salt, uint8_t *out)
     blf_ctx state;
     uint8_t ciphertext[BCRYPT_HASHSIZE] =
     "OxychromaticBlowfishSwatDynamite";
-    uint32_t cdata[BCRYPT_WORDS];
+    uint32_t cdata[BCRYPT_KDF_WORDS];
     int i;
     uint16_t j;
     size_t shalen = SHA512_DIGEST_LENGTH;
@@ -65,13 +65,13 @@ bcrypt_hash(uint8_t *sha2pass, uint8_t *sha2salt, uint8_t *out)
 
     /* encryption */
     j = 0;
-    for (i = 0; i < BCRYPT_WORDS; i++)
+    for (i = 0; i < BCRYPT_KDF_WORDS; i++)
             cdata[i] = citadel_Blowfish_stream2word(ciphertext, sizeof(ciphertext), &j);
     for (i = 0; i < 64; i++)
-            citadel_blf_enc(&state, cdata, BCRYPT_WORDS / 2);
+            citadel_blf_enc(&state, cdata, BCRYPT_KDF_WORDS / 2);
 
     /* copy out */
-    for (i = 0; i < BCRYPT_WORDS; i++) {
+    for (i = 0; i < BCRYPT_KDF_WORDS; i++) {
         out[4 * i + 3] = (cdata[i] >> 24) & 0xff;
         out[4 * i + 2] = (cdata[i] >> 16) & 0xff;
         out[4 * i + 1] = (cdata[i] >> 8) & 0xff;
@@ -101,7 +101,7 @@ citadel_bcrypt_pbkdf(const unsigned char *pass, size_t passlen, const uint8_t *s
     if (rounds < 1)
         goto bad;
     if (passlen == 0 || saltlen == 0 || keylen == 0 ||
-        keylen > sizeof(out) * sizeof(out) || saltlen > 1<<20)
+        keylen > BCRYPT_HASHSIZE * BCRYPT_HASHSIZE || saltlen > 1<<20)
         goto bad;
     if ((countsalt = calloc(1, saltlen + 4)) == NULL)
         goto bad;
@@ -160,7 +160,14 @@ bad:
 #ifdef __APPLE__
     arc4random_buf(key, keylen);
 #else
-    getentropy(key, keylen);
+    /* getentropy fills at most 256 bytes a call; zero what it cannot fill. */
+    for (i = 0; i < keylen; i += amt) {
+        amt = MINIMUM(keylen - i, 256);
+        if (getentropy(key + i, amt) != 0) {
+            explicit_bzero(key + i, keylen - i);
+            break;
+        }
+    }
 #endif
     return -1;
 }

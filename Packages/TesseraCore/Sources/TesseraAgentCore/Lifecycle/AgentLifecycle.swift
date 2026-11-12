@@ -34,6 +34,8 @@ public struct AgentLifecycleHookEvent: Equatable, Codable, Sendable {
     public let agentID: String?
     public let agentType: String?
     public let rootAgentID: String?
+    /// The tool call a PreToolUse/PostToolUse names (Claude's `tool_use_id`).
+    public let toolUseID: String?
 
     public static func decode(_ data: Data) -> Self? {
         guard !data.isEmpty, data.count <= 65_536,
@@ -88,7 +90,10 @@ public struct AgentLifecycleHookEvent: Equatable, Codable, Sendable {
             },
             agentID: token(wire.agentId),
             agentType: token(wire.agentType),
-            rootAgentID: token(wire.rootAgentId)
+            rootAgentID: token(wire.rootAgentId),
+            // Only an aid to telling calls apart: one this side cannot trust
+            // drops the ID, not the frame.
+            toolUseID: AgentToolCallIdentity.whole(token(wire.toolUseId))
         )
     }
 
@@ -116,6 +121,8 @@ public struct AgentLifecycleHookEvent: Equatable, Codable, Sendable {
         let agentId: String?
         let agentType: String?
         let rootAgentId: String?
+        /// Absent before integration 27.
+        let toolUseId: String?
     }
 
     private static let hookSchemaRegistry: AgentProviderRegistry = {
@@ -174,6 +181,23 @@ public struct AgentLifecycleHookEvent: Equatable, Codable, Sendable {
 /// A content-free hint from integration v21 hooks that a question tool
 /// started or finished. The hook reports it in `reason`; the prompt itself is
 /// only ever read from the terminal.
+/// A tool call's ID, as hooks and transcripts name it, kept whole or not at
+/// all: a cut or filtered one could name another call. Every producer bounds
+/// it at 256 bytes, so a value that long may already be cut.
+public enum AgentToolCallIdentity {
+    public static let maximumBytes = 255
+
+    public static func whole(_ value: String?) -> String? {
+        guard let value, !value.isEmpty, value.utf8.count <= maximumBytes,
+              value.utf8.allSatisfy({ byte in
+                  (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+                      || (byte >= 48 && byte <= 57) || byte == 46 || byte == 95 || byte == 58 || byte == 45
+              })
+        else { return nil }
+        return value
+    }
+}
+
 public enum AgentLifecycleInputHint: String, Codable, Sendable {
     /// A question that stops the agent until it is answered: Codex
     /// `request_user_input`, Claude and Kimi `AskUserQuestion`.
@@ -211,12 +235,17 @@ public struct AgentLifecycleEnvelope: Equatable, Codable, Sendable {
     public let sourceTimestampNanoseconds: UInt64?
     /// Set only on PreToolUse/PostToolUse; see `withInputHint`.
     public private(set) var inputHint: AgentLifecycleInputHint?
+    /// The question tool call the hint's boundary opens or closes; see `withInputHint`.
+    public private(set) var toolUseID: String?
 
-    /// The same frame carrying a question hint. A hint on any other event is
-    /// dropped: only tool boundaries report question tools.
-    public func withInputHint(_ hint: AgentLifecycleInputHint?) -> Self {
+    /// The same frame carrying a question hint, and the ID of the call it
+    /// names. A hint on any other event is dropped: only tool boundaries
+    /// report question tools. An ID needs a hint, and is kept whole or not
+    /// at all: a cut one could name another call.
+    public func withInputHint(_ hint: AgentLifecycleInputHint?, toolUseID: String? = nil) -> Self {
         var copy = self
         copy.inputHint = event == .preToolUse || event == .postToolUse ? hint : nil
+        copy.toolUseID = copy.inputHint != nil ? AgentToolCallIdentity.whole(toolUseID) : nil
         return copy
     }
 
@@ -296,7 +325,7 @@ public struct AgentLifecycleEnvelope: Equatable, Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case version, providerID, event, status, providerSessionID, agentPID
-        case transcriptRef, agentID, agentType, rootAgentID, eventSequence, sourceTimestampNanoseconds, inputHint
+        case transcriptRef, agentID, agentType, rootAgentID, eventSequence, sourceTimestampNanoseconds, inputHint, toolUseID
     }
 
     public init(from decoder: Decoder) throws {
@@ -335,7 +364,8 @@ public struct AgentLifecycleEnvelope: Equatable, Codable, Sendable {
                 debugDescription: "Invalid lifecycle envelope field \(offending.stringValue)"
             )
         }
-        self = validated.withInputHint(try container.decodeIfPresent(AgentLifecycleInputHint.self, forKey: .inputHint))
+        self = validated.withInputHint(try container.decodeIfPresent(AgentLifecycleInputHint.self, forKey: .inputHint),
+                                       toolUseID: try container.decodeIfPresent(String.self, forKey: .toolUseID))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -355,6 +385,7 @@ public struct AgentLifecycleEnvelope: Equatable, Codable, Sendable {
         // the retained-hook identity that dedupe and completion reads use.
         try container.encodeIfPresent(sourceTimestampNanoseconds, forKey: .sourceTimestampNanoseconds)
         try container.encodeIfPresent(inputHint, forKey: .inputHint)
+        try container.encodeIfPresent(toolUseID, forKey: .toolUseID)
     }
 }
 

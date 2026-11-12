@@ -154,10 +154,12 @@ class SshAgentSessionEndpointOutputTest {
                 val text = "❯ suggested"
                 val cells = text.mapIndexed { index, char -> SharedTerminalScreenEvidence.Cell(char.toString(), 1, if (index >= 2) 32 else 0) }
                 val screen = SharedTerminalScreenEvidence(text.length, listOf(cells), listOf(false), 0, 2, true, false)
+                val styled = "\u001b[0;48;5;153m❯\u001b[0m suggested"
                 endpoint.noteRawSnapshot(TerminalTextSnapshot(text, text, listOf(text),
-                    cursorRow = 0, cursorVisible = true, cursorColumn = 2, screenEvidence = screen))
+                    cursorRow = 0, cursorVisible = true, cursorColumn = 2, screenEvidence = screen, promptText = styled))
                 val observed = (endpoint.inspect(endpoint.binding.value) as AgentEndpointResult.Success).value
                 assertEquals(text, observed.visibleTail.decodeToString())
+                assertEquals("the prompt reads the cells' backgrounds", styled, observed.promptText)
                 assertEquals(text, observed.currentCursorLine)
                 assertSame(screen, observed.screenEvidence)
                 assertEquals(2, observed.cursorColumn)

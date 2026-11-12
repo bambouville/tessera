@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forwarding_title">ポート転送</string>
+    <string name="forwarding_intro">ローカルとダイナミックのリスナーはこのデバイス上で動作します。リモートのバインドはサーバー側です。</string>
+    <string name="forwarding_add">追加</string>
+    <string name="forwarding_no_rules">転送ルールはありません。</string>
+    <string name="forwarding_enabled">有効</string>
+    <string name="forwarding_open">↗ 開く</string>
+    <string name="forwarding_edit">編集</string>
+    <string name="forwarding_delete">削除</string>
+    <string name="forwarding_stop">停止</string>
+    <string name="forwarding_start">開始</string>
+    <string name="forwarding_summary_remote">%1$s → デバイス %2$s</string>
+    <string name="forwarding_rule_title">転送ルール</string>
+    <string name="forwarding_edit_title">%1$s を編集</string>
+    <string name="forwarding_cancel">キャンセル</string>
+    <string name="forwarding_save">保存</string>
+    <string name="forwarding_label">ラベル</string>
+    <string name="forwarding_optional">省略可能</string>
+    <string name="forwarding_bind_address">バインドアドレス</string>
+    <string name="forwarding_loopback_only">ループバックのみ</string>
+    <string name="forwarding_bind_port">バインドポート</string>
+    <string name="forwarding_bind_port_zero_allowed">バインドポート · 0 も可</string>
+    <string name="forwarding_remote_host">リモートホスト</string>
+    <string name="forwarding_device_host">デバイス側のホスト</string>
+    <string name="forwarding_target_port">転送先ポート</string>
+    <string name="forwarding_ports_whole_numbers">ポートは整数で指定してください。</string>
+    <string name="forwarding_direction_local">ローカル</string>
+    <string name="forwarding_direction_remote">リモート</string>
+    <string name="forwarding_direction_dynamic">ダイナミック</string>
+    <string name="forwarding_status_stopped">停止中</string>
+    <string name="forwarding_status_starting">開始中</string>
+    <string name="forwarding_status_serving">応答あり · アクティブ 0</string>
+    <string name="forwarding_status_nothing_serving">待ち受け中 · リモートのポート %1$s で応答なし</string>
+    <string name="forwarding_status_checking">待ち受け中 · 確認中…</string>
+    <string name="forwarding_status_listening">待ち受け中 · アクティブ 0</string>
+    <string name="forwarding_invalid_bind_address">バインドアドレスが必要です。</string>
+    <string name="forwarding_invalid_bind_port">バインドポートが無効です。</string>
+    <string name="forwarding_non_loopback_local_bind">ローカル転送とダイナミック転送はループバックにバインドする必要があります。</string>
+    <string name="forwarding_missing_target">転送先が必要です。</string>
+    <string name="forwarding_invalid_target_address">転送先のホストが必要です。</string>
+    <string name="forwarding_invalid_target_port">転送先のポートが無効です。</string>
+    <string name="forwarding_dynamic_cannot_have_target">ダイナミック転送では、SOCKS リクエストごとに転送先が決まります。</string>
+    <string name="forwarding_bind_collision">別のローカルリスナーがこのポートを使用しています。</string>
+    <string name="forwarding_runtime_unavailable">SSH 転送を利用できません</string>
+    <string name="forwarding_listener_stopped">転送リスナーが予期せず停止しました</string>
+    <string name="forwarding_mosh_without_side_channel">Mosh には認証済みの SSH サイドチャネルがありません</string>
+    <string name="forwarding_transport_unsupported_local">このトランスポートはローカル転送に対応していません</string>
+    <string name="forwarding_transport_unsupported_remote">このトランスポートはリモート転送に対応していません</string>
+    <string name="forwarding_transport_unsupported_dynamic">このトランスポートはダイナミック転送に対応していません</string>
+    <string name="forwarding_chrome_label">ポート転送</string>
+    <plurals name="forwarding_chrome_label_serving">
+        <item quantity="other">ポート転送、応答あり %1$d</item>
+    </plurals>
+    <string name="forwarding_browser_back">戻る</string>
+    <string name="forwarding_browser_forward">進む</string>
+    <string name="forwarding_browser_stop">停止</string>
+    <string name="forwarding_browser_reload">再読み込み</string>
+    <string name="forwarding_browser_done">完了</string>
+    <string name="forwarding_browser_no_answer">このトンネルは応答しませんでした</string>
+    <string name="forwarding_browser_check_rule">ルールがリッスンしていること、リモートのサービスが起動していることを確認してください。</string>
+    <string name="forwarding_browser_retry">再試行</string>
+    <string name="forwarding_browser_connection_failed">接続に失敗しました</string>
+    <plurals name="forwarding_status_active_connections">
+        <item quantity="other">アクティブな接続 %1$d 件</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels">
+        <item quantity="other">アクティブなトンネル %1$d</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels_serving">
+        <item quantity="other">アクティブなトンネル %1$d、応答あり %2$d</item>
+    </plurals>
+</resources>

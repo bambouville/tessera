@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_hostname_required">le nom d\'hôte est obligatoire</string>
+    <string name="data_hostname_whitespace">le nom d\'hôte ne peut pas contenir d\'espaces</string>
+    <string name="data_hostname_control_characters">le nom d\'hôte ne peut pas contenir de caractères de contrôle</string>
+    <string name="data_username_required">le nom d\'utilisateur est obligatoire</string>
+    <string name="data_username_whitespace">le nom d\'utilisateur ne peut pas contenir d\'espaces</string>
+    <string name="data_username_control_characters">le nom d\'utilisateur ne peut pas contenir de caractères de contrôle</string>
+    <string name="data_name_control_characters">le nom ne peut pas contenir de caractères de contrôle</string>
+    <string name="data_port_range">le port doit être compris entre 1 et 65535</string>
+    <string name="data_host_text_too_long">le texte de l\'hôte dépasse 64 KiB ou contient un caractère NUL</string>
+    <string name="data_invalid_tmux_mode">mode tmux non valide</string>
+    <string name="data_invalid_transport_kind">type de transport non valide</string>
+    <string name="data_tmux_target_required">une cible tmux fixée est requise</string>
+    <string name="data_tmux_target_too_long">la cible tmux est trop longue</string>
+    <string name="data_tmux_target_characters">la cible tmux ne peut contenir que des lettres, des chiffres, le tiret bas, le tiret ou le point</string>
+    <string name="data_host_jump_through_itself">un hôte ne peut pas être son propre hôte de rebond</string>
+    <string name="data_jump_route_cycle">la route de rebond contient un cycle</string>
+    <string name="data_route_host_unavailable">un hôte de la route est indisponible</string>
+    <string name="data_jump_host_unavailable">l\'hôte de rebond est indisponible</string>
+    <string name="data_identity_name_required">le nom de l\'identité est obligatoire</string>
+    <string name="data_identity_name_control_characters">le nom de l\'identité ne peut pas contenir de caractères de contrôle</string>
+    <plurals name="data_jump_route_too_long">
+        <item quantity="one">la route de rebond dépasse %1$d hôte</item>
+        <item quantity="many">la route de rebond dépasse %1$d hôtes</item>
+        <item quantity="other">la route de rebond dépasse %1$d hôtes</item>
+    </plurals>
+</resources>

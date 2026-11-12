@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="switcher_window_count">
+        <item quantity="one">%d ventana</item>
+        <item quantity="many">%d ventanas</item>
+        <item quantity="other">%d ventanas</item>
+    </plurals>
+    <plurals name="switcher_session_count">
+        <item quantity="one">%d sesión</item>
+        <item quantity="many">%d sesiones</item>
+        <item quantity="other">%d sesiones</item>
+    </plurals>
+    <plurals name="session_switcher_panes_open_full_screen">
+        <item quantity="one">%d panel · se abre a pantalla completa</item>
+        <item quantity="many">%d paneles · cada uno se abre a pantalla completa</item>
+        <item quantity="other">%d paneles · cada uno se abre a pantalla completa</item>
+    </plurals>
+</resources>

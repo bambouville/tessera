@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Resources
 import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +34,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.bambouville.tessera.core.bridge.SharedImportAction
 import com.bambouville.tessera.core.bridge.SharedKnownHostsExportRecord
@@ -76,15 +80,17 @@ fun KnownHostsScreen(
     var importNotice by remember { mutableStateOf<String?>(null) }
     var reviewedPlan by remember { mutableStateOf<SharedKnownHostsImportPlan?>(null) }
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
+    val exportTitle = stringResource(R.string.hosts_known_export_title)
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             try {
                 val text = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        ?: error("The selected known-hosts file is unavailable")
+                        ?: error(resources.getString(R.string.hosts_known_file_unavailable))
                 }
-                require(text.length <= 512 * 1024) { "Known-hosts import is too large" }
+                require(text.length <= 512 * 1024) { resources.getString(R.string.hosts_known_import_too_large) }
                 // Build the plan; write nothing. The parser that mutated as it
                 // went is what used to leave a half-imported store behind on
                 // the first bad line, and made "review before you trust" a lie.
@@ -117,30 +123,30 @@ fun KnownHostsScreen(
                     )
                 }
                 if (plan.candidates.isEmpty() && plan.rejections.isEmpty()) {
-                    importNotice = "That file contained no host keys."
+                    importNotice = resources.getString(R.string.hosts_known_import_no_keys)
                 } else {
                     reviewedPlan = plan
                 }
             } catch (failure: Throwable) {
-                importError = failure.message ?: "Known hosts could not be imported"
+                importError = failure.message ?: resources.getString(R.string.hosts_known_import_failed_fallback)
             }
         }
     }
     val tokens = LocalTesseraTokens.current
     Column(modifier.background(tokens.bg)) {
         TesseraSubPageHeader(
-            title = "known hosts",
+            title = stringResource(R.string.hosts_known_title),
             onBack = onBack,
-            backContentDescription = "Back",
+            backContentDescription = stringResource(R.string.hosts_known_back),
         ) {
             TesseraIconButton(
                 icon = TesseraIcons.Download,
-                contentDescription = "Import known hosts",
+                contentDescription = stringResource(R.string.hosts_known_import),
                 onClick = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream")) },
             )
             TesseraIconButton(
                 icon = TesseraIcons.Upload,
-                contentDescription = "Export known hosts",
+                contentDescription = stringResource(R.string.hosts_known_export),
                 enabled = knownHosts.isNotEmpty(),
                 onClick = {
                     // OpenSSH-canonical: a bare host at port 22, `[host]:port`
@@ -168,7 +174,7 @@ fun KnownHostsScreen(
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_TEXT, contents)
                             },
-                            "Export Tessera known hosts",
+                            exportTitle,
                         ),
                     )
                 },
@@ -179,8 +185,8 @@ fun KnownHostsScreen(
             Spacer(Modifier.fillMaxSize())
         } else if (knownHosts.isEmpty()) {
             TesseraEmptyState(
-                title = "no trusted hosts",
-                body = "Host keys accepted during a connection are recorded here so a later change can be detected.",
+                title = stringResource(R.string.hosts_known_empty_title),
+                body = stringResource(R.string.hosts_known_empty_body),
                 icon = TesseraIcons.Shield,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -212,7 +218,7 @@ fun KnownHostsScreen(
                             )
                         }
                         if (host.previousCanonicalKeyBlob != null) {
-                            TesseraTag("replaced", tone = tokens.amber)
+                            TesseraTag(stringResource(R.string.hosts_known_replaced), tone = tokens.amber)
                         }
                         androidx.compose.material3.Icon(
                             TesseraIcons.ChevronRight,
@@ -236,18 +242,18 @@ fun KnownHostsScreen(
             onConfirm = {
                 reviewedPlan = null
                 scope.launch {
-                    importNotice = applyImportPlan(repository, plan)
+                    importNotice = applyImportPlan(repository, plan, resources)
                 }
             },
         )
     }
     importError?.let { message ->
         TesseraDialog(
-            title = "import failed",
+            title = stringResource(R.string.hosts_known_import_failed),
             onDismissRequest = { importError = null },
             actions = {
                 TesseraButton(
-                    text = "Done",
+                    text = stringResource(R.string.host_close),
                     onClick = { importError = null },
                     style = TesseraButtonStyle.Primary,
                     compact = true,
@@ -259,11 +265,11 @@ fun KnownHostsScreen(
     }
     importNotice?.let { message ->
         TesseraDialog(
-            title = "import",
+            title = stringResource(R.string.hosts_known_import_result_title),
             onDismissRequest = { importNotice = null },
             actions = {
                 TesseraButton(
-                    text = "Done",
+                    text = stringResource(R.string.host_close),
                     onClick = { importNotice = null },
                     style = TesseraButtonStyle.Primary,
                     compact = true,
@@ -289,12 +295,12 @@ private fun KnownHostsImportReview(
 ) {
     val tokens = LocalTesseraTokens.current
     TesseraDialog(
-        title = "review import",
+        title = stringResource(R.string.hosts_known_review_title),
         onDismissRequest = onDismiss,
         actions = {
-            TesseraButton(text = "Cancel", onClick = onDismiss, compact = true)
+            TesseraButton(text = stringResource(R.string.host_cancel), onClick = onDismiss, compact = true)
             TesseraButton(
-                text = "Import",
+                text = stringResource(R.string.hosts_known_import_confirm),
                 onClick = onConfirm,
                 style = TesseraButtonStyle.Primary,
                 enabled = !plan.isNoOp,
@@ -303,34 +309,38 @@ private fun KnownHostsImportReview(
         },
     ) {
         Text(
-            buildString {
-                append("${plan.addCount} to add")
-                append(" · ${plan.replaceCount} to replace")
-                append(" · ${plan.unchangedCount} already pinned")
-            },
+            listOf(
+                pluralStringResource(R.plurals.hosts_known_plan_add, plan.addCount, plan.addCount),
+                pluralStringResource(R.plurals.hosts_known_plan_replace, plan.replaceCount, plan.replaceCount),
+                pluralStringResource(R.plurals.hosts_known_plan_unchanged, plan.unchangedCount, plan.unchangedCount),
+            ).joinToString(" · "),
             style = TesseraType.bodySmall,
             color = tokens.fg,
         )
         if (plan.replaceCount > 0) {
             TesseraBanner(
-                text = "Replacing a pinned key rotates it. The key you replace is kept so a " +
-                    "later revert is still reported.",
+                text = stringResource(R.string.hosts_known_replace_warning),
                 tone = TesseraBannerTone.Warning,
             )
         }
         if (plan.rejections.isNotEmpty()) {
             Column(Modifier.fillMaxWidth()) {
-                TesseraKicker("not imported", Modifier.padding(bottom = 6.dp))
+                TesseraKicker(stringResource(R.string.hosts_known_not_imported), Modifier.padding(bottom = 6.dp))
                 plan.rejections.take(MAX_LISTED_IMPORT_LINES).forEach { rejection ->
                     Text(
-                        "line ${rejection.lineNumber}: ${rejectionText(rejection.reason, rejection.marker)}",
+                        stringResource(
+                            R.string.hosts_known_rejection_line,
+                            rejection.lineNumber,
+                            rejectionText(rejection.reason, rejection.marker),
+                        ),
                         style = TesseraType.bodySmall,
                         color = tokens.fgMuted,
                     )
                 }
                 if (plan.rejections.size > MAX_LISTED_IMPORT_LINES) {
+                    val more = plan.rejections.size - MAX_LISTED_IMPORT_LINES
                     Text(
-                        "and ${plan.rejections.size - MAX_LISTED_IMPORT_LINES} more",
+                        pluralStringResource(R.plurals.hosts_known_rejections_more, more, more),
                         style = TesseraType.bodySmall,
                         color = tokens.fgDim,
                     )
@@ -339,7 +349,11 @@ private fun KnownHostsImportReview(
         }
         if (plan.warnings.isNotEmpty()) {
             Text(
-                "${plan.warnings.size} duplicate line(s) ignored.",
+                pluralStringResource(
+                    R.plurals.hosts_known_duplicates_ignored,
+                    plan.warnings.size,
+                    plan.warnings.size,
+                ),
                 style = TesseraType.bodySmall,
                 color = tokens.fgMuted,
             )
@@ -362,6 +376,7 @@ private fun KnownHostsImportReview(
 private suspend fun applyImportPlan(
     repository: KnownHostsRepository,
     plan: SharedKnownHostsImportPlan,
+    resources: Resources,
 ): String {
     var applied = 0
     var skipped = 0
@@ -382,27 +397,29 @@ private suspend fun applyImportPlan(
         )
         if (written) applied += 1 else skipped += 1
     }
-    return buildString {
-        append("Pinned $applied host key(s).")
-        if (skipped > 0) {
-            append(" $skipped were skipped because the stored key changed since the plan was built.")
-        }
-    }
+    val pinned = resources.getQuantityString(R.plurals.hosts_known_import_pinned, applied, applied)
+    if (skipped == 0) return pinned
+    return resources.getString(
+        R.string.hosts_known_import_summary,
+        pinned,
+        resources.getQuantityString(R.plurals.hosts_known_import_skipped, skipped, skipped),
+    )
 }
 
 /** The core classifies; the platform words it. */
+@Composable
 private fun rejectionText(reason: String, marker: String?): String = when (reason) {
-    "missingFields" -> "not a host, key type and key"
-    "unsupportedMarker" -> "${marker ?: "@"} lines are not host pins"
-    "invalidPublicKey" -> "unreadable public key"
-    "emptyHostField" -> "empty host in the host list"
-    "hashedHost" -> "hashed hosts cannot be mapped back to an endpoint"
-    "wildcardOrNegatedHost" -> "patterns and negations are not exact pins"
-    "invalidBracketedHostPort" -> "malformed [host]:port"
-    "invalidHostOrPort" -> "host or port out of range"
-    "ambiguousEndpoint" -> "two different keys for the same endpoint"
-    "unnormalizableHost" -> "host name has no usable form"
-    else -> "unusable host field"
+    "missingFields" -> stringResource(R.string.hosts_known_reject_missing_fields)
+    "unsupportedMarker" -> stringResource(R.string.hosts_known_reject_unsupported_marker, marker ?: "@")
+    "invalidPublicKey" -> stringResource(R.string.hosts_known_reject_invalid_key)
+    "emptyHostField" -> stringResource(R.string.hosts_known_reject_empty_host)
+    "hashedHost" -> stringResource(R.string.hosts_known_reject_hashed)
+    "wildcardOrNegatedHost" -> stringResource(R.string.hosts_known_reject_pattern)
+    "invalidBracketedHostPort" -> stringResource(R.string.hosts_known_reject_bracketed)
+    "invalidHostOrPort" -> stringResource(R.string.hosts_known_reject_out_of_range)
+    "ambiguousEndpoint" -> stringResource(R.string.hosts_known_reject_ambiguous)
+    "unnormalizableHost" -> stringResource(R.string.hosts_known_reject_unnormalizable)
+    else -> stringResource(R.string.hosts_known_reject_unusable)
 }
 
 private const val MAX_LISTED_IMPORT_LINES = 6
@@ -417,12 +434,13 @@ private fun KnownHostDetails(
     val tokens = LocalTesseraTokens.current
     val scope = rememberCoroutineScope()
     val fingerprint = host.canonicalKeyBlob.fingerprint()
+    val fingerprintClipLabel = stringResource(R.string.hosts_known_fingerprint_clip_label)
     TesseraDialog(
         title = host.normalizedEndpoint,
         onDismissRequest = onDismiss,
         actions = {
             TesseraButton(
-                text = "Forget",
+                text = stringResource(R.string.hosts_known_forget),
                 onClick = {
                     val (hostname, port) = KnownHostKeys.splitEndpoint(host.normalizedEndpoint)
                         ?: (host.normalizedEndpoint to 22)
@@ -435,7 +453,7 @@ private fun KnownHostDetails(
                 compact = true,
             )
             TesseraButton(
-                text = "Done",
+                text = stringResource(R.string.host_close),
                 onClick = onDismiss,
                 style = TesseraButtonStyle.Primary,
                 compact = true,
@@ -444,7 +462,7 @@ private fun KnownHostDetails(
     ) {
         TesseraTag(host.algorithm, tone = tokens.green)
         Column(Modifier.fillMaxWidth()) {
-            TesseraKicker("fingerprint", Modifier.padding(bottom = 6.dp))
+            TesseraKicker(stringResource(R.string.identity_fingerprint), Modifier.padding(bottom = 6.dp))
             Text(
                 fingerprint,
                 modifier = Modifier
@@ -457,22 +475,22 @@ private fun KnownHostDetails(
             )
         }
         Text(
-            "Last verified ${host.lastVerifiedAtEpochMilliseconds.displayDate()}",
+            stringResource(R.string.hosts_known_last_verified, host.lastVerifiedAtEpochMilliseconds.displayDate()),
             style = TesseraType.bodySmall,
             color = tokens.fgMuted,
         )
         if (host.previousCanonicalKeyBlob != null) {
             Text(
-                "A previous key is retained so a reverted key is still detected as a change.",
+                stringResource(R.string.hosts_known_previous_retained),
                 style = TesseraType.bodySmall,
                 color = tokens.fgMuted,
             )
         }
         TesseraButton(
-            text = "Copy fingerprint",
+            text = stringResource(R.string.hosts_known_copy_fingerprint),
             onClick = {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("SSH host fingerprint", fingerprint))
+                clipboard.setPrimaryClip(ClipData.newPlainText(fingerprintClipLabel, fingerprint))
             },
             modifier = Modifier.fillMaxWidth(),
             icon = TesseraIcons.Copy,

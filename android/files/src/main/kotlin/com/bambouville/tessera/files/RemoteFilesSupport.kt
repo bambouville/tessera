@@ -3,6 +3,9 @@ package com.bambouville.tessera.files
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.IntentCompat
+import com.bambouville.tessera.design.ArtifactOpenOrigin
+import com.bambouville.tessera.design.ArtifactOpenRequest
+import com.bambouville.tessera.design.ArtifactOpener
 import java.util.Locale
 
 enum class RemoteFileRowTap { NAVIGATE, QUICK_VIEW, NONE }
@@ -17,6 +20,21 @@ object RemoteFilesBrowser {
         RemoteFileKind.DIRECTORY, RemoteFileKind.SYMLINK -> RemoteFileRowTap.NAVIGATE
         RemoteFileKind.FILE -> RemoteFileRowTap.QUICK_VIEW
         RemoteFileKind.OTHER -> RemoteFileRowTap.NONE
+    }
+
+    /** True means the browser owns the fetch; the caller must not stage a copy. */
+    fun openArtifact(
+        entry: RemoteFileEntry,
+        action: RemoteFilePresentationAction,
+        hostId: String?,
+        opener: ArtifactOpener?,
+        origin: ArtifactOpenOrigin,
+        sessionHint: String? = null,
+    ): Boolean {
+        if (opener == null || hostId.isNullOrBlank() || action != RemoteFilePresentationAction.OPEN ||
+            entry.kind != RemoteFileKind.FILE || !entry.path.startsWith('/')) return false
+        opener.open(ArtifactOpenRequest.File(hostId, entry.path, origin, sessionHint))
+        return true
     }
 
     fun requestedPath(value: String, homePath: String? = null): String? {

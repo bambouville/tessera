@@ -1,5 +1,7 @@
 package com.bambouville.tessera.forwarding
 
+import androidx.annotation.StringRes
+import com.bambouville.tessera.design.DisplayText
 import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -27,10 +29,21 @@ data class BoundForwardEndpoint(
     val port: Int,
 )
 
+/**
+ * [reason] is the English text diagnostics and callers see; [display] is what
+ * the rule row shows, resolved there so it follows the user's language. A
+ * reason that came from the host or the system shows as it came.
+ */
 sealed interface PortForwardingFailure {
     data class Validation(val error: PortForwardRuleError) : PortForwardingFailure
-    data class Unsupported(val reason: String) : PortForwardingFailure
-    data class Transport(val reason: String) : PortForwardingFailure
+    data class Unsupported(
+        val reason: String,
+        val display: DisplayText = DisplayText.Verbatim(reason),
+    ) : PortForwardingFailure
+    data class Transport(
+        val reason: String,
+        val display: DisplayText = DisplayText.Verbatim(reason),
+    ) : PortForwardingFailure
 }
 
 sealed interface PortForwardingStatus {
@@ -101,6 +114,18 @@ data class PortForwardingState(
  */
 private fun unavailableText(reason: ForwardingUnavailableReason): String = when (reason) {
     ForwardingUnavailableReason.MoshWithoutSshSideChannel -> "Mosh has no authenticated SSH side channel"
+}
+
+@StringRes
+private fun unavailableTextRes(reason: ForwardingUnavailableReason): Int = when (reason) {
+    ForwardingUnavailableReason.MoshWithoutSshSideChannel -> R.string.forwarding_mosh_without_side_channel
+}
+
+@StringRes
+private fun unsupportedDirectionRes(direction: PortForwardDirection): Int = when (direction) {
+    PortForwardDirection.LOCAL -> R.string.forwarding_transport_unsupported_local
+    PortForwardDirection.REMOTE -> R.string.forwarding_transport_unsupported_remote
+    PortForwardDirection.DYNAMIC -> R.string.forwarding_transport_unsupported_dynamic
 }
 
 /**
@@ -256,67 +281,53 @@ class PortForwardingManager internal constructor(
      * initial connection attachment.
      */
     suspend fun reconcile(rules: List<PortForwardRule>) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val next = rules.associateBy(PortForwardRule::id)
-            entries.keys.filter { it !in next }.toList().forEach(::stopLocked)
-            configuredRules = next
-
-            rules.forEach { rule ->
-                val active = entries[rule.id]
-                when {
-                    !rule.enabled -> {
-                        if (active != null) stopLocked(rule.id)
-                        updateStateLocked(rule, PortForwardingStatus.Idle)
-                    }
-                    active == null -> startLocked(rule)
-                    policy.requiresRestart(active.rule, rule) -> {
-                        stopLocked(rule.id)
-                        startLocked(rule)
-                    }
-                    else -> {
-                        // Preserve listener, activity, and service state while
-                        // label or auto-start changes: the target is the same.
-                        active.rule = rule
-                        val watches = policy.watchesService(rule)
-                        if (watches != active.watchesService) {
-                            // Unreachable while the shared policy restarts on
-                            // every field `watchesService` reads. Should that
-                            // change, a rule that stops being watched is never
-                            // probed and drops its passive evidence, so a kept
-                            // answer would colour the glyph for good.
-                            active.watchesService = watches
-                            active.forgetService()
-                        }
-                        publishEntryLocked(active)
-                    }
-                }
-            }
-        }
+        mutex.withLock { reconcileLocked(rules) }
     }
 
-    suspend fun start(ruleId: UUID) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val rule = configuredRules[ruleId] ?: return@withLock
-            if (!rule.enabled) {
-                updateStateLocked(rule, PortForwardingStatus.Idle)
-                return@withLock
+    /**
+     * The session must decide whether to attach using the same lock that
+     * owns the runtime. A separate controller flag can outlive detach and
+     * send a rule edit to a manager that no longer has an SSH carrier.
+     * Rechecking an unchanged configuration preserves manually stopped rules.
+     * Connection-time changes honor autoStart; connected edits start enabled rules.
+     */
+    suspend fun reconcileIfAttached(rules: List<PortForwardRule>, asConnectedEdit: Boolean = false): Boolean =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                if (runtime == null) return@withLock false
+                if (asConnectedEdit || configuredRules.values.toList() != rules) {
+                    reconcileLocked(rules, autoStartOnly = !asConnectedEdit)
+                }
+                true
             }
-            if (entries[ruleId] == null) startLocked(rule)
         }
+
+    suspend fun start(ruleId: UUID) = withContext(Dispatchers.IO) {
+        mutex.withLock { startConfiguredRuleLocked(ruleId) }
+    }
+
+    /** A failed attachment keeps its original error until the session can retry it. */
+    suspend fun startIfAttached(ruleId: UUID) = withContext(Dispatchers.IO) {
+        mutex.withLock { if (runtime != null) startConfiguredRuleLocked(ruleId) }
     }
 
     suspend fun stop(ruleId: UUID) = withContext(Dispatchers.IO) {
         mutex.withLock { stopLocked(ruleId) }
     }
 
-    suspend fun reportTransportUnavailable(rules: List<PortForwardRule>, reason: String) = withContext(Dispatchers.IO) {
+    /** [reason] is English, as [PortForwardingFailure.Transport.reason]; [display] is what the rows show. */
+    suspend fun reportTransportUnavailable(
+        rules: List<PortForwardRule>,
+        reason: String,
+        display: DisplayText = DisplayText.Verbatim(reason),
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
             detachLocked(closeRuntime = true)
             configuredRules = rules.associateBy(PortForwardRule::id)
             mutableStates.value = rules.associate { rule ->
                 rule.id to PortForwardingState(
                     rule,
-                    PortForwardingStatus.Failed(PortForwardingFailure.Transport(reason)),
+                    PortForwardingStatus.Failed(PortForwardingFailure.Transport(reason, display)),
                 )
             }
         }
@@ -411,6 +422,54 @@ class PortForwardingManager internal constructor(
         ForwardedServiceProbe.Inconclusive(error.javaClass.simpleName)
     }
 
+    private suspend fun reconcileLocked(rules: List<PortForwardRule>, autoStartOnly: Boolean = false) {
+        val next = rules.associateBy(PortForwardRule::id)
+        entries.keys.filter { it !in next }.toList().forEach(::stopLocked)
+        configuredRules = next
+        mutableStates.value = mutableStates.value.filterKeys { it in next }
+
+        rules.forEach { rule ->
+            val active = entries[rule.id]
+            when {
+                !rule.enabled -> {
+                    if (active != null) stopLocked(rule.id)
+                    updateStateLocked(rule, PortForwardingStatus.Idle)
+                }
+                active == null -> {
+                    if (!autoStartOnly || rule.autoStart) startLocked(rule)
+                    else updateStateLocked(rule, PortForwardingStatus.Idle)
+                }
+                policy.requiresRestart(active.rule, rule) -> {
+                    stopLocked(rule.id)
+                    if (!autoStartOnly || rule.autoStart) startLocked(rule)
+                    else updateStateLocked(rule, PortForwardingStatus.Idle)
+                }
+                else -> {
+                    // Preserve listener, activity, and service state while
+                    // label or auto-start changes: the target is the same.
+                    active.rule = rule
+                    val watches = policy.watchesService(rule)
+                    if (watches != active.watchesService) {
+                        // If policy later allows this change without restarting,
+                        // a rule that stops being watched must forget its evidence.
+                        active.watchesService = watches
+                        active.forgetService()
+                    }
+                    publishEntryLocked(active)
+                }
+            }
+        }
+    }
+
+    private suspend fun startConfiguredRuleLocked(ruleId: UUID) {
+        val rule = configuredRules[ruleId] ?: return
+        if (!rule.enabled) {
+            updateStateLocked(rule, PortForwardingStatus.Idle)
+            return
+        }
+        if (entries[ruleId] == null) startLocked(rule)
+    }
+
     private suspend fun startLocked(rule: PortForwardRule) {
         val validation = policy.validate(rule, configuredRules.values)
         if (validation != null) {
@@ -421,7 +480,12 @@ class PortForwardingManager internal constructor(
         if (currentRuntime == null) {
             updateStateLocked(
                 rule,
-                PortForwardingStatus.Failed(PortForwardingFailure.Transport("SSH forwarding runtime is unavailable")),
+                PortForwardingStatus.Failed(
+                    PortForwardingFailure.Transport(
+                        "SSH forwarding runtime is unavailable",
+                        DisplayText.Resource(R.string.forwarding_runtime_unavailable),
+                    ),
+                ),
             )
             return
         }
@@ -432,6 +496,10 @@ class PortForwardingManager internal constructor(
                     PortForwardingFailure.Unsupported(
                         currentRuntime.capabilities.unavailableReason?.let(::unavailableText)
                             ?: "This transport does not support ${rule.direction}",
+                        DisplayText.Resource(
+                            currentRuntime.capabilities.unavailableReason?.let(::unavailableTextRes)
+                                ?: unsupportedDirectionRes(rule.direction),
+                        ),
                     ),
                 ),
             )
@@ -472,7 +540,10 @@ class PortForwardingManager internal constructor(
                         updateStateLocked(
                             live.rule,
                             PortForwardingStatus.Failed(
-                                PortForwardingFailure.Transport("Forwarding listener stopped unexpectedly"),
+                                PortForwardingFailure.Transport(
+                                    "Forwarding listener stopped unexpectedly",
+                                    DisplayText.Resource(R.string.forwarding_listener_stopped),
+                                ),
                             ),
                         )
                     }

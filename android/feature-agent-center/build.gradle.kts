@@ -15,6 +15,8 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(project(":agent-platform"))
     implementation(project(":design"))
+    // The terminal's selection rules: path candidates and artifacts link routing.
+    implementation(project(":files"))
     implementation(project(":markdown"))
     implementation(project(":data"))
     implementation(project(":lifecycle"))
@@ -22,12 +24,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
-    // Gemini Nano through ML Kit, for the on-device tier of the title
-    // waterfall. Every transitive Play/datatransport artifact it brings is
-    // already in the app through the pairing scanner, so this adds a model
-    // client and nothing else. Absent hardware simply falls through to the
-    // clipped opening prompt.
-    implementation(libs.mlkit.genai.prompt)
 
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)

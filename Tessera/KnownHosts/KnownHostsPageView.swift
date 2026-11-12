@@ -13,6 +13,7 @@ struct KnownHostsPageView: View {
     }()
 
     @Environment(\.designTokens) private var T
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var rows: [KnownHostsStore.DisplayRow] = []
@@ -31,16 +32,7 @@ struct KnownHostsPageView: View {
     @ScaledMetric(relativeTo: .body) private var statusColumnWidth: CGFloat = 110
 
     private var isPhone: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone
-    }
-
-    /// The desktop table's fixed columns total 340pt at default text size and
-    /// scale with Dynamic Type (@ScaledMetric below) — at accessibility sizes
-    /// they would consume the whole viewport on iPad portrait / Split View,
-    /// collapsing the flexible host column. Fall back to the stacked compact
-    /// row there; it has no fixed columns.
-    private var usesCompactRows: Bool {
-        isPhone || dynamicTypeSize.isAccessibilitySize
+        CompactLayout.isPhone(horizontalSizeClass)
     }
 
     private enum Filter {
@@ -51,6 +43,16 @@ struct KnownHostsPageView: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+            // Settings' section rail also consumes width on a regular iPad.
+            // Reserve space for the host name beyond the scaled fixed columns.
+            pageContent(usesCompactRows: isPhone
+                || dynamicTypeSize.isAccessibilitySize
+                || geometry.size.width < algoColumnWidth + addedColumnWidth + statusColumnWidth + 260)
+        }
+    }
+
+    private func pageContent(usesCompactRows: Bool) -> some View {
         ZStack {
             T.bg.ignoresSafeArea()
 
@@ -63,7 +65,7 @@ struct KnownHostsPageView: View {
                     }
 
                     filterChips
-                    table
+                    table(usesCompactRows: usesCompactRows)
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(.bottom, 40)
@@ -224,7 +226,7 @@ struct KnownHostsPageView: View {
         .padding(.horizontal, isPhone ? 18 : 40)
     }
 
-    private var table: some View {
+    private func table(usesCompactRows: Bool) -> some View {
         VStack(spacing: 0) {
             if !usesCompactRows {
                 tableHeader
@@ -725,7 +727,7 @@ private struct KnownHostsImportReviewSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .laptopSheetDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 

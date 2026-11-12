@@ -41,6 +41,8 @@ struct AgentCurrentIntegrationTarget: Equatable, Sendable {
     let shellIntegrationActive: Bool?
     let agentIntegrationActive: Bool
     let agentRequiresLifecycleHook: Bool?
+    /// False on plain mosh: no lifecycle event can reach this terminal.
+    let agentLifecycleDeliverable: Bool
 
     init(
         location: AgentLocation,
@@ -48,7 +50,8 @@ struct AgentCurrentIntegrationTarget: Equatable, Sendable {
         processIDs: Set<Int>,
         shellIntegrationActive: Bool?,
         agentIntegrationActive: Bool,
-        agentRequiresLifecycleHook: Bool? = nil
+        agentRequiresLifecycleHook: Bool? = nil,
+        agentLifecycleDeliverable: Bool = true
     ) {
         self.location = location
         self.foreground = foreground
@@ -56,6 +59,7 @@ struct AgentCurrentIntegrationTarget: Equatable, Sendable {
         self.shellIntegrationActive = shellIntegrationActive
         self.agentIntegrationActive = agentIntegrationActive
         self.agentRequiresLifecycleHook = agentRequiresLifecycleHook
+        self.agentLifecycleDeliverable = agentLifecycleDeliverable
     }
 }
 
@@ -176,42 +180,49 @@ struct AgentIntegrationWarningState: Equatable, Sendable {
                 foreground: target.foreground.semanticKind,
                 shellIntegrationActive: target.shellIntegrationActive,
                 agentIntegrationActive: target.agentIntegrationActive,
-                agentRequiresLifecycleHook: target.agentRequiresLifecycleHook
+                agentRequiresLifecycleHook: target.agentRequiresLifecycleHook,
+                agentLifecycleDeliverable: target.agentLifecycleDeliverable
             )
         )
         switch decision.kind {
         case .notInstalled:
             let canApply = decision.primaryAction == .installAndApply
             let insideHookAgent = target.foreground == .agent
-                && target.agentRequiresLifecycleHook != false
+                && target.agentRequiresLifecycleHook != false && target.agentLifecycleDeliverable
+            let actionLabel: LocalizedStringResource = canApply ? "Install and enable" : "Install integration"
             return Self(
                 kind: .notInstalled,
                 title: "Agent integration not installed",
-                message: insideHookAgent
+                message: !target.agentLifecycleDeliverable
+                    ? "Installs Tessera's Agent Center helpers on this host. Plain mosh cannot carry agent status; agents in this terminal show without it."
+                    : insideHookAgent
                     ? "Installs Tessera's helpers now. If this agent has not loaded the lifecycle hooks, relaunch it to enable status reporting."
                     : target.foreground == .agent
                     ? "Installs Tessera's Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes."
                     : canApply
                     ? "Installs Tessera's local hook files and PATH shims, then loads them here so future agents report accurate status."
                     : "Installs Tessera's local hook files. Return to a shell prompt afterward to enable this terminal.",
-                actionLabel: canApply ? "Install and enable" : "Install integration",
+                actionLabel: actionLabel,
                 action: decision.primaryAction?.appleAction
             )
         case .outdated:
             let canApply = decision.primaryAction == .installAndApply
             let insideHookAgent = target.foreground == .agent
-                && target.agentRequiresLifecycleHook != false
+                && target.agentRequiresLifecycleHook != false && target.agentLifecycleDeliverable
+            let actionLabel: LocalizedStringResource = canApply ? "Update and enable" : "Update integration"
             return Self(
                 kind: .outdated,
                 title: "Agent integration needs an update",
-                message: insideHookAgent
+                message: !target.agentLifecycleDeliverable
+                    ? "Updates Tessera's Agent Center helpers on this host. Plain mosh cannot carry agent status; agents in this terminal show without it."
+                    : insideHookAgent
                     ? "Updates Tessera's helpers immediately without interrupting this agent. Existing hooks use the new scripts on their next event. If lifecycle status remains unavailable, relaunch the agent to load its hooks."
                     : target.foreground == .agent
                     ? "Updates Tessera's Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes."
                     : canApply
                     ? "Updates Tessera's local hook files and PATH shims, then loads them here so future agents report accurate status."
                     : "Updates Tessera's local hook files. Return to a shell prompt afterward to enable this terminal.",
-                actionLabel: canApply ? "Update and enable" : "Update integration",
+                actionLabel: actionLabel,
                 action: decision.primaryAction?.appleAction
             )
         case .ready:
@@ -390,6 +401,7 @@ struct AgentLifecycleEvent: Equatable, Sendable {
     let agentID: String?
     let agentType: String?
     let rootAgentID: String?
+    let toolUseID: String?
 
     init(
         version: Int,
@@ -406,7 +418,8 @@ struct AgentLifecycleEvent: Equatable, Sendable {
         transcriptRef: String? = nil,
         agentID: String? = nil,
         agentType: String? = nil,
-        rootAgentID: String? = nil
+        rootAgentID: String? = nil,
+        toolUseID: String? = nil
     ) {
         self.version = version
         self.provider = provider
@@ -423,6 +436,7 @@ struct AgentLifecycleEvent: Equatable, Sendable {
         self.agentID = agentID
         self.agentType = agentType
         self.rootAgentID = rootAgentID
+        self.toolUseID = toolUseID
     }
 
     var timestamp: Date {
@@ -498,7 +512,8 @@ struct AgentLifecycleEvent: Equatable, Sendable {
             transcriptRef: wire.transcriptRef,
             agentID: wire.agentID,
             agentType: wire.agentType,
-            rootAgentID: wire.rootAgentID
+            rootAgentID: wire.rootAgentID,
+            toolUseID: wire.toolUseID
         )
     }
 }
@@ -806,6 +821,11 @@ struct AgentProbeTarget: Equatable, Sendable {
     let cursorColumn: Int?
     let cursorVisible: Bool?
     let screenEvidence: TerminalScreenEvidence?
+    /// The local grid as a prompt observation reads it: Claude marks its
+    /// current question tab only by the cells' background, which
+    /// `visibleText` loses. nil where `visibleText` is a tmux capture, which
+    /// keeps its SGR, and outside action inspections.
+    let promptText: String?
     let lifecycleEvent: AgentLifecycleEvent?
     let bracketedPasteEnabled: Bool
     /// When the remote process read behind `processIDs` began. Discovery may
@@ -824,6 +844,7 @@ struct AgentProbeTarget: Equatable, Sendable {
         cursorColumn: Int? = nil,
         cursorVisible: Bool? = nil,
         screenEvidence: TerminalScreenEvidence? = nil,
+        promptText: String? = nil,
         lifecycleEvent: AgentLifecycleEvent? = nil,
         bracketedPasteEnabled: Bool,
         processSnapshotTakenAt: Date? = nil
@@ -837,6 +858,7 @@ struct AgentProbeTarget: Equatable, Sendable {
         self.cursorColumn = cursorColumn
         self.cursorVisible = cursorVisible
         self.screenEvidence = screenEvidence
+        self.promptText = promptText
         self.lifecycleEvent = lifecycleEvent
         self.bracketedPasteEnabled = bracketedPasteEnabled
         self.processSnapshotTakenAt = processSnapshotTakenAt
@@ -887,6 +909,9 @@ struct AgentSessionSource {
     let inspect: @MainActor (AgentLocation) async -> AgentProbeTarget?
     /// Preserve the leased process in bounded snapshots used for action safety.
     let inspectInputTarget: @MainActor (AgentLocation, Int?) async -> AgentProbeTarget?
+    /// `inspectInputTarget` with a local grid's backgrounds in
+    /// `AgentProbeTarget.promptText`, for the prompt reads that need them.
+    let inspectPromptTarget: @MainActor (AgentLocation, Int?) async -> AgentProbeTarget?
     let lifecycleIntegrationCacheKey: String
     let automaticallyProbeLifecycleIntegration: Bool
     let probeLifecycleIntegrationOnCurrentCarrier: (@MainActor () async throws -> AgentLifecycleHostInstallation?)?
@@ -939,6 +964,7 @@ struct AgentSessionSource {
         verifySend: (@MainActor (AgentLocation) async -> AgentProbeTarget?)? = nil,
         inspect: @escaping @MainActor (AgentLocation) async -> AgentProbeTarget?,
         inspectInputTarget: (@MainActor (AgentLocation, Int?) async -> AgentProbeTarget?)? = nil,
+        inspectPromptTarget: (@MainActor (AgentLocation, Int?) async -> AgentProbeTarget?)? = nil,
         lifecycleIntegrationCacheKey: String? = nil,
         automaticallyProbeLifecycleIntegration: Bool = false,
         probeLifecycleIntegrationOnCurrentCarrier: (@MainActor () async throws -> AgentLifecycleHostInstallation?)? = nil,
@@ -970,7 +996,9 @@ struct AgentSessionSource {
         self.observe = observe
         self.verifySend = verifySend ?? observe
         self.inspect = inspect
-        self.inspectInputTarget = inspectInputTarget ?? { location, _ in await inspect(location) }
+        let inspectInputTarget = inspectInputTarget ?? { location, _ in await inspect(location) }
+        self.inspectInputTarget = inspectInputTarget
+        self.inspectPromptTarget = inspectPromptTarget ?? inspectInputTarget
         self.lifecycleIntegrationCacheKey = lifecycleIntegrationCacheKey ?? sessionID.uuidString
         self.automaticallyProbeLifecycleIntegration = automaticallyProbeLifecycleIntegration
         self.probeLifecycleIntegrationOnCurrentCarrier = probeLifecycleIntegrationOnCurrentCarrier

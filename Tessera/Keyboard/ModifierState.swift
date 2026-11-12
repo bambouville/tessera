@@ -19,6 +19,9 @@ final class ModifierState {
     private var arming = ModifierArming()
 
     private(set) var suppressesSoftwareKeyboardReclaim = false
+    /// Counts terminal taps that asked for the keyboard. The session closes the
+    /// phone Files sheet on one, as a terminal tap closes the iPad panel.
+    private(set) var terminalTapKeyboardRequests = 0
     @ObservationIgnored private var resignSoftwareKeyboard: (() -> Bool)?
     @ObservationIgnored private var becomeSoftwareKeyboard: (() -> Bool)?
 
@@ -69,6 +72,7 @@ final class ModifierState {
     /// Do not invoke the last pane's stored responder callback in that case.
     func requestSoftwareKeyboardOnTerminalTap() {
         suppressesSoftwareKeyboardReclaim = false
+        terminalTapKeyboardRequests &+= 1
     }
 
     func noteSoftwareKeyboardRequested(

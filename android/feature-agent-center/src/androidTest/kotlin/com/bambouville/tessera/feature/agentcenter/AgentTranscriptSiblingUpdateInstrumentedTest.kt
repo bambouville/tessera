@@ -25,10 +25,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.ForcedSize
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -65,7 +68,9 @@ class AgentTranscriptSiblingUpdateInstrumentedTest {
         val state = MutableStateFlow(fixture.initialState())
         val actions = SiblingHarnessActions()
         compose.activityRule.scenario.onActivity { it.installFixture { TesseraTheme {
-            SiblingActivityHarness(state, actions, compact, Modifier.fillMaxSize().safeDrawingPadding())
+            SplitSized(compact) {
+                SiblingActivityHarness(state, actions, compact, Modifier.fillMaxSize().safeDrawingPadding())
+            }
         } } }
         compose.waitUntil(10_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasTestTag("agent-transcript-list"))
@@ -102,6 +107,19 @@ class AgentTranscriptSiblingUpdateInstrumentedTest {
         for (name in listOf("detailPane", "transcriptItem", "blockCard", "toolRunCard", "markdown", "composer")) {
             assertEquals("$name recomposed for an unrelated thread: $counts", 0, counts.getInt(name))
         }
+    }
+}
+
+/**
+ * The split needs 760dp, which a phone-width emulator lacks: there it is laid
+ * out at a tablet's size, scaled down to fit, so the split case still runs.
+ */
+@Composable
+private fun SplitSized(compact: Boolean, content: @Composable () -> Unit) {
+    if (compact) {
+        content()
+    } else {
+        DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(840.dp, 1_200.dp))) { content() }
     }
 }
 

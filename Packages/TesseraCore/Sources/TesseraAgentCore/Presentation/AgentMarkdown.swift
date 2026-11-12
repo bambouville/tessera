@@ -30,21 +30,32 @@ public struct AgentMarkdownDocument: Codable, Equatable, Sendable {
     """
 
     /// Parses CommonMark with GFM extensions into a bounded display-only tree.
-    public static func parse(_ source: String) -> Self {
+    public static func parse(_ source: String) -> Self { parse(source, keepsLinks: false, cache: markdownCache) }
+
+    /// A document shown in Artifacts keeps every link destination as written,
+    /// since its viewer resolves each against the document's host and refuses
+    /// what must not open. Agent output keeps only web and mail links, so the
+    /// two never share a cache.
+    public static func parseDocument(_ source: String) -> Self { parse(source, keepsLinks: true, cache: documentMarkdownCache) }
+
+    private static func parse(_ source: String, keepsLinks: Bool, cache: AgentMarkdownCache) -> Self {
         let input = boundedInput(source)
-        if let cached = markdownCache.value(for: input.value) {
+        if let cached = cache.value(for: input.value) {
             return Self(blocks: cached.blocks, truncated: cached.truncated || input.truncated)
         }
-        var mapper = Mapper(initiallyTruncated: false)
+        var mapper = Mapper(initiallyTruncated: false, keepsLinks: keepsLinks)
         let document = Markdown.Document(parsing: input.value, options: [.disableSmartOpts])
         let parsed = Self(blocks: mapper.nodes(from: document), truncated: mapper.truncated)
-        markdownCache.insert(parsed, for: input.value)
+        cache.insert(parsed, for: input.value)
         return Self(blocks: parsed.blocks, truncated: parsed.truncated || input.truncated)
     }
 
     /// Parsed trees are reconstructible; memory pressure and disabling
     /// Agent Center drop them with the transcript content they came from.
-    public static func purgeCache() { markdownCache.purge() }
+    public static func purgeCache() {
+        markdownCache.purge()
+        documentMarkdownCache.purge()
+    }
 
     static func sizeCache(for budget: AgentContentBudget) { markdownCache.size(for: budget) }
     static func cachedForTesting(_ source: String) -> Bool { markdownCache.value(for: source) != nil }
@@ -60,6 +71,12 @@ private final class AgentMarkdownCache: @unchecked Sendable {
     }
     private let entries = NSCache<NSString, Entry>()
     init() { size(for: .compact) }
+    /// A document's viewer keeps its own cache in front of this one, which
+    /// then only needs to span one document's JNI size/copy calls.
+    init(documents: Int, bytes: Int) {
+        entries.countLimit = documents
+        entries.totalCostLimit = bytes
+    }
     /// Sized for the rows of a rendered transcript range (one conversation's
     /// retained budget), so re-rendering on scroll hits the cache instead of
     /// re-parsing every visible row. Android's view layer keeps its own LRU
@@ -87,6 +104,7 @@ private final class AgentMarkdownCache: @unchecked Sendable {
 }
 
 private let markdownCache = AgentMarkdownCache()
+private let documentMarkdownCache = AgentMarkdownCache(documents: 2, bytes: 2 << 20)
 
 public enum AgentMarkdownKind: String, Codable, Equatable, Sendable {
     case paragraph
@@ -163,11 +181,13 @@ private extension AgentMarkdownDocument {
 
     struct Mapper {
         var truncated: Bool
+        private let keepsLinks: Bool
         private var nodeCount = 0
         private var outputBytes = 0
 
-        init(initiallyTruncated: Bool) {
+        init(initiallyTruncated: Bool, keepsLinks: Bool = false) {
             truncated = initiallyTruncated
+            self.keepsLinks = keepsLinks
         }
 
         mutating func nodes(from document: Markdown.Document) -> [AgentMarkdownNode] {
@@ -358,6 +378,7 @@ private extension AgentMarkdownDocument {
         }
 
         private mutating func safeDestination(_ destination: String?) -> String? {
+            if keepsLinks, let destination, !destination.isEmpty { return limited(destination, destination: true) }
             guard let destination, let scheme = URL(string: destination)?.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) else {
                 return nil
             }

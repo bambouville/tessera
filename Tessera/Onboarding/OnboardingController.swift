@@ -8,6 +8,7 @@ import SwiftUI
 /// Phases:
 /// - `.inactive`  — nothing shown; the overlay passes touches through.
 /// - `.welcome`   — the opening card (`take the tour` / `skip`).
+/// - `.whatsNew`  — this release's navigation changes (`show me` / `done`).
 /// - `.touring(n) — coach-mark step `n`.
 @MainActor
 @Observable
@@ -15,12 +16,32 @@ final class OnboardingController {
     var phase: OnboardingPhase = .inactive
 
     /// The ordered step list. Pure data — see `OnboardingStep.firstRun`.
-    var steps: [OnboardingStep] { OnboardingStep.firstRun(appearance.modifierNotation) }
+    var steps: [OnboardingStep] {
+        let all = OnboardingStep.firstRun(
+            appearance.modifierNotation,
+            agentCenterEnabled: appearance.agentCenterEnabled
+        )
+        switch tourScope {
+        case .firstRun: return all
+        case .whatsNew(let isPhone): return WhatsNewPolicy.walkthroughSteps(all, isPhone: isPhone)
+        }
+    }
 
     private let appearance: AppearancePreferences
+    private let currentVersion: String
+    private var tourScope: TourScope = .firstRun
 
-    init(appearance: AppearancePreferences) {
+    private enum TourScope {
+        case firstRun
+        case whatsNew(isPhone: Bool)
+    }
+
+    init(
+        appearance: AppearancePreferences,
+        currentVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    ) {
         self.appearance = appearance
+        self.currentVersion = currentVersion
     }
 
     enum BootstrapPresentationAction: Equatable {
@@ -45,8 +66,58 @@ final class OnboardingController {
     /// a re-entrant `onAppear` after the tour has started is a no-op.
     func beginIfFirstLaunch(hasHosts: Bool, hasSeen: Bool) {
         guard phase == .inactive, !hasSeen, !hasHosts else { return }
+        tourScope = .firstRun
         withAnimation(.easeInOut(duration: 0.25)) {
             phase = .welcome
+        }
+    }
+
+    /// Call after the lock/setup presentation gates, independently of the
+    /// empty-landing welcome gate: an updater may have restored live sessions.
+    func beginWhatsNewIfNeeded(hostCount: Int, isLocked: Bool, isSetupPresented: Bool) {
+        guard phase == .inactive, !isLocked, !isSetupPresented,
+              WhatsNewPolicy.shouldShowWhatsNew(
+                currentVersion: currentVersion,
+                lastSeen: appearance.lastSeenWhatsNewVersion,
+                hasSeenWelcome: appearance.hasSeenWelcome,
+                hostCount: hostCount
+              ) else { return }
+        showWhatsNew()
+    }
+
+    /// Settings → About may reopen this card even after it was acknowledged.
+    func showWhatsNew() {
+        tourScope = .firstRun
+        withAnimation(.easeInOut(duration: 0.25)) {
+            phase = .whatsNew
+        }
+    }
+
+    func startWhatsNewTour(isPhone: Bool) {
+        markWhatsNewSeen()
+        tourScope = .whatsNew(isPhone: isPhone)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            phase = .touring(0)
+        }
+    }
+
+    func dismissWhatsNew() {
+        markWhatsNewSeen()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            phase = .inactive
+        }
+    }
+
+    /// Also used when the nearby setup sheet completes the welcome flow.
+    /// Cancel must never call this; it resumes the ordinary welcome instead.
+    func completeWelcome() {
+        appearance.hasSeenWelcome = true
+        markWhatsNewSeen()
+    }
+
+    private func markWhatsNewSeen() {
+        if appearance.lastSeenWhatsNewVersion.compare(WhatsNewPolicy.version, options: .numeric) == .orderedAscending {
+            appearance.lastSeenWhatsNewVersion = WhatsNewPolicy.version
         }
     }
 
@@ -54,6 +125,7 @@ final class OnboardingController {
     /// "take the tour" button and the Settings → About replay row, so the tour
     /// is never lost once dismissed.
     func startTour() {
+        tourScope = .firstRun
         withAnimation(.easeInOut(duration: 0.25)) {
             phase = .touring(0)
         }
@@ -82,20 +154,26 @@ final class OnboardingController {
     /// Dismisses the tour and records that the user has seen the welcome flow so
     /// it never auto-runs again.
     func finish() {
-        appearance.hasSeenWelcome = true
+        completeWelcome()
         withAnimation(.easeInOut(duration: 0.25)) {
             phase = .inactive
         }
     }
 
-    /// `skip` is `finish` — the flag is set either way, per the locked design.
+    /// Skipping a walkthrough completes welcome; dismissing the release card
+    /// alone acknowledges only that card.
     func skip() {
-        finish()
+        if phase == .whatsNew {
+            dismissWhatsNew()
+        } else {
+            finish()
+        }
     }
 }
 
 enum OnboardingPhase: Equatable {
     case inactive
     case welcome
+    case whatsNew
     case touring(Int)
 }

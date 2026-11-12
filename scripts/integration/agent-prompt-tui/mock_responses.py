@@ -4,9 +4,12 @@
 A user message containing SCRIPT:<name> answers with that function call.
 The follow-up after a request_user_input_async output holds the stream open
 (HOLD seconds, or until the lane releases it) so the turn keeps running and
-the async question stays pending.
+the async question stays pending. Codex 0.166 sends each async answer into
+the running turn at once; the follow-up to one holds too, so the questions
+left stay pending.
 """
 import json
+import re
 import sys
 import time
 import uuid
@@ -28,6 +31,12 @@ SCRIPTS = {
         {"title": "Which database should the service use?", "options": ["Postgres", "SQLite"]},
         {"title": "Describe the rollout window you prefer."}]}),
     "asyncfree": ("request_user_input_async", {"questions": [{"title": "What should the release be called?"}]}),
+    # Twins that differ only in a first paragraph, above a blank line.
+    "asyncpara": ("request_user_input_async", {"questions": [
+        {"title": "Staging takes the first rollout, on the shared cluster in the east region.\n\n"
+                  "Describe the rollout window you prefer."},
+        {"title": "Production takes the second rollout, on the dedicated cluster in the west region.\n\n"
+                  "Describe the rollout window you prefer."}]}),
     "rui": ("request_user_input", {"questions": [{
         "id": "database", "header": "Database", "question": "Which database should we use?",
         "options": [{"label": "Postgres (Recommended)", "description": "Transactional and deployed."},
@@ -57,9 +66,12 @@ def choose(body):
                 if isinstance(part, dict) and part.get("text"):
                     texts.append(part["text"])
     newest = texts[-1] if texts else ""
-    for name, (tool, payload) in SCRIPTS.items():
-        if f"SCRIPT:{name}" in newest:
-            return ("tool", tool, json.dumps(payload))
+    if last.get("type") == "message" and "<send_user_message_question_reply>" in newest:
+        return ("hold", "Continuing with your answer.")
+    named = re.search(r"SCRIPT:(\w+)", newest)
+    if named and named.group(1) in SCRIPTS:
+        tool, payload = SCRIPTS[named.group(1)]
+        return ("tool", tool, json.dumps(payload))
     return ("text", "OK.")
 
 

@@ -1621,6 +1621,8 @@ public final class TerminalEmulator {
                     case 0: // Erase from the active position to the end of the screen, inclusive (default).
                         blockClear(mCursorCol, mCursorRow, mColumns - mCursorCol);
                         blockClear(0, mCursorRow + 1, mColumns, mRows - (mCursorRow + 1));
+                        // As in xterm, a row erased to its end no longer continues on the next.
+                        mScreen.clearLineWrap(mCursorRow);
                         break;
                     case 1: // Erase from start of the screen to the active position, inclusive.
                         blockClear(0, 0, mColumns, mCursorRow);
@@ -1643,6 +1645,8 @@ public final class TerminalEmulator {
                 switch (getArg0(0)) {
                     case 0: // Erase from the cursor to the end of the line, inclusive (default)
                         blockClear(mCursorCol, mCursorRow, mColumns - mCursorCol);
+                        // As in xterm, a row erased to its end no longer continues on the next.
+                        mScreen.clearLineWrap(mCursorRow);
                         break;
                     case 1: // Erase from the start of the screen to the cursor, inclusive.
                         blockClear(0, mCursorRow, mCursorCol + 1);

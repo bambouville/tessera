@@ -615,7 +615,7 @@ final class JumpHostTransportIntegrationTests: XCTestCase {
                 innerHostKeyEndpoint(config),
             ]
         )
-        var host = makeJumpHost(config: config, transport: .ssh)
+        let host = makeJumpHost(config: config, transport: .ssh)
         var middle = host
         middle.jumpChain = []
         var inner = Host(

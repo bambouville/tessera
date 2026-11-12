@@ -30,6 +30,7 @@ object TesseraIcons {
     val ChevronLeft by lazy { line("ChevronLeft") { moveTo(15f, 4.5f); lineTo(8.5f, 12f); lineTo(15f, 19.5f) } }
     val ChevronRight by lazy { line("ChevronRight") { moveTo(9f, 4.5f); lineTo(15.5f, 12f); lineTo(9f, 19.5f) } }
     val ChevronDown by lazy { line("ChevronDown") { moveTo(5.5f, 9f); lineTo(12f, 15.5f); lineTo(18.5f, 9f) } }
+    val ChevronUp by lazy { line("ChevronUp") { moveTo(5.5f, 15f); lineTo(12f, 8.5f); lineTo(18.5f, 15f) } }
     val Close by lazy {
         line("Close") {
             moveTo(5.5f, 5.5f); lineTo(18.5f, 18.5f)

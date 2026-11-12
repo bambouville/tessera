@@ -5,30 +5,22 @@ import TesseraCore
 struct AgentThreadDetailView: View {
     @Bindable var model: AgentCenterV2PresentationModel
     let isCompact: Bool
-    @State private var expandedToolEntries: Set<String> = []
-    @State private var visibleRowID: String?
+    /// The viewer above the fold on a laptop-folded Duo. It draws its own
+    /// title row (there is no navigation bar) and leaves its composer to the
+    /// laptop layout, which docks it on the hinge.
+    var isLaptopViewer = false
+    @State private var presentation = AgentThreadPresentationState()
+    @State private var presentationThreadID: AgentThreadID?
+    @State private var presentationOwner = UUID()
+    @State private var positionedPresentation = false
+    @State private var restoredAnchorID: String?
+    @State private var restoredAnchorFraction: CGFloat?
+    @State private var pagingEnabled = true
+    @Environment(AgentThreadPresentationStore.self) private var presentationStore: AgentThreadPresentationStore?
     @State private var nearHistoryEdge = false
     @State private var nearNewerEdge = false
-    @State private var requestedNewerCursor: String?
-    @State private var requestedBridgeCursor: String?
-    @State private var bridgeRetryDelay: TimeInterval = 1
-    @State private var historyDemand = ""
-    @State private var automaticPages = 0
-    @State private var historyDemandGeneration = 0
     @State private var atNewest = true
-    // User intent survives content/layout growth. Geometry alone cannot tell
-    // whether the reader scrolled away or the latest reply became taller.
-    @State private var followingLatest = true
     @State private var transcriptSize = CGSize.zero
-    @State private var positionedThread: AgentThreadID?
-    @State private var requestedCursor: String?
-    @State private var nextPageAttempt = Date.distantPast
-    @State private var pageRetryDelay: TimeInterval = 1
-    @State private var toolRunAnchors: [String: String] = [:]
-    // A windowed transcript lays out only this range of its retained rows.
-    // nil bounds follow the newest rows; explicit IDs hold a history read.
-    @State private var renderedLowerID: String?
-    @State private var renderedUpperID: String?
     // Rendered rows extend before the reader reaches their edge.
     @State private var nearRenderedTop = false
     @State private var nearRenderedBottom = false
@@ -38,10 +30,27 @@ struct AgentThreadDetailView: View {
     // Rendered rows are shorter than the viewport: nothing can be scrolled
     // to ask for history, so older pages load without a pan.
     @State private var underfilled = false
-    // Pages asked for to fill a short transcript since it last filled.
-    @State private var fillPages = 0
     @State private var anchorKeeper = AgentTranscriptAnchorKeeper()
+    @State private var followPulse = AgentFollowPulse()
+    /// Counts changes the follow pass has to see, at most one per turn of the
+    /// main queue (`AgentFollowPulse`).
+    @State private var followGeneration = 0
+    /// The row the reader is on when the scroll position names another (a
+    /// landing, a move without a pan); it reports its frame for the save.
+    @State private var readingFrameRowID: String?
+    @State private var blockDisclosures = AgentBlockDisclosures()
+    @State private var promptCard: AgentPromptCardFrame?
+    /// The prompt whose landing was decided; each lands at most once.
+    @State private var decidedPromptToken: AgentActionToken?
+    /// Landings asked again after one waited under a finger.
+    @State private var promptLandingAttempt = 0
+    /// The search match just landed on, marked for a moment.
+    @State private var searchHighlightRowID: String?
     @Environment(\.designTokens) private var T
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.duoRailMode) private var duoRailMode
+    @Environment(\.duoOpenSwitcher) private var openSwitcher
+    @Environment(\.duoWorkspace) private var duoWorkspace
 
     /// Eager layout cost is proportional to rendered content, not retained
     /// history. The shared window may retain thousands of records; revealing
@@ -65,82 +74,67 @@ struct AgentThreadDetailView: View {
     var body: some View {
         Group {
             if let thread = model.selectedThreadForDetail {
-                VStack(spacing: 0) {
-                    threadHeader(thread)
-                    if let status = model.visibleReadStatus(for: thread) {
-                        HStack {
-                            Text(status.message)
-                                .font(Typography.tesseraMono(size: 11)).foregroundStyle(T.fgDim)
-                                .accessibilityIdentifier("agent-center-v2-read-status")
-                            Spacer(minLength: 4)
-                            if !status.isProgress {
-                                Button("Retry") { model.onAction?(.returnToLatest(thread.summary.id)) }
-                                    .font(Typography.tesseraMono(size: 11)).foregroundStyle(T.fg)
-                                    .frame(minHeight: 44)
-                                    .disabled(model.loadingTranscriptThreads.contains(thread.summary.id))
-                                    .accessibilityIdentifier("agent-center-v2-read-retry")
-                            }
-                        }
-                        .padding(.horizontal, isCompact ? 16 : 22)
-                    }
-                    liveConversation(thread)
-                    returnToLatestFooter(thread)
-                    if thread.summary.availability.actions,
-                       thread.binding?.capabilities.contains(.send) == true {
-                        AgentComposerView(model: model, thread: thread, isCompact: isCompact)
-                    } else {
-                        Text("Terminal actions require a current, PID-proven agent binding.")
-                            .font(Typography.tesseraMono(size: 10.5))
-                            .foregroundStyle(T.fgDim)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, isCompact ? 16 : 22)
-                            .padding(.vertical, 12)
-                            .background(T.panelBg)
-                            .overlay(alignment: .top) { Rectangle().fill(T.border).frame(height: 1) }
+                if isLaptopViewer {
+                    conversation(thread)
+                } else {
+                    VStack(spacing: 0) {
+                        conversation(thread)
+                        AgentThreadComposerSlot(model: model, thread: thread, isCompact: isCompact)
                     }
                 }
             } else if let candidate = model.selectedCandidate {
-                candidateDetail(candidate)
+                if isLaptopViewer {
+                    // Laptop pose has no tab bar: every viewer state keeps
+                    // the title's ⌄, the only touch route to another section.
+                    VStack(spacing: 0) {
+                        laptopSectionTitleRow
+                        candidateDetail(candidate)
+                    }
+                } else {
+                    candidateDetail(candidate)
+                }
+            } else if isLaptopViewer, model.listSnapshot.threads.isEmpty, model.listSnapshot.candidates.isEmpty {
+                laptopEmptyState
+            } else if isLaptopViewer {
+                VStack(spacing: 0) {
+                    laptopSectionTitleRow
+                    ContentUnavailableView("select a thread", systemImage: "bubble.left.and.bubble.right")
+                }
             } else {
                 ContentUnavailableView("select a thread", systemImage: "bubble.left.and.bubble.right")
             }
         }
         .background(T.panelBg)
-        .task(id: model.selectedThreadForDetail?.summary.id) {
-            guard let threadID = model.selectedThreadForDetail?.summary.id else { return }
-            model.onAction?(.detailVisibility(threadID, true))
-            defer { model.onAction?(.detailVisibility(threadID, false)) }
-            while !Task.isCancelled {
-                model.onAction?(.refreshTranscript(threadID))
-                do { try await Task.sleep(for: .seconds(3)) }
-                catch { return }
+        .onChange(of: model.selectedThreadForDetail?.summary.id, initial: true) { _, _ in
+            restorePresentation()
+        }
+        .onAppear { restorePresentation() }
+        .onChange(of: model.latestOpening) { _, opening in
+            if let opening, opening == presentationThreadID { openAtLatest(opening) }
+        }
+        .onDisappear {
+            if let presentationThreadID {
+                presentationStore?.unmountReader(for: presentationThreadID, owner: presentationOwner)
             }
+            presentationThreadID = nil
         }
-        .onChange(of: model.selectedThreadForDetail?.summary.id) { _, _ in
-            expandedToolEntries = []
-            positionedThread = nil
-            requestedCursor = nil
-            historyDemand = ""; automaticPages = 0
-            nextPageAttempt = .distantPast
-            pageRetryDelay = 1
-            toolRunAnchors = [:]
-            // Rendered bounds reset with the window placement (see
-            // `AgentWindowPlacement`), which also knows a detached open.
-            nearRenderedTop = false; nearRenderedBottom = false
-            renderedTopVisible = false; renderedBottomVisible = false
-            underfilled = false; fillPages = 0
-            anchorKeeper.reset()
-            visibleRowID = nil
-            atNewest = true
-            // Edge flags describe the previous thread until new bounds land.
-            nearHistoryEdge = false; nearNewerEdge = false
-            followingLatest = model.selectedThreadForDetail?.ingestionWindow?.atLiveHead != false
-            transcriptSize = .zero
-        }
-        .navigationTitle(isCompact ? model.selectedThreadForDetail?.summary.title ?? model.selectedCandidate?.title ?? "threads" : "")
+        .navigationTitle(duoRailMode || isLaptopViewer ? "" : isCompact ? model.selectedThreadForDetail?.summary.title ?? model.selectedCandidate?.title ?? "threads" : "")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackgroundVisibility(duoRailMode ? .hidden : .automatic, for: .navigationBar)
+        .ignoresSafeArea(.container, edges: duoRailMode ? .top : [])
         .toolbar {
-            if isCompact, let thread = model.selectedThreadForDetail {
+            if duoRailMode {
+                AgentRailToolbar(
+                    items: railItems,
+                    onOpenSwitcher: { openSwitcher?() },
+                    onToggleContext: { duoWorkspace?.toggleContext() },
+                    contextShown: duoWorkspace?.isContextShown == true,
+                    onStop: { model.interruptSelectedThread() },
+                    onFork: {
+                        if let id = model.selectedThreadForDetail?.summary.id { model.openLaunch(.fork(id)) }
+                    }
+                )
+            } else if isCompact, !isLaptopViewer, let thread = model.selectedThreadForDetail {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if thread.summary.status == .working && thread.summary.availability.actions {
                         Button { model.onAction?(.interrupt(thread.summary.id)) } label: { Image(systemName: "stop") }
@@ -163,6 +157,178 @@ struct AgentThreadDetailView: View {
             AgentCenterV2HarnessAccessibilityMarker(identifier: "agent-center-v2-thread-detail")
             #endif
         }
+    }
+
+    /// The thread's header, read status and transcript, above its composer.
+    private func conversation(_ thread: AgentThreadSnapshot) -> some View {
+        VStack(spacing: 0) {
+            threadHeader(thread)
+            if let status = model.visibleReadStatus(for: thread) {
+                HStack {
+                    Text(status.message)
+                        .font(Typography.tesseraMono(size: 11)).foregroundStyle(T.fgDim)
+                        .accessibilityIdentifier("agent-center-v2-read-status")
+                    Spacer(minLength: 4)
+                    if !status.isProgress {
+                        Button("Retry") { model.onAction?(.returnToLatest(thread.summary.id)) }
+                            .font(Typography.tesseraMono(size: 11)).foregroundStyle(T.fg)
+                            .frame(minHeight: 44)
+                            .disabled(model.loadingTranscriptThreads.contains(thread.summary.id))
+                            .accessibilityIdentifier("agent-center-v2-read-retry")
+                    }
+                }
+                .padding(.horizontal, isCompact ? 16 : 22)
+            }
+            if presentationThreadID == thread.summary.id {
+                liveConversation(thread)
+            } else {
+                Color.clear
+            }
+            returnToLatestFooter(thread)
+        }
+    }
+
+    /// The laptop viewer's title row: there is no navigation bar above it.
+    private func laptopTitleRow(_ thread: AgentThreadSnapshot) -> some View {
+        HStack(spacing: 0) {
+            Circle()
+                .fill(statusColor(thread.summary))
+                .frame(width: 7, height: 7)
+                .padding(.trailing, 8)
+                .accessibilityHidden(true)
+            AgentLaptopTitle(title: Text(thread.summary.title))
+            Spacer(minLength: 4)
+            if thread.summary.status == .working && thread.summary.availability.actions {
+                Button { model.onAction?(.interrupt(thread.summary.id)) } label: {
+                    Image(systemName: "stop").frame(width: 44, height: 44)
+                }
+                .accessibilityIdentifier("agent-center-v2-interrupt")
+                .accessibilityLabel("interrupt")
+            }
+            if thread.summary.availability.fork {
+                Button { model.openLaunch(.fork(thread.summary.id)) } label: {
+                    Image(systemName: "arrow.triangle.branch").frame(width: 44, height: 44)
+                }
+                .accessibilityIdentifier("agent-center-v2-fork")
+                .accessibilityLabel("fork thread")
+            }
+            Button { model.onAction?(.openTerminal(thread.summary.id)) } label: {
+                Image(systemName: "terminal").frame(width: 44, height: 44)
+            }
+            .accessibilityIdentifier("agent-center-v2-open-terminal")
+            .accessibilityLabel("open terminal")
+        }
+        .font(.system(size: 15, weight: .regular))
+        .foregroundStyle(T.fgMuted)
+        .padding(.trailing, -10)
+    }
+
+    /// The viewer's title row with no thread open: the section's name and ⌄.
+    private var laptopSectionTitleRow: some View {
+        HStack(spacing: 0) {
+            AgentLaptopTitle(title: Text("agents"))
+            Spacer(minLength: 4)
+        }
+        .frame(minHeight: 44)
+        .padding(.leading, 16)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .overlay(alignment: .bottom) { Rectangle().fill(T.border).frame(height: 1) }
+    }
+
+    /// No threads yet: the viewer offers a new agent, and the list keeps its
+    /// place on the desk, empty, so nothing moves when the first one arrives.
+    private var laptopEmptyState: some View {
+        VStack(spacing: 0) {
+            // New agent sits in the empty state below and on the desk's header.
+            laptopSectionTitleRow
+            ContentUnavailableView {
+                Label("no threads", systemImage: "sparkles")
+            } description: {
+                Text("Connected hosts with agent transcripts appear here.")
+            } actions: {
+                Button { model.openLaunch(.spawn) } label: {
+                    Label("new agent", systemImage: "plus")
+                        .font(Typography.tesseraMono(size: 12, weight: .medium))
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .foregroundStyle(T.accent)
+                        .background(T.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(T.accent.opacity(0.35), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("agent-center-v2-laptop-empty-new")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func statusColor(_ summary: AgentThreadSummary) -> Color {
+        if summary.attention == .needsYou { return T.amber }
+        switch summary.status {
+        case .working, .finished: return T.green
+        case .waitingForInput: return T.amber
+        case .idle, .unavailable: return T.fgFaint
+        }
+    }
+
+    private static func holdsPrompt(_ item: AgentTranscriptItem, token: AgentActionToken) -> Bool {
+        guard case .message(let part) = item else { return false }
+        return part.blocks.contains { if case .actionPrompt(let prompt) = $0 { prompt.token == token } else { false } }
+    }
+
+    /// A notification opens the newest reply rather than the place the
+    /// reader kept (`latestOpening`), as Return to latest does.
+    private func openAtLatest(_ threadID: AgentThreadID) {
+        presentation.followingLatest = true
+        presentation.historyDemand = ""; presentation.automaticPages = 0
+        presentation.historyDemandGeneration += 1
+        model.finishLatestOpening(threadID)
+    }
+
+    private func restorePresentation() {
+        let thread = model.selectedThreadForDetail
+        guard presentationThreadID != thread?.summary.id else { return }
+        if let presentationThreadID {
+            presentationStore?.unmountReader(for: presentationThreadID, owner: presentationOwner)
+        }
+        presentationThreadID = thread?.summary.id
+        guard let thread else { return }
+        let saved = presentationStore?.mountReader(for: thread.summary.id, owner: presentationOwner,
+            snapshot: { [state = $presentation, keeper = anchorKeeper, disclosures = blockDisclosures] in
+                var held = keeper.reading(state.wrappedValue)
+                held.expandedBlocks = disclosures.expanded
+                return held
+            })
+        presentation = saved ?? AgentThreadPresentationState(followingLatest: thread.ingestionWindow?.atLiveHead != false)
+        if model.latestOpening == thread.summary.id { openAtLatest(thread.summary.id) }
+        blockDisclosures.expanded = presentation.expandedBlocks
+        restoredAnchorID = presentation.followingLatest ? nil : presentation.visibleRowID
+        restoredAnchorFraction = presentation.followingLatest ? nil : presentation.visibleRowFraction
+        positionedPresentation = false
+        // A retained pan is not a new history request. A fresh gesture or an
+        // actual page update resumes it, with its old counters and backoff.
+        pagingEnabled = saved?.positionedThread != thread.summary.id
+        nearHistoryEdge = false; nearNewerEdge = false
+        nearRenderedTop = false; nearRenderedBottom = false
+        renderedTopVisible = false; renderedBottomVisible = false
+        underfilled = false
+        atNewest = presentation.followingLatest
+        transcriptSize = .zero
+        anchorKeeper.reset()
+    }
+
+    private var railItems: [AgentRailPolicy.Entry] {
+        guard let thread = model.selectedThreadForDetail else {
+            return AgentRailPolicy.items(screen: .candidate, hasSwitcher: openSwitcher != nil)
+        }
+        let hasForkTarget = thread.binding.map { binding in
+            model.launchTargets.contains { $0.id == binding.liveSessionID && $0.providerIDs.contains(thread.summary.id.providerID) }
+        } == true
+        return AgentRailPolicy.threadItems(
+            thread, hasSwitcher: openSwitcher != nil,
+            hasContext: duoWorkspace.map { $0.arrangement != .single } == true, hasForkTarget: hasForkTarget
+        )
     }
 
     private func candidateDetail(_ candidate: AgentTerminalCandidate) -> some View {
@@ -252,8 +418,10 @@ struct AgentThreadDetailView: View {
     }
 
     private func threadHeader(_ thread: AgentThreadSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !isCompact {
+        VStack(alignment: .leading, spacing: isLaptopViewer ? 2 : 8) {
+            if isLaptopViewer {
+                laptopTitleRow(thread)
+            } else if !isCompact {
             HStack(spacing: 9) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 13, weight: .medium))
@@ -298,12 +466,29 @@ struct AgentThreadDetailView: View {
             metadata(thread)
         }
         .padding(.horizontal, isCompact ? 16 : 22)
-        .padding(.vertical, 6)
+        .padding(.top, isLaptopViewer ? 0 : 6)
+        .padding(.bottom, 6)
         .overlay(alignment: .bottom) { Rectangle().fill(T.border).frame(height: 1) }
     }
 
+    @ViewBuilder
     private func metadata(_ thread: AgentThreadSnapshot) -> some View {
-        AgentCenterV2FlowLayout(spacing: 6) {
+        if dynamicTypeSize.isAccessibilitySize {
+            // Wrapped at these sizes, the chips stack into a block that leaves
+            // the transcript under it next to no room, above a laptop fold
+            // none: one line that scrolls sideways keeps every chip readable.
+            // Its indicator flashes on appear to show that more chips follow.
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) { metadataChips(thread) }
+            }
+            .scrollIndicatorsFlash(onAppear: true)
+        } else {
+            AgentCenterV2FlowLayout(spacing: 6) { metadataChips(thread) }
+        }
+    }
+
+    private func metadataChips(_ thread: AgentThreadSnapshot) -> some View {
+        Group {
             metaChip("\(thread.summary.providerName)\(thread.summary.model.map { " · \($0)" } ?? "")")
             if thread.summary.permissionMode != .unavailable {
                 metaChip(thread.summary.permissionMode.label, tint: modeColor(thread.summary.permissionMode))
@@ -339,12 +524,12 @@ struct AgentThreadDetailView: View {
         let displayItems: [TranscriptDisplayItem] = items.flatMap { item in
             let candidate: String
             if case .toolRun(let run) = item {
-                candidate = run.entries.compactMap { toolRunAnchors[$0.id] }.first ?? item.id
+                candidate = run.entries.compactMap { presentation.toolRunAnchors[$0.id] }.first ?? item.id
             } else { candidate = item.id }
             let key = usedKeys.insert(candidate).inserted ? candidate : item.id
             let header = TranscriptDisplayItem(id: key, item: item)
             guard case .toolRun(let run) = item,
-                  run.entries.contains(where: { expandedToolEntries.contains($0.id) }) else { return [header] }
+                  run.entries.contains(where: { presentation.expandedToolEntries.contains($0.id) }) else { return [header] }
             // Each expanded entry owns a top-level lazy key, preserving scroll
             // anchors when older tool activity merges into the run's beginning.
             return [header] + run.entries.map { entry in
@@ -354,8 +539,7 @@ struct AgentThreadDetailView: View {
                 )))
             }
         }
-        let rendered = thread.ingestionWindow == nil ? displayItems.indices :
-            Self.renderedRange(displayItems, lowerID: renderedLowerID, upperID: renderedUpperID, anchorID: visibleRowID)
+        let rendered = thread.ingestionWindow == nil ? displayItems.indices : renderedRange(of: displayItems)
         let renderedItems = displayItems[rendered]
         let rendersNewest = rendered.upperBound == displayItems.count
         // A send the transcript already shows is that transcript row; its
@@ -370,12 +554,18 @@ struct AgentThreadDetailView: View {
         // live head to admit another older page, and waits out a failed
         // read: asking again would clear the failure and its Retry. Rows
         // that collapse into one tool run could otherwise read every page.
-        let pagesToFill = underfilled && fillPages < Self.fillPageLimit && thread.ingestionWindow?.olderPageFits == true
+        let pagesToFill = underfilled && presentation.fillPages < Self.fillPageLimit && thread.ingestionWindow?.olderPageFits == true
             && model.ingestionReadStatuses[thread.summary.id]?.isProgress != false
             && !model.ingestionCapacityThreads.contains(thread.summary.id)
-        anchorKeeper.pinsBottom = followingLatest && rendersNewest
+        anchorKeeper.pinsBottom = presentation.followingLatest && rendersNewest
             && (thread.ingestionWindow?.atLiveHead != false || !outgoing.isEmpty)
         return GeometryReader { viewport in
+        let _ = followPulse.note(AgentFollowInputs(content: transcriptSize, viewport: viewport.size,
+                                                   landing: positionedPresentation ? nil : atNewest,
+                                                   following: presentation.followingLatest,
+                                                   atLiveHead: thread.ingestionWindow?.atLiveHead != false, tail: tailID)) {
+            followGeneration &+= 1
+        }
         ScrollViewReader { proxy in
             ScrollView {
                 // The shared window already bounds retained rows. Eager
@@ -388,16 +578,19 @@ struct AgentThreadDetailView: View {
                             switch row.item {
                             case .message(let part):
                                 AgentMessageView(message: part.message, model: model,
-                                                 promptActionsAvailable: canAnswer, isCompact: isCompact)
+                                                 promptActionsAvailable: canAnswer, isCompact: isCompact,
+                                                 artifactHostID: thread.summary.id.hostID,
+                                                 artifactSessionID: thread.binding?.liveSessionID,
+                                                 firstBlockIndex: part.firstBlockIndex)
                                     .equatable()
                             case .toolRun(let run):
                                 AgentToolRunView(run: run,
-                                    expanded: run.entries.contains { expandedToolEntries.contains($0.id) },
+                                    expanded: run.entries.contains { presentation.expandedToolEntries.contains($0.id) },
                                     onToggle: {
                                         let ids = Set(run.entries.map(\.id))
-                                        if run.entries.contains(where: { expandedToolEntries.contains($0.id) }) {
-                                            expandedToolEntries.subtract(ids)
-                                        } else { expandedToolEntries.formUnion(ids) }
+                                        if run.entries.contains(where: { presentation.expandedToolEntries.contains($0.id) }) {
+                                            presentation.expandedToolEntries.subtract(ids)
+                                        } else { presentation.expandedToolEntries.formUnion(ids) }
                                     })
                                     .equatable()
                             }
@@ -408,11 +601,27 @@ struct AgentThreadDetailView: View {
                             // prepended row, even in a vertical ScrollView.
                             .padding(.horizontal, isCompact ? 16 : 22)
                             .background {
-                                if row.id == visibleRowID {
+                                if row.id == presentation.visibleRowID {
                                     GeometryReader { geometry in
                                         Color.clear.preference(key: AgentTranscriptAnchorPreference.self,
-                                            value: AgentTranscriptAnchorFrame(id: row.id, minY: geometry.frame(in: .named("agent-rows")).minY))
+                                            value: AgentTranscriptAnchorFrame(id: row.id, minY: geometry.frame(in: .named("agent-rows")).minY,
+                                                                              height: geometry.size.height,
+                                                                              top: geometry.frame(in: .named("agent-row-stack")).minY))
                                     }
+                                } else if row.id == readingFrameRowID {
+                                    GeometryReader { geometry in
+                                        let top = geometry.frame(in: .named("agent-row-stack")).minY
+                                        Color.clear.preference(key: AgentTranscriptReadingFramePreference.self,
+                                            value: AgentTranscriptAnchorFrame(id: row.id, minY: top, height: geometry.size.height, top: top))
+                                    }
+                                }
+                            }
+                            .background {
+                                if row.id == searchHighlightRowID {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous).fill(T.inputBgSoft)
+                                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(T.border, lineWidth: 1))
+                                        .padding(.horizontal, isCompact ? 8 : 12).padding(.vertical, -3)
+                                        .transition(.opacity)
                                 }
                             }
                             .id(row.id)
@@ -465,19 +674,28 @@ struct AgentThreadDetailView: View {
                 .scrollTargetLayout()
                 .padding(.vertical, 8)
                 .padding(.top, 24)
+                // The transcript bounds' own origin, which a change of the
+                // viewport's height does not move.
+                .coordinateSpace(name: "agent-row-stack")
                 .background(GeometryReader { geometry in
                     Color.clear.preference(key: AgentTranscriptBoundsPreference.self,
                         value: .init(thread: thread.summary.id, frame: geometry.frame(in: .named("agent-transcript"))))
                 })
-                .background(AgentTranscriptScrollProbe(anchorKeeper: anchorKeeper) { direction, began in
-                    if direction == "before" { followingLatest = false }
-                    else if atNewest { followingLatest = true }
-                    if began || direction != historyDemand || automaticPages >= 4 {
-                        automaticPages = 0
-                        historyDemandGeneration += 1
-                    }
-                    historyDemand = direction
-                }.allowsHitTesting(false))
+                .background {
+                    AgentTranscriptScrollProbe(anchorKeeper: anchorKeeper) { direction, began in
+                        pagingEnabled = true
+                        anchorKeeper.landedRowID = nil
+                        if direction == "before" { presentation.followingLatest = false }
+                        else if atNewest { presentation.followingLatest = true }
+                        if began || direction != presentation.historyDemand || presentation.automaticPages >= 4 {
+                            presentation.automaticPages = 0
+                            presentation.historyDemandGeneration += 1
+                        }
+                        presentation.historyDemand = direction
+                    }.allowsHitTesting(false)
+                    // Selected text here gains the terminal's path actions.
+                    AgentTranscriptSelectionScope(model: model, threadID: thread.summary.id)
+                }
                 // A transcript shorter than the viewport rests on the
                 // composer, and grows upward from there.
                 .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .bottom)
@@ -488,25 +706,52 @@ struct AgentThreadDetailView: View {
                 .coordinateSpace(name: "agent-rows")
             }
             .coordinateSpace(name: "agent-transcript")
+            .environment(\.agentBlockDisclosures, blockDisclosures)
             .accessibilityIdentifier("agent-center-v2-transcript")
-            .scrollPosition(id: $visibleRowID)
+            // A row written here starts the viewport. Without an anchor
+            // SwiftUI scrolls the least amount to it, which leaves a row
+            // taller than the viewport, above it, showing its end (a search
+            // match on a phone or a narrow Duo pane). The top row is still
+            // the one reported.
+            .scrollPosition(id: $presentation.visibleRowID, anchor: .top)
+            // The scroll position follows only the reader's own scrolling.
+            // Visibility follows every move: a landing, VoiceOver, a keyboard.
+            .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.01) { ids in
+                let visible = Set(ids)
+                let reading = anchorKeeper.see(renderedItems.compactMap { visible.contains($0.id) ? $0.id : nil },
+                                               scrollRow: presentation.visibleRowID)
+                if readingFrameRowID != reading { readingFrameRowID = reading }
+            }
             .onChange(of: AgentWindowPlacement(thread: thread.summary.id, atLiveHead: thread.ingestionWindow?.atLiveHead),
                       initial: true) { old, new in
-                let opened = old == new || old.thread != new.thread
-                if opened { renderedLowerID = nil; renderedUpperID = nil }
-                guard new.atLiveHead == false else {
-                    // Newer paging reached the head under a following reader.
-                    if followingLatest { renderedLowerID = nil; renderedUpperID = nil }
+                // An initial callback after restoration must not turn a held
+                // read into a newly opened detached window. An actual window
+                // transition while hidden still follows the existing policy.
+                let restored = old == new && presentation.positionedThread == new.thread
+                if restored, presentation.windowAtLiveHead == new.atLiveHead { return }
+                defer { presentation.windowAtLiveHead = new.atLiveHead }
+                // A seek's page is placed by its search landing; one opened
+                // later is placed as any window away from the head.
+                if thread.ingestionWindow?.transition == .seek, model.searchLanding?.threadID == thread.summary.id {
+                    presentation.followingLatest = false
                     return
                 }
-                if !opened, followingLatest, let lane = thread.ingestionWindow?.transition, lane == .revisions || lane == .head {
+                let opened = !restored && (old == new || old.thread != new.thread)
+                if opened { presentation.renderedLowerID = nil; presentation.renderedUpperID = nil }
+                guard new.atLiveHead == false else {
+                    // Newer paging reached the head under a following reader.
+                    if presentation.followingLatest { presentation.renderedLowerID = nil; presentation.renderedUpperID = nil }
+                    return
+                }
+                if !opened, presentation.followingLatest, let lane = thread.ingestionWindow?.transition, lane == .revisions || lane == .head {
                     // The window left the head under a following reader,
                     // across more rows than Core bridges (`bridgesToHead`).
                     // Take them back to it rather than onto history.
                     model.onAction?(.returnToLatest(thread.summary.id))
                     return
                 }
-                followingLatest = false
+                presentation.followingLatest = false
+                anchorKeeper.landedRowID = nil
                 guard !displayItems.isEmpty else { return }
                 if opened {
                     // A window opened away from the live head starts at its
@@ -523,6 +768,38 @@ struct AgentThreadDetailView: View {
                     pinRenderedRange(displayItems, rendered)
                 }
             }
+            // A search result opens at its match once the transcript holds
+            // it and no read can move the window off it: the row starts the
+            // viewport, marked for a moment, and the reader keeps it while the
+            // head rolls. It is placed after this update's other handlers (a
+            // new thread's restore, its placement).
+            .onChange(of: AgentSearchLandingAttempt(
+                landing: model.searchLanding?.threadID == thread.summary.id ? model.searchLanding : nil,
+                restored: presentationThreadID == thread.summary.id, loading: loading,
+                version: thread.ingestionWindow?.version, rows: displayItems.count), initial: true) { _, attempt in
+                guard let landing = attempt.landing, attempt.restored, !attempt.loading,
+                      let index = displayItems.firstIndex(where: { Self.holdsRecord($0.item, landing.recordID) }) else { return }
+                model.finishSearchLanding(landing)
+                let row = displayItems[index].id
+                let range = thread.ingestionWindow == nil ? nil : Self.renderedRange(displayItems, around: index)
+                Task { @MainActor in
+                    guard presentationThreadID == landing.threadID else { return }
+                    presentation.followingLatest = false
+                    presentation.historyDemand = ""; presentation.automaticPages = 0
+                    if let range { pinRenderedRange(displayItems, range) }
+                    restoredAnchorID = row; restoredAnchorFraction = 0
+                    presentation.visibleRowID = row
+                    anchorKeeper.landedRowID = row
+                    positionedPresentation = false
+                    followGeneration &+= 1
+                    guard landing.marked else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { searchHighlightRowID = row }
+                    do { try await Task.sleep(for: .seconds(2.4)) } catch { return }
+                    guard searchHighlightRowID == row else { return }
+                    withAnimation(.easeOut(duration: 0.6)) { searchHighlightRowID = nil }
+                }
+            }
+            .stackBoundary()
             .onPreferenceChange(AgentTranscriptTailPreference.self) { bounds in
                 // Eager construction is not visibility. Only a tail actually
                 // inside the viewport may acknowledge that the latest was read.
@@ -537,7 +814,7 @@ struct AgentThreadDetailView: View {
             // A finish that adds no record, or lands while the tail is already
             // on screen, moves no tail bounds. Read it whenever the live end is
             // in view; an empty transcript is read on selection.
-            .onChange(of: thread.summary.attention == .unreadCompletion && !loading
+            .onChange(of: positionedPresentation && thread.summary.attention == .unreadCompletion && !loading
                         && (thread.messages.isEmpty || (rendersNewest && atNewest))
                         && thread.ingestionWindow?.atLiveHead != false
                         && thread.ingestionWindow?.hasNewer != true
@@ -553,6 +830,8 @@ struct AgentThreadDetailView: View {
                     .frame(maxWidth: .infinity).frame(height: 24)
                     .allowsHitTesting(false)
             }
+            .onChange(of: AgentPresentationPageIdentity(cursor: thread.cursor, after: thread.ingestionWindow?.after,
+                version: thread.ingestionWindow?.version)) { _, _ in pagingEnabled = true }
             .onChange(of: items, initial: true) { _, _ in
                 var anchors: [String: String] = [:]
                 for row in displayItems {
@@ -560,13 +839,36 @@ struct AgentThreadDetailView: View {
                         for entry in run.entries { anchors[entry.id] = row.id }
                     }
                 }
-                toolRunAnchors = anchors
+                presentation.toolRunAnchors = anchors
             }
             // Rows revealed, released or resized above the reader, and window
             // updates that drop older rows, move the reader's row in content
             // space. SwiftUI's scrollPosition does not hold it through a fling
             // (or at all for eager rows); shift the offset in the same update.
             .onPreferenceChange(AgentTranscriptAnchorPreference.self) { anchorKeeper.observe($0) }
+            // Measured only: holding that row is the scroll position's frame's job.
+            .onPreferenceChange(AgentTranscriptReadingFramePreference.self) { anchorKeeper.readingFrame = $0 }
+            .onPreferenceChange(AgentPromptCardPreference.self) { promptCard = $0 }
+            .onChange(of: AgentPromptLandingAttempt(landing: AgentPromptLanding.decide(
+                promptCard, decided: decidedPromptToken, waiting: thread.summary.status == .waitingForInput,
+                following: presentation.followingLatest && rendersNewest, positioned: positionedPresentation,
+                viewportHeight: viewport.size.height
+            ), attempt: promptLandingAttempt), initial: true) { _, request in
+                guard let landing = request.landing else { return }
+                if let rowY = landing.rowY {
+                    // Under a finger it waits; the finger lifting decides
+                    // again, from the layout and reading state then.
+                    guard anchorKeeper.land(atRowY: rowY, margin: AgentPromptLanding.margin,
+                                            retry: { promptLandingAttempt += 1 }) else { return }
+                    presentation.followingLatest = false
+                    // The scroll position reports only the reader's own
+                    // scrolling, and setting it scrolls a tall row again. The
+                    // keeper keeps the card's row, so a rebuilt detail (book
+                    // to laptop) returns to it, not to the conversation's top.
+                    anchorKeeper.landedRowID = displayItems.last { Self.holdsPrompt($0.item, token: landing.token) }?.id
+                }
+                decidedPromptToken = landing.token
+            }
             // Keyed by thread: another thread laid out to the same frame
             // still re-derives the edge flags a switch reset.
             .onPreferenceChange(AgentTranscriptBoundsPreference.self) { measured in
@@ -574,9 +876,12 @@ struct AgentThreadDetailView: View {
                 // The bottom of a partial rendered range is not the newest row.
                 atNewest = rendersNewest && bounds.maxY <= viewport.size.height + 40 && bounds.maxY >= 0
                 transcriptSize = bounds.size
-                if atNewest && historyDemand == "after" { followingLatest = true }
+                // Runs every scroll frame: write the shared presentation only on change.
+                if positionedPresentation, atNewest && presentation.historyDemand == "after", !presentation.followingLatest {
+                    presentation.followingLatest = true
+                }
                 nearNewerEdge = bounds.maxY <= viewport.size.height * 2 && bounds.maxY >= 0
-                if !nearNewerEdge { requestedNewerCursor = nil }
+                if !nearNewerEdge, positionedPresentation, presentation.requestedNewerCursor != nil { presentation.requestedNewerCursor = nil }
                 nearHistoryEdge = pagesForward
                     ? bounds.maxY <= viewport.size.height * 2 && bounds.maxY >= 0
                     : bounds.minY >= -viewport.size.height
@@ -587,22 +892,46 @@ struct AgentThreadDetailView: View {
                 renderedTopVisible = bounds.minY > -1
                 renderedBottomVisible = bounds.maxY < viewport.size.height + 1
                 underfilled = bounds.height < viewport.size.height - 1
-                if !underfilled { fillPages = 0 }
+                if !underfilled, positionedPresentation, presentation.fillPages != 0 { presentation.fillPages = 0 }
                 anchorKeeper.bounds = bounds; anchorKeeper.viewportHeight = viewport.size.height
-                if !nearHistoryEdge {
-                    requestedCursor = nil
-                    pageRetryDelay = 1
-                    nextPageAttempt = .distantPast
+                if !nearHistoryEdge, positionedPresentation, presentation.requestedCursor != nil
+                    || presentation.pageRetryDelay != 1 || presentation.nextPageAttempt != .distantPast {
+                    presentation.requestedCursor = nil
+                    presentation.pageRetryDelay = 1
+                    presentation.nextPageAttempt = .distantPast
                 }
             }
-            .task(id: AgentChatFollowTrigger(thread: thread.summary.id, content: transcriptSize,
-                viewport: viewport.size, following: followingLatest, atLiveHead: thread.ingestionWindow?.atLiveHead != false,
-                tail: tailID, landing: positionedThread == thread.summary.id ? nil : atNewest)) {
+            .task(id: AgentChatFollowTrigger(thread: thread.summary.id, inputs: followGeneration)) {
                 // Follow the actual end after layout, including same-ID text,
                 // regrouped tools, pending bubbles, and keyboard resizing.
                 await Task.yield()
                 guard !Task.isCancelled, model.selectedThreadForDetail?.summary.id == thread.summary.id else { return }
-                if followingLatest && (model.selectedThreadForDetail?.ingestionWindow?.atLiveHead != false || !outgoing.isEmpty) {
+                if !positionedPresentation, !presentation.followingLatest {
+                    // Bounds can have been evicted while hidden. The existing
+                    // cost-bounded range already falls back around a survivor.
+                    let anchor = restoredAnchorID.flatMap { id in displayItems.contains { $0.id == id } ? id : nil }
+                        ?? (rendered.isEmpty ? nil : displayItems[rendered.lowerBound].id)
+                    if let anchor {
+                        presentation.visibleRowID = anchor
+                        // A held reader returns to the same place inside a
+                        // long reply, not to its first line. The keeper lands
+                        // before positioning below lets paging read the edges;
+                        // scrollTo lands on a later layout, and a reveal that
+                        // reads the unscrolled top in between brings in rows
+                        // the reader never neared.
+                        let fraction = anchor == restoredAnchorID ? restoredAnchorFraction : nil
+                        if !anchorKeeper.scroll(into: anchor, fraction: fraction ?? 0) {
+                            proxy.scrollTo(anchor, anchor: .top)
+                            // A row not laid out yet, or a survivor of an
+                            // eviction: paging waits for the landing, as for
+                            // a follower below. A restart lands it again.
+                            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+                        }
+                    }
+                    restoredAnchorID = nil
+                    restoredAnchorFraction = nil
+                }
+                if presentation.followingLatest && (model.selectedThreadForDetail?.ingestionWindow?.atLiveHead != false || !outgoing.isEmpty) {
                     // The keeper already follows layout; scrollTo's anchor
                     // sits above the bottom padding and would fight it.
                     // A follower's own fling or bounce at the end settles
@@ -613,103 +942,117 @@ struct AgentThreadDetailView: View {
                     // Paging waits for the opening scroll to land: until then
                     // the edge geometry describes the unscrolled top, which a
                     // slow first layout can leave in place long enough to page.
-                    if positionedThread != thread.summary.id, !atNewest {
+                    if presentation.positionedThread != thread.summary.id, !atNewest {
                         do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
                     }
                 }
                 // A detached window is ready for paging too. Following the
                 // live head is not a prerequisite for displaying history.
-                positionedThread = thread.summary.id
+                presentation.positionedThread = thread.summary.id
+                positionedPresentation = true
             }
             .task(id: AgentHistoryLoadTrigger(threadID: thread.summary.id, cursor: thread.cursor,
-                                            nearEdge: nearHistoryEdge && (thread.ingestionWindow == nil || historyDemand == "before" || pagesToFill), loading: loading,
-                                            positioned: positionedThread == thread.summary.id, demandGeneration: historyDemandGeneration,
+                                            nearEdge: pagingEnabled && nearHistoryEdge && (thread.ingestionWindow == nil || presentation.historyDemand == "before" || pagesToFill), loading: loading,
+                                            positioned: positionedPresentation && presentation.positionedThread == thread.summary.id, demandGeneration: presentation.historyDemandGeneration,
                                             renderedEdge: rendered.lowerBound)) {
                 // Retained rows are revealed locally before asking the host.
                 guard thread.ingestionWindow == nil || rendered.lowerBound == 0 else { return }
-                let demanded = thread.ingestionWindow == nil || (historyDemand == "before" && automaticPages < 4)
-                guard positionedThread == thread.summary.id, nearHistoryEdge, !loading,
+                let demanded = thread.ingestionWindow == nil || (presentation.historyDemand == "before" && presentation.automaticPages < 4)
+                guard pagingEnabled, positionedPresentation, presentation.positionedThread == thread.summary.id, nearHistoryEdge, !loading,
                       demanded || pagesToFill, thread.hasMore, let cursor = thread.cursor else { return }
                 // An unchanged cursor can mean a transient read failure or
                 // an in-flight refresh. Retry without a button or a tight loop.
-                if cursor == requestedCursor {
-                    let wait = max(0, nextPageAttempt.timeIntervalSinceNow)
+                if cursor == presentation.requestedCursor {
+                    let wait = max(0, presentation.nextPageAttempt.timeIntervalSinceNow)
                     do { try await Task.sleep(for: .seconds(wait)) } catch { return }
-                    pageRetryDelay = min(30, pageRetryDelay * 2)
-                } else { pageRetryDelay = 1 }
-                requestedCursor = cursor
-                nextPageAttempt = .now.addingTimeInterval(pageRetryDelay)
+                    presentation.pageRetryDelay = min(30, presentation.pageRetryDelay * 2)
+                } else { presentation.pageRetryDelay = 1 }
+                presentation.requestedCursor = cursor
+                presentation.nextPageAttempt = .now.addingTimeInterval(presentation.pageRetryDelay)
                 // A fill never spends the pages a history gesture is allowed.
                 if demanded {
-                    automaticPages += 1
+                    presentation.automaticPages += 1
                     model.onAction?(.requestOlderPage(thread.summary.id))
                 } else {
-                    fillPages += 1
+                    presentation.fillPages += 1
                     model.onAction?(.fillOlderPage(thread.summary.id))
                 }
             }
             .task(id: AgentHistoryLoadTrigger(threadID: thread.summary.id, cursor: thread.ingestionWindow?.after,
-                                            nearEdge: nearNewerEdge && historyDemand == "after", loading: loading,
-                                            positioned: positionedThread == thread.summary.id, demandGeneration: historyDemandGeneration,
+                                            nearEdge: pagingEnabled && nearNewerEdge && presentation.historyDemand == "after", loading: loading,
+                                            positioned: positionedPresentation && presentation.positionedThread == thread.summary.id, demandGeneration: presentation.historyDemandGeneration,
                                             renderedEdge: rendered.upperBound)) {
-                guard rendersNewest, positionedThread == thread.summary.id, nearNewerEdge, !loading,
-                      historyDemand == "after", automaticPages < 4,
+                guard pagingEnabled, positionedPresentation, rendersNewest, presentation.positionedThread == thread.summary.id, nearNewerEdge, !loading,
+                      presentation.historyDemand == "after", presentation.automaticPages < 4,
                       let window = thread.ingestionWindow, window.hasNewer, !window.atLiveHead,
                       let cursor = window.after else { return }
-                if requestedNewerCursor == cursor {
+                if presentation.requestedNewerCursor == cursor {
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 }
-                requestedNewerCursor = cursor
-                automaticPages += 1
+                presentation.requestedNewerCursor = cursor
+                presentation.automaticPages += 1
                 model.onAction?(.requestNewerPage(thread.summary.id))
             }
             // A bridged window reads as live: its newest rows are shown but
             // not retained, so nothing revises them. A follower asks for the
             // newer page that retains them, backing off an unchanged cursor.
             .task(id: AgentBridgeTrigger(thread: thread.summary.id, cursor: thread.ingestionWindow?.bridgesToHead == true
-                ? thread.ingestionWindow?.after : nil, version: thread.ingestionWindow?.version, following: followingLatest, loading: loading)) {
-                guard followingLatest, !loading, let window = thread.ingestionWindow, window.bridgesToHead == true,
+                ? thread.ingestionWindow?.after : nil, version: thread.ingestionWindow?.version,
+                following: positionedPresentation && pagingEnabled && presentation.followingLatest, loading: loading)) {
+                guard pagingEnabled, positionedPresentation, presentation.followingLatest, !loading, let window = thread.ingestionWindow, window.bridgesToHead == true,
                       let cursor = window.after else { return }
-                if cursor == requestedBridgeCursor {
-                    do { try await Task.sleep(for: .seconds(bridgeRetryDelay)) } catch { return }
-                    bridgeRetryDelay = min(30, bridgeRetryDelay * 2)
-                } else { bridgeRetryDelay = 1 }
-                requestedBridgeCursor = cursor
+                if cursor == presentation.requestedBridgeCursor {
+                    do { try await Task.sleep(for: .seconds(presentation.bridgeRetryDelay)) } catch { return }
+                    presentation.bridgeRetryDelay = min(30, presentation.bridgeRetryDelay * 2)
+                } else { presentation.bridgeRetryDelay = 1 }
+                presentation.requestedBridgeCursor = cursor
                 model.onAction?(.retainBridgedRows(thread.summary.id))
             }
             .task(id: AgentRenderedRevealTrigger(threadID: thread.summary.id, rendered: rendered, count: displayItems.count,
-                                                 older: nearRenderedTop && historyDemand == "before",
-                                                 newer: nearRenderedBottom && historyDemand == "after",
+                                                 older: nearRenderedTop && demands("before"),
+                                                 newer: nearRenderedBottom && demands("after"),
                                                  topVisible: renderedTopVisible, bottomVisible: renderedBottomVisible,
-                                                 positioned: positionedThread == thread.summary.id)) {
-                guard thread.ingestionWindow != nil, positionedThread == thread.summary.id else { return }
+                                                 positioned: positionedPresentation && presentation.positionedThread == thread.summary.id)) {
+                // A range pinned since this update rendered is not this one,
+                // and its own update restarts this task: the fallback below
+                // must not pin this one back over it.
+                guard positionedPresentation, thread.ingestionWindow != nil, presentation.positionedThread == thread.summary.id,
+                      renderedRange(of: displayItems) == rendered else { return }
                 // A rebuilt fallback range becomes the range, so it does not
                 // follow the reader's row from frame to frame.
-                if !rendered.isEmpty, renderedLowerID != nil || renderedUpperID != nil {
+                if !rendered.isEmpty, presentation.renderedLowerID != nil || presentation.renderedUpperID != nil {
                     let bounds = renderedBounds(displayItems, rendered)
-                    if bounds.lower != renderedLowerID || bounds.upper != renderedUpperID { pinRenderedRange(displayItems, rendered) }
+                    if bounds.lower != presentation.renderedLowerID || bounds.upper != presentation.renderedUpperID { pinRenderedRange(displayItems, rendered) }
                 }
                 // An exposed edge is repaired first, whatever the direction,
                 // and without releasing rows the reader may be heading for.
                 let repairTop = renderedTopVisible && rendered.lowerBound > 0
                 let repairBottom = renderedBottomVisible && !rendersNewest
-                let older = repairTop || !repairBottom && nearRenderedTop && historyDemand == "before" && rendered.lowerBound > 0
+                let older = repairTop || !repairBottom && nearRenderedTop && demands("before") && rendered.lowerBound > 0
                 // A reader parked above a growing tail keeps a bounded range:
                 // head updates add rows the budget releases from the top.
                 let overBudget = displayItems[rendered].reduce(0, { $0 + Self.layoutCost($1) }) > Self.renderedCostBudget + Self.renderedCostChunk
-                let trimTop = !older && !repairBottom && !nearRenderedTop && rendersNewest && renderedLowerID != nil && overBudget
-                guard older || repairBottom || trimTop || (nearRenderedBottom && historyDemand == "after" && !rendersNewest) else { return }
-                // Let the previous reveal's layout report its new edge.
+                let trimTop = !older && !repairBottom && !nearRenderedTop && rendersNewest && presentation.renderedLowerID != nil && overBudget
+                guard older || repairBottom || trimTop || (nearRenderedBottom && demands("after") && !rendersNewest) else { return }
+                // Let the previous reveal's layout report its new edge, and
+                // reveal only while the reason holds: an edge still exposed,
+                // or demand toward one still near. The keeper's shift over
+                // rows just revealed can cover the edge in the same frame,
+                // and SwiftUI then does not restart this task. A search
+                // landing, placed from a task of its own, can pin its range
+                // meanwhile: a reveal from this one would leave its match
+                // outside the rendered rows.
                 await Task.yield()
-                guard !Task.isCancelled,
-                      trimTop || (older ? nearRenderedTop || renderedTopVisible : nearRenderedBottom || renderedBottomVisible) else { return }
+                guard !Task.isCancelled, renderedRange(of: displayItems) == rendered, trimTop || (older
+                        ? renderedTopVisible || nearRenderedTop && demands("before")
+                        : renderedBottomVisible || nearRenderedBottom && demands("after")) else { return }
                 // A repair releases only once over budget: it serves readers
                 // without pans (VoiceOver, keyboard), whose reveals must not
                 // grow the range back to the whole window.
                 revealRetainedRows(displayItems, rendered: rendered, older: older,
                                    release: overBudget || (!repairTop && !repairBottom))
             }
-            .onChange(of: AgentViewportPinTrigger(rowID: visibleRowID, followingLatest: followingLatest), initial: true) { _, pin in
+            .onChange(of: AgentViewportPinTrigger(rowID: presentation.visibleRowID, followingLatest: presentation.followingLatest), initial: true) { _, pin in
                 guard thread.ingestionWindow != nil else { return }
                 // A live-following reader must not pin the old rolling page.
                 // Only an explicit history-reading gesture owns an anchor,
@@ -725,16 +1068,17 @@ struct AgentThreadDetailView: View {
                 }
                 model.onAction?(.viewportAnchor(threadID: thread.summary.id, recordID: recordID))
             }
-            .onChange(of: followingLatest) { _, following in
+            .onChange(of: presentation.followingLatest) { _, following in
+                if following { anchorKeeper.landedRowID = nil }
                 // Only the live head's tail is followed. The bottom of a
                 // detached window is history: newer pages reveal in chunks
                 // from the reader's rows rather than jumping to their end.
-                if following, thread.ingestionWindow?.atLiveHead != false { renderedLowerID = nil; renderedUpperID = nil }
+                if following, thread.ingestionWindow?.atLiveHead != false { presentation.renderedLowerID = nil; presentation.renderedUpperID = nil }
                 else if following { if !rendered.isEmpty { pinRenderedRange(displayItems, rendered) } }
                 // Hold the reader's rows: newer tail rows must not trim the
                 // top of the range under a history read.
-                else if renderedLowerID == nil, thread.ingestionWindow != nil, !rendered.isEmpty {
-                    renderedLowerID = displayItems[rendered.lowerBound].id
+                else if presentation.renderedLowerID == nil, thread.ingestionWindow != nil, !rendered.isEmpty {
+                    presentation.renderedLowerID = displayItems[rendered.lowerBound].id
                 }
             }
             // A new send follows the tail. Watch every send, not the drawn
@@ -742,11 +1086,18 @@ struct AgentThreadDetailView: View {
             // that must not pull a reader out of history.
             .onChange(of: thread.outgoingMessages?.last?.id) { previous, next in
                 if next != nil && next != previous {
-                    followingLatest = true; historyDemand = ""; automaticPages = 0
+                    presentation.followingLatest = true; presentation.historyDemand = ""; presentation.automaticPages = 0
                 }
             }
         }
         }
+    }
+
+    /// The body's rendered range, read again from a task to tell whether a
+    /// pin changed it since that update.
+    private func renderedRange(of items: [TranscriptDisplayItem]) -> Range<Int> {
+        Self.renderedRange(items, lowerID: presentation.renderedLowerID, upperID: presentation.renderedUpperID,
+                           anchorID: restoredAnchorID ?? presentation.visibleRowID)
     }
 
     /// A nil upper ID renders through the newest row; both nil is the live
@@ -775,6 +1126,13 @@ struct AgentThreadDetailView: View {
         return start..<end
     }
 
+    /// A pan toward older or newer rows. A retained one is not a new
+    /// request (`restorePresentation`): it reveals rows only once a gesture
+    /// or a page update resumes paging, as it loads pages.
+    private func demands(_ direction: String) -> Bool {
+        pagingEnabled && presentation.historyDemand == direction
+    }
+
     /// Extends the rendered range by one cost chunk toward older or newer
     /// rows and releases the far side beyond the budget. Rows within half
     /// the budget past the scroll anchor (the top visible row) are never
@@ -784,7 +1142,7 @@ struct AgentThreadDetailView: View {
     /// The anchor keeper holds the visible row in place.
     private func revealRetainedRows(_ items: [TranscriptDisplayItem], rendered: Range<Int>, older: Bool, release: Bool) {
         var lower = rendered.lowerBound, upper = rendered.upperBound, added = 0
-        let anchor = visibleRowID.flatMap { id in items[rendered].firstIndex { $0.id == id } }
+        let anchor = presentation.visibleRowID.flatMap { id in items[rendered].firstIndex { $0.id == id } }
         let renderedCost = items[rendered].reduce(0) { $0 + Self.layoutCost($1) }
         if older {
             while lower > 0, added < Self.renderedCostChunk { lower -= 1; added += Self.layoutCost(items[lower]) }
@@ -820,10 +1178,27 @@ struct AgentThreadDetailView: View {
         pinRenderedRange(items, lower..<upper)
     }
 
+    /// A range around a landed row: half the budget from it down, for
+    /// reading on, then rows above it, for scrolling back.
+    private static func renderedRange(_ items: [TranscriptDisplayItem], around index: Int) -> Range<Int> {
+        var lower = index, upper = index + 1, cost = layoutCost(items[index])
+        while upper < items.count, cost < renderedCostBudget / 2 { cost += layoutCost(items[upper]); upper += 1 }
+        while lower > 0, cost < renderedCostBudget { lower -= 1; cost += layoutCost(items[lower]) }
+        while upper < items.count, cost < renderedCostBudget { cost += layoutCost(items[upper]); upper += 1 }
+        return lower..<upper
+    }
+
+    private static func holdsRecord(_ item: AgentTranscriptItem, _ recordID: String) -> Bool {
+        switch item {
+        case .message(let part): part.recordID == recordID
+        case .toolRun(let run): run.entries.contains { $0.recordID == recordID }
+        }
+    }
+
     /// Through-the-newest (a nil upper ID) exists only at the live head; a
     /// detached window's newer pages are revealed, never appended.
     private func pinRenderedRange(_ items: [TranscriptDisplayItem], _ range: Range<Int>) {
-        (renderedLowerID, renderedUpperID) = renderedBounds(items, range)
+        (presentation.renderedLowerID, presentation.renderedUpperID) = renderedBounds(items, range)
     }
 
     private func renderedBounds(_ items: [TranscriptDisplayItem], _ range: Range<Int>) -> (lower: String, upper: String?) {
@@ -842,8 +1217,8 @@ struct AgentThreadDetailView: View {
             // Collapsed cards lay out a label and at most a one-line preview.
             case .thinking, .compactSummary: total + 200
             case .workflow(let title): total + 200 + title.utf8.count
-            case .toolCall(let name, let preview): total + 200 + name.utf8.count + min(400, preview.utf8.count)
-            case .toolResult(let preview, _): total + 200 + min(400, preview.utf8.count)
+            case .toolCall(let name, let preview, _): total + 200 + name.utf8.count + min(400, preview.utf8.count)
+            case .toolResult(let preview, _, _): total + 200 + min(400, preview.utf8.count)
             case .edit(let path, _): total + 200 + (path?.utf8.count ?? 0)
             default: total + 200
             }
@@ -855,7 +1230,9 @@ struct AgentThreadDetailView: View {
         // Reserve real layout space: a translucent overlay obscures transcript
         // glyphs on compact screens. Keeping this outside the scroll geometry
         // also makes visibility and edge checks use the actual reading viewport.
-        if !followingLatest || thread.ingestionWindow?.atLiveHead == false || model.ingestionCapacityThreads.contains(thread.summary.id) {
+        // A match still being read can be given up for the newest page.
+        let landing = model.searchLanding?.threadID == thread.summary.id && model.loadingTranscriptThreads.contains(thread.summary.id)
+        if landing || !presentation.followingLatest || thread.ingestionWindow?.atLiveHead == false || model.ingestionCapacityThreads.contains(thread.summary.id) {
             HStack {
                 Spacer(minLength: 0)
                 Button {
@@ -863,10 +1240,10 @@ struct AgentThreadDetailView: View {
                     NSLog("[AgentChat] return-to-latest atHead=%@ loading=%@", String(describing: thread.ingestionWindow?.atLiveHead),
                         String(model.loadingTranscriptThreads.contains(thread.summary.id)))
                     #endif
-                    followingLatest = true
-                    historyDemand = ""; automaticPages = 0
-                    historyDemandGeneration += 1
-                    if thread.ingestionWindow?.atLiveHead == false || model.ingestionCapacityThreads.contains(thread.summary.id) {
+                    presentation.followingLatest = true
+                    presentation.historyDemand = ""; presentation.automaticPages = 0
+                    presentation.historyDemandGeneration += 1
+                    if landing || thread.ingestionWindow?.atLiveHead == false || model.ingestionCapacityThreads.contains(thread.summary.id) {
                         model.onAction?(.returnToLatest(thread.summary.id))
                     }
                 } label: {
@@ -878,7 +1255,7 @@ struct AgentThreadDetailView: View {
                 .buttonStyle(.plain)
                 .background(T.panelBg, in: Capsule())
                 .overlay(Capsule().stroke(T.border, lineWidth: 1))
-                .disabled(model.loadingTranscriptThreads.contains(thread.summary.id))
+                .disabled(!landing && model.loadingTranscriptThreads.contains(thread.summary.id))
                 .accessibilityIdentifier("agent-center-v2-return-to-latest")
             }
             .padding(.horizontal, 12).padding(.vertical, 4)
@@ -905,13 +1282,94 @@ struct AgentThreadDetailView: View {
         }
     }
 
+    /// tmux's window ID is no window number, so only the pane shows, in
+    /// tmux's own `%21` syntax.
     private func location(for binding: AgentTerminalBinding) -> String {
         var values = [binding.transport.rawValue]
-        if let window = binding.windowID { values.append("window \(window)") }
-        if let pane = binding.paneID { values.append("pane \(pane)") }
+        if let pane = binding.paneID { values.append("pane " + (pane.hasPrefix("%") ? pane : "%" + pane)) }
         return values.joined(separator: " · ")
     }
 
+}
+
+/// A thread's composer, or why it has none. Below the transcript in the
+/// stack and in two columns; on the hinge in laptop pose, where sending also
+/// puts the keyboard away so the composer docks and the list comes back.
+struct AgentThreadComposerSlot: View {
+    @Bindable var model: AgentCenterV2PresentationModel
+    let thread: AgentThreadSnapshot
+    let isCompact: Bool
+    @Environment(\.duoDeckPlacement) private var deckPlacement
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        Group {
+            if thread.summary.availability.actions,
+               thread.binding?.capabilities.contains(.send) == true {
+                AgentComposerView(model: model, thread: thread, isCompact: isCompact)
+            } else {
+                Text("Replies need this agent running in a connected terminal.")
+                    .font(Typography.tesseraMono(size: 10.5))
+                    .foregroundStyle(T.fgDim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, isCompact ? 16 : 22)
+                    .padding(.vertical, 12)
+                    .background(T.panelBg)
+                    .overlay(alignment: .top) { Rectangle().fill(T.border).frame(height: 1) }
+            }
+        }
+        .onChange(of: model.pendingSends[thread.summary.id] != nil) { _, sending in
+            if sending, deckPlacement?.keyboardUp == true { AgentComposerView.hideKeyboard() }
+        }
+    }
+}
+
+/// A laptop screen's title. With the shell's switcher (the sections and the
+/// screen's own entries) it gains ⌄ and opens it; without one it is a label.
+struct AgentLaptopTitle: View {
+    let title: Text
+    @Environment(\.duoOpenSwitcher) private var openSwitcher
+    @Environment(\.designTokens) private var T
+
+    var body: some View {
+        let label = title
+            .font(Typography.tesseraMono(size: 14, weight: .medium))
+            .foregroundStyle(T.fg)
+            .lineLimit(1)
+        if let openSwitcher {
+            Button { openSwitcher() } label: {
+                HStack(spacing: 6) {
+                    label
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(T.fgMuted)
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("agent-center-v2-laptop-title")
+        } else {
+            label
+                .frame(minHeight: 44)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+}
+
+private struct AgentPresentationPageIdentity: Equatable {
+    let cursor: String?
+    let after: String?
+    let version: UInt64?
+}
+
+private struct AgentSearchLandingAttempt: Equatable {
+    let landing: AgentCenterV2PresentationModel.SearchLanding?
+    let restored: Bool
+    let loading: Bool
+    let version: UInt64?
+    let rows: Int
 }
 
 private struct AgentViewportPinTrigger: Equatable {
@@ -921,14 +1379,42 @@ private struct AgentViewportPinTrigger: Equatable {
 
 private struct AgentChatFollowTrigger: Equatable {
     let thread: AgentThreadID
+    /// `AgentFollowInputs` changes, collapsed per frame.
+    let inputs: Int
+}
+
+/// What the follow pass reads: the transcript's layout and the follow state.
+private struct AgentFollowInputs: Equatable {
     let content: CGSize
     let viewport: CGSize
-    let following: Bool
-    let atLiveHead: Bool
-    let tail: String?
     /// Watched only until the thread is positioned: later scrolls without a
     /// pan (VoiceOver, keyboard) must not re-run the follow.
     let landing: Bool?
+    let following: Bool
+    let atLiveHead: Bool
+    let tail: String?
+}
+
+/// The follow task's id may change only once per frame, and one frame can
+/// change its inputs several times: a detail opened in a navigation stack lays
+/// out under a large-title bar, then again under its inline one, and the
+/// positioning the follow pass ends with lands a prompt card, which stops
+/// following. Every change reaches the task as one bump on the next turn of
+/// the main queue; the task reads the current state when it runs.
+private final class AgentFollowPulse {
+    private var inputs: AgentFollowInputs?
+    private var pending = false
+
+    func note(_ next: AgentFollowInputs, bump: @escaping () -> Void) {
+        guard next != inputs else { return }
+        inputs = next
+        guard !pending else { return }
+        pending = true
+        DispatchQueue.main.async { [weak self] in
+            self?.pending = false
+            bump()
+        }
+    }
 }
 
 private struct AgentBridgeTrigger: Equatable {
@@ -968,10 +1454,29 @@ private struct AgentRenderedRevealTrigger: Equatable {
 
 private struct AgentTranscriptAnchorFrame: Equatable {
     let id: String
+    /// In the bottom-aligned agent-rows frame, where the keeper holds it.
     let minY: CGFloat
+    /// Changes only with layout, so scrolling sends no new preference.
+    var height: CGFloat = 0
+    /// From the row stack's origin, the origin of the keeper's `bounds`. In
+    /// agent-rows a short transcript's rows sit lower by the viewport's
+    /// spare height.
+    let top: CGFloat
 }
 
 private struct AgentTranscriptAnchorPreference: PreferenceKey {
+    static let defaultValue: AgentTranscriptAnchorFrame? = nil
+    static func reduce(value: inout AgentTranscriptAnchorFrame?, nextValue: () -> AgentTranscriptAnchorFrame?) {
+        value = value ?? nextValue()
+    }
+}
+
+/// The frame of the row `AgentTranscriptAnchorKeeper.see` says the reader
+/// is on, when that is not the scroll position's row. Measured from the row
+/// stack's origin, the transcript bounds' own: in the bottom-aligned
+/// `agent-rows` space a short transcript's rows move with the viewport's
+/// height, which a container can change twice in one frame.
+private struct AgentTranscriptReadingFramePreference: PreferenceKey {
     static let defaultValue: AgentTranscriptAnchorFrame? = nil
     static func reduce(value: inout AgentTranscriptAnchorFrame?, nextValue: () -> AgentTranscriptAnchorFrame?) {
         value = value ?? nextValue()
@@ -998,8 +1503,46 @@ private final class AgentTranscriptAnchorKeeper {
 
     /// A pin skipped under a finger or fling, retried once it settles.
     private var pendingPin: CADisplayLink?
+    /// A landing skipped under a finger, asked again once it lifts.
+    private var landingRetry: (() -> Void)?
 
-    func reset() { last = nil; bounds = nil }
+    /// The row a prompt landing put the reader on, until they scroll, return
+    /// to the latest or the window moves them into history.
+    var landedRowID: String?
+    /// The rendered rows on screen, top first. Plain storage, like `bounds`.
+    private var visibleRowIDs: [String] = []
+    /// The scroll position's row once it was on screen. A row it names that
+    /// never was is a restore still on its way, not a reader gone elsewhere.
+    private var shownRowID: String?
+    /// The frame of the row `see` named, measured like `last`.
+    var readingFrame: AgentTranscriptAnchorFrame?
+
+    func reset() {
+        last = nil; bounds = nil; landingRetry = nil; landedRowID = nil
+        visibleRowIDs = []; shownRowID = nil; readingFrame = nil
+    }
+
+    /// Takes the rendered rows on screen and returns the row the reader is
+    /// on when the scroll position names another, which must then report
+    /// its frame (`readingFrame`) for `reading` to save how far into it
+    /// they are.
+    func see(_ rows: [String], scrollRow: String?) -> String? {
+        visibleRowIDs = rows
+        if let scrollRow, rows.contains(scrollRow) { shownRowID = scrollRow }
+        let reader = readerRowID(scrollRow: scrollRow)
+        return reader == scrollRow ? nil : reader
+    }
+
+    /// The scroll position names the row the reader last panned to, even
+    /// from before Return to latest. A landing, VoiceOver or a keyboard
+    /// moved them since without it: the rows on screen say where they are.
+    /// None yet (no layout, no height) keeps it.
+    private func readerRowID(scrollRow: String?) -> String? {
+        let shown = visibleRowIDs
+        if let landedRowID, shown.isEmpty || shown.contains(landedRowID) { return landedRowID }
+        if let top = shown.first, scrollRow.map({ $0 == shownRowID && !onScreen($0, shown: shown) }) ?? true { return top }
+        return scrollRow
+    }
 
     func attach(_ found: UIScrollView?) {
         guard found !== scroll else { return }
@@ -1025,10 +1568,18 @@ private final class AgentTranscriptAnchorKeeper {
         if scroll.isTracking || (scroll.isDecelerating && !stoppingScroll) { pinWhenSettled(); return }
         let bottom = Self.maximumOffset(scroll)
         guard abs(scroll.contentOffset.y - bottom) > 0.5 else { return }
-        // Only the animated setter ends a fling; assignment would let it
-        // carry on from the new offset.
-        if scroll.isDecelerating { scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: bottom), animated: false) }
-        else { scroll.contentOffset = CGPoint(x: scroll.contentOffset.x, y: bottom) }
+        move(scroll, to: bottom, endingFling: true)
+    }
+
+    /// Moves the viewport, and `bounds` with it: until layout reports again,
+    /// a landing converts with the frame at the new offset. Only the
+    /// animated setter ends a fling; assignment lets one carry on from the
+    /// new offset.
+    private func move(_ scroll: UIScrollView, to y: CGFloat, endingFling: Bool = false) {
+        bounds = bounds?.offsetBy(dx: 0, dy: scroll.contentOffset.y - y)
+        let offset = CGPoint(x: scroll.contentOffset.x, y: y)
+        if endingFling, scroll.isDecelerating { scroll.setContentOffset(offset, animated: false) }
+        else { scroll.contentOffset = offset }
     }
 
     private func pinWhenSettled() {
@@ -1039,9 +1590,17 @@ private final class AgentTranscriptAnchorKeeper {
     }
 
     fileprivate func settledTick() {
-        guard let scroll, pinsBottom else { pendingPin?.invalidate(); pendingPin = nil; return }
+        guard let scroll, pinsBottom || landingRetry != nil else { pendingPin?.invalidate(); pendingPin = nil; return }
         guard !scroll.isTracking, !scroll.isDecelerating else { return }
         pendingPin?.invalidate(); pendingPin = nil
+        if let retry = landingRetry {
+            // A landing decided again moves the reader itself; if it no
+            // longer lands, the pin it held back still applies.
+            landingRetry = nil
+            retry()
+            DispatchQueue.main.async { [weak self] in self?.pinBottom() }
+            return
+        }
         pinBottom()
     }
 
@@ -1050,17 +1609,67 @@ private final class AgentTranscriptAnchorKeeper {
         return max(-inset.top, scroll.contentSize.height + inset.bottom - scroll.bounds.height)
     }
 
+    /// The reading state with how far into its top row the reader sits.
+    func reading(_ presentation: AgentThreadPresentationState) -> AgentThreadPresentationState {
+        var held = presentation
+        held.visibleRowFraction = nil
+        if !held.followingLatest { held.visibleRowID = readerRowID(scrollRow: held.visibleRowID) }
+        guard !held.followingLatest, let id = held.visibleRowID,
+              let frame = [last, readingFrame].lazy.compactMap({ $0 }).first(where: { $0.id == id }),
+              frame.height > 0, let bounds else { return held }
+        // `bounds` is the row stack in viewport space, so this is the row's
+        // top below the viewport's: negative once the reader is inside it.
+        let rowTop = bounds.minY + frame.top
+        held.visibleRowFraction = min(1, max(0, -rowTop / frame.height))
+        return held
+    }
+
+    /// The scroll position's row reports its frame on every layout, so its
+    /// own frame says whether it is on screen; visibility can trail a frame.
+    private func onScreen(_ id: String, shown: [String]) -> Bool {
+        guard let last, last.id == id, let bounds else { return shown.contains(id) }
+        let rowTop = bounds.minY + last.top
+        return rowTop + last.height > 0 && rowTop < viewportHeight
+    }
+
+    /// Puts the viewport top `margin` above a row-stack position and stops
+    /// following. Never under the reader's finger: then `retry` runs once
+    /// the finger lifts and any fling ends.
+    func land(atRowY y: CGFloat, margin: CGFloat, retry: @escaping () -> Void = {}) -> Bool {
+        guard let scroll, let bounds else { return false }
+        guard !scroll.isTracking else {
+            landingRetry = retry
+            pinWhenSettled()
+            return false
+        }
+        landingRetry = nil
+        pinsBottom = false
+        pendingPin?.invalidate(); pendingPin = nil
+        let top = scroll.contentOffset.y + bounds.minY + y - margin
+        move(scroll, to: min(Self.maximumOffset(scroll), max(-scroll.adjustedContentInset.top, top)), endingFling: true)
+        return true
+    }
+
+    /// Puts the viewport top `fraction` of the way into a laid-out row, in
+    /// the row's current height, at once. False leaves the landing to
+    /// `scrollTo`.
+    func scroll(into id: String, fraction: CGFloat) -> Bool {
+        guard let scroll, let last, last.id == id, last.height > 0, let bounds else { return false }
+        let rowTop = scroll.contentOffset.y + bounds.minY + last.top
+        move(scroll, to: min(Self.maximumOffset(scroll), max(-scroll.adjustedContentInset.top, rowTop + fraction * last.height)))
+        return true
+    }
+
     func observe(_ frame: AgentTranscriptAnchorFrame?) {
         defer { last = frame }
         guard let frame, let last, frame.id == last.id, frame.minY != last.minY, let scroll else { return }
         // Layout moved the same row. A new row ID is the reader scrolling
         // (VoiceOver, the status bar, a keyboard): never pull that back.
         if pinsBottom { pinBottom(); return }
-        var offset = scroll.contentOffset
         // Held in range: a viewport growing over short content moves the
         // row by more than there is left to scroll.
-        offset.y = min(Self.maximumOffset(scroll), max(-scroll.adjustedContentInset.top, offset.y + frame.minY - last.minY))
-        scroll.contentOffset = offset
+        move(scroll, to: min(Self.maximumOffset(scroll),
+                             max(-scroll.adjustedContentInset.top, scroll.contentOffset.y + frame.minY - last.minY)))
     }
 }
 
@@ -1083,6 +1692,51 @@ private struct AgentTranscriptBoundsPreference: PreferenceKey {
     static let defaultValue: AgentTranscriptBounds? = nil
     static func reduce(value: inout AgentTranscriptBounds?, nextValue: () -> AgentTranscriptBounds?) {
         if let next = nextValue() { value = next }
+    }
+}
+
+/// A prompt card's frame in the row stack's scroll-invariant space.
+struct AgentPromptCardFrame: Equatable {
+    let token: AgentActionToken
+    let frame: CGRect
+}
+
+/// The newest (lowest) card wins: older prompts stay in the transcript.
+struct AgentPromptCardPreference: PreferenceKey {
+    static let defaultValue: AgentPromptCardFrame? = nil
+    static func reduce(value: inout AgentPromptCardFrame?, nextValue: () -> AgentPromptCardFrame?) {
+        guard let next = nextValue() else { return }
+        if value.map({ next.frame.minY >= $0.frame.minY }) ?? true { value = next }
+    }
+}
+
+/// Pinned to the bottom, a question taller than the transcript keeps its
+/// title and first answers above the viewport: the laptop's upper half has
+/// about 240 pt for it. Such a question lands once at its own top instead.
+/// A card that fits is decided too, so a keyboard shrinking the viewport
+/// later never pulls a typing reader up to it.
+/// A landing with how often one that waited under a finger was asked again,
+/// so the finger lifting decides it anew even when nothing else changed.
+private struct AgentPromptLandingAttempt: Equatable {
+    let landing: AgentPromptLanding?
+    let attempt: Int
+}
+
+struct AgentPromptLanding: Equatable {
+    static let margin: CGFloat = 8
+
+    let token: AgentActionToken
+    /// The row-stack position to land at; nil when the card fits.
+    let rowY: CGFloat?
+
+    static func decide(
+        _ card: AgentPromptCardFrame?, decided: AgentActionToken?, waiting: Bool, following: Bool,
+        positioned: Bool, viewportHeight: CGFloat
+    ) -> AgentPromptLanding? {
+        guard waiting, following, positioned, let card, card.token != decided,
+              card.frame.height > 0, viewportHeight > 0 else { return nil }
+        let lands = card.frame.height > viewportHeight - 2 * margin
+        return AgentPromptLanding(token: card.token, rowY: lands ? card.frame.minY : nil)
     }
 }
 

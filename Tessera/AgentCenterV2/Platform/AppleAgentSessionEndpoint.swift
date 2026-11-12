@@ -1,5 +1,6 @@
 import Foundation
 import TesseraCore
+import TmuxControlCore
 
 enum AgentCenterV2TaskOwnership {
     static func owns(currentTaskID: UUID?, taskID: UUID) -> Bool {
@@ -9,9 +10,26 @@ enum AgentCenterV2TaskOwnership {
 
 enum AppleAgentPromptCapture {
     /// A tmux capture keeps its SGR (`capture-pane -e`); the grammar reads the
-    /// cells, so escapes go before the rows are bounded.
+    /// cells, so escapes go before the rows are bounded. A local grid brings
+    /// its own (`AgentProbeTarget.promptText`).
     static func bottomWholeRows(_ text: String, limit: Int = 16_384) -> String {
         AgentPromptGrammar.promptText(fromCapture: text, limit: limit)
+    }
+
+    /// Claude marks its current question tab only by its background, which a
+    /// local grid's plain text loses; the other providers read no background.
+    @MainActor static func inspection(_ providerID: AgentProviderID, _ source: AgentSessionSource)
+        -> @MainActor (AgentLocation, Int?) async -> AgentProbeTarget? {
+        providerID == .claude ? source.inspectPromptTarget : source.inspectInputTarget
+    }
+
+    /// A target's screen as a prompt observation reads it.
+    static func request(_ providerID: AgentProviderID, _ target: AgentProbeTarget) -> AgentPromptObservationRequest? {
+        target.visibleText.flatMap { visible in
+            AgentPromptObservationRequest(providerID: providerID,
+                visibleText: target.promptText ?? bottomWholeRows(visible),
+                currentCursorLine: target.currentInputLine.map { utf8Prefix($0, limit: 2_048) })
+        }
     }
 
     static func utf8Prefix(_ text: String, limit: Int) -> String {
@@ -153,6 +171,13 @@ struct AppleAgentProjectionRoute {
     func matchesInventorySource(transcriptRef: String, binding: AgentTerminalBinding, registrationID: UUID) -> Bool {
         self.transcriptRef == transcriptRef && self.binding == binding && source.registrationID == registrationID
     }
+}
+
+/// The matches a host search accepted so far, kept when an outer deadline
+/// ends the search before it returns them.
+@MainActor
+final class AgentSearchAccepted {
+    var results: [AgentSearchResult] = []
 }
 
 @MainActor
@@ -414,10 +439,17 @@ extension AgentCenterV2Coordinator {
         }
     }
 
+    /// Reads the thread's page for `direction`; true when a seek landed the
+    /// window apart from the newest page.
+    @discardableResult
     private func projectNative(transcriptRef: String, providerID: AgentProviderID, threadID: AgentThreadID,
                                binding: AgentTerminalBinding, source: AgentSessionSource, cursor: String?, direction: String = "before",
-                               requiredConnection: AppleAgentIngestionConnection? = nil) async throws {
+                               seek: AgentSearchResult? = nil,
+                               requiredConnection: AppleAgentIngestionConnection? = nil) async throws -> Bool {
+        // The optional prefetch passes its connection and is not the read the view waits on.
+        let stage = { (name: String) in if requiredConnection == nil { self.noteProjectionStage(threadID, name) } }
         let host: AppleAgentIngestionHost, connection: AppleAgentIngestionConnection
+        stage("host")
         if let requiredConnection {
             guard !requiredConnection.isClosed,
                   let current = uniqueIngestionHosts(sessionID: source.sessionID).first(where: { $0.connection === requiredConnection })
@@ -429,6 +461,7 @@ extension AgentCenterV2Coordinator {
         guard providerID != .opencode || connection.supportsOpenCodeSessions else { throw AgentIngestionError.remote("unsupportedOpenCodeReader") }
         guard providerID != .kimi || connection.supportsKimiSessions else { throw AgentIngestionError.remote("unsupportedKimiReader") }
         if host.threads[threadID] == nil {
+            stage("resolve")
             let nativeLocator = [.codex, .opencode].contains(providerID) && transcriptRef.hasPrefix("native:")
             let reply = try await connection.request(["kind": .string("resolve"), "provider": .string(providerID.rawValue),
                 nativeLocator ? "nativeSessionID" : "transcriptRef": .string(nativeLocator ? String(transcriptRef.dropFirst(7)) : transcriptRef)],
@@ -451,24 +484,65 @@ extension AgentCenterV2Coordinator {
         if requiredConnection == nil, direction == "bootstrap" || cursor != nil, presentation.ingestionCapacityThreads.contains(threadID) {
             presentation.ingestionCapacityThreads.remove(threadID)
         }
-        if host.bootstrapped.contains(threadID), direction != "bootstrap", cursor == nil,
+        // A host from before seeks reads no page around a match: the thread
+        // opens at its newest page, as for a refused seek.
+        let seeking = direction == "seek" && connection.supportsWindowSeek
+        if host.bootstrapped.contains(threadID), direction != "bootstrap", !seeking, cursor == nil,
            await runtime.ingestionCheckpoint(for: threadID)?.epoch == connection.epoch {
-            scheduleNativeInterests(); return
+            if direction == "seek", let seek,
+               presentation.searchLanding.map({ $0.threadID == threadID && $0.recordID == seek.recordID }) == true,
+               presentation.threadSnapshots[threadID]?.ingestionWindow?.atLiveHead == false {
+                pendingLatestRequests.insert(threadID)
+            }
+            scheduleNativeInterests(); return false
         }
         host.pausedThreads.insert(threadID)
         defer { host.pausedThreads.remove(threadID); scheduleNativeInterests() }
+        stage("interest")
         await host.interestTask?.value
         try Task.checkCancellation()
-        _ = try await connection.request(["kind": .string("unsubscribe"), "thread": .string(handle)])
+        stage("unsubscribe")
+        // A control abandoned in flight leaves the remote watch unknown, so
+        // the connection retires with every thread on it. Optional history is
+        // cancelled by any tap or selection; its unsubscribe runs to the reply.
+        _ = try await Task { try await connection.request(["kind": .string("unsubscribe"), "thread": .string(handle)]) }.value
         host.interests.removeValue(forKey: threadID)
+        try Task.checkCancellation()
         if await runtime.ingestionCheckpoint(for: threadID)?.epoch != connection.epoch {
             host.bootstrapped.remove(threadID)
         }
         let initial = !host.bootstrapped.contains(threadID) || direction == "bootstrap"
+        // An opening read ends a place a notification gave up, however it ends.
+        defer { if initial && requiredConnection == nil { readerPlacesGivenUp.remove(threadID) } }
         if initial {
             host.initialPrefetchStarted.remove(threadID)
             // A bootstrap sizes the new window from this connection's hello.
             await runtime.setIngestionHostSegments(connection.maxWindowSegments, for: threadID.hostID, thread: threadID)
+        }
+        // Any other read that opens the thread here opens a reader who was in
+        // history at their place instead (`readerPlace`), where the host can
+        // read around a row.
+        let place = initial && seek == nil && direction != "bootstrap" && requiredConnection == nil && connection.supportsWindowSeek
+            && Self.seeksNatively(providerID) ? await readerPlace(threadID) : nil
+        let target = seek ?? place
+        // A seek that opens the thread here reads its newest page first; the
+        // detail shows none of it (`presentationHolds`).
+        let hold = (seeking || place != nil) && initial && requiredConnection == nil ? UUID() : nil
+        if let hold { presentationHolds[threadID] = hold }
+        var outcome = NativeSeekOutcome.interrupted
+        defer {
+            if let hold {
+                // An interrupted read leaves the place, and the rows before,
+                // to the next read; any other end settles it. A place that
+                // did not land leaves no landing behind.
+                let kept = place != nil && outcome == .interrupted
+                if let place, presentationHolds[threadID] == hold {
+                    if !kept { readerPlaces.removeValue(forKey: threadID) }
+                    if outcome != .landed, let landing = presentation.searchLanding, landing.threadID == threadID,
+                       !landing.marked, landing.recordID == place.recordID { presentation.dropSearchLanding(threadID) }
+                }
+                releasePresentationHold(threadID, hold, shows: !kept)
+            }
         }
         if initial || cursor != nil {
             let window = await runtime.ingestionWindowSnapshot(for: threadID)
@@ -478,10 +552,12 @@ extension AgentCenterV2Coordinator {
             var limit = 100
             while true {
             fields["limit"] = .number(Decimal(limit))
+            stage("read")
             let reply = try await connection.request(fields)
             guard !Task.isCancelled, isNativeHostCurrent(host, sessionID: source.sessionID),
                   isProjectionEndpointCurrent(binding, threadID: threadID, registrationID: source.registrationID),
                   let page = reply.page else { throw AgentActionError.staleBinding }
+            stage("apply")
             let applied = await apply(page: page, to: threadID)
             if !applied.accepted {
                 if let transaction = page.ingestion?.requestID { try? await connection.cancelWindow(transaction, thread: handle) }
@@ -497,6 +573,7 @@ extension AgentCenterV2Coordinator {
             guard isNativeHostCurrent(host, sessionID: source.sessionID),
                   isProjectionEndpointCurrent(binding, threadID: threadID, registrationID: source.registrationID),
                   let committed = await runtime.ingestionWindowSnapshot(for: threadID) else { throw AgentActionError.staleBinding }
+            stage("ack")
             try await connection.acknowledgeWindow(page, thread: handle, snapshot: committed)
             guard !Task.isCancelled, isNativeHostCurrent(host, sessionID: source.sessionID),
                   isProjectionEndpointCurrent(binding, threadID: threadID, registrationID: source.registrationID) else { throw AgentActionError.staleBinding }
@@ -521,9 +598,15 @@ extension AgentCenterV2Coordinator {
             break
             }
         }
+        if seeking || place != nil, let target {
+            stage("seek")
+            outcome = try await seekNative(target, handle: handle, host: host, connection: connection, binding: binding, source: source)
+            if outcome == .landed { readerPlaces.removeValue(forKey: threadID) }
+        } else { outcome = .ended }
         // A new selection demotes the previous thread on the same connection;
         // it neither starts another host service nor steals another app's lease.
         scheduleNativeInterests()
+        return outcome == .landed
     }
 
     @discardableResult
@@ -533,6 +616,13 @@ extension AgentCenterV2Coordinator {
         // Keep it addressable until its defer releases the native read pause.
         // An explicit page request may join that cleanup; Send never joins it.
         return task
+    }
+
+    /// Marks where the thread's projection read waits; nil `taskID` marks
+    /// whichever projection read is current.
+    func noteProjectionStage(_ threadID: AgentThreadID, taskID: UUID? = nil, _ stage: String) {
+        guard let current = projectionTaskIDs[threadID], taskID.map({ $0 == current }) ?? true else { return }
+        projectionStages[threadID] = stage
     }
 
     func cancelInitialPrefetches(except retained: AgentThreadID? = nil) {
@@ -578,6 +668,9 @@ extension AgentCenterV2Coordinator {
             pendingHistoryRequests.remove(threadID)
             pendingFillRequests.remove(threadID)
             pendingLatestRequests.remove(threadID)
+            if let seek = pendingSeekRequests.removeValue(forKey: threadID) {
+                presentation.abandonSearchLanding(threadID, recordID: seek.recordID)
+            }
             cancelInitialPrefetch(threadID)
             scheduleNativeInterests()
         case .retryRead:
@@ -867,10 +960,7 @@ extension AgentCenterV2Coordinator {
 
     private func searchNativeProviderPages(threadID: AgentThreadID, route: AppleAgentProjectionRoute, query: String) async throws -> [AgentSearchResult] {
         let (host, connection) = try await nativeHost(source: route.source, context: route.binding)
-        guard [.codex, .claude].contains(route.providerID) ||
-            (route.providerID == .pi && connection.supportsPiSessions) ||
-            (route.providerID == .kimi && connection.supportsKimiSessions) ||
-            (route.providerID == .opencode && connection.supportsOpenCodeSessions) else {
+        guard providerSearchable(route, on: connection) else {
             throw AgentIngestionError.remote("unsupportedNativeReader")
         }
         let nativeLocator = [.codex, .opencode].contains(route.providerID) && route.transcriptRef.hasPrefix("native:")
@@ -907,40 +997,169 @@ extension AgentCenterV2Coordinator {
         throw AgentIngestionError.capacityExceeded
     }
 
-    func searchConnectedSources(query: String, generation: UInt64) async {
-        let needle = String(query.prefix(512)).trimmingCharacters(in: .whitespacesAndNewlines)
+    private func providerSearchable(_ route: AppleAgentProjectionRoute, on connection: AppleAgentIngestionConnection) -> Bool {
+        [.codex, .claude].contains(route.providerID) ||
+            (route.providerID == .pi && connection.supportsPiSessions) ||
+            (route.providerID == .kimi && connection.supportsKimiSessions) ||
+            (route.providerID == .opencode && connection.supportsOpenCodeSessions)
+    }
+
+    /// The threads one Agent Host connection holds handles for, searched by
+    /// that host in a few bounded requests instead of paging every transcript
+    /// through the app. Threads it cannot read itself, or whose handle it no
+    /// longer knows, come back for paging; an older host without `search.v1`,
+    /// or one refusing the search, pages them all. Out of time or connection,
+    /// what was found stands and `complete` is false.
+    private func searchHost(_ group: [(AgentThreadID, AppleAgentProjectionRoute)], host: AppleAgentIngestionHost,
+                            connection: AppleAgentIngestionConnection, sessionID: UUID, query: String,
+                            admitted: Int, remaining: Duration, accepted: AgentSearchAccepted,
+                            progress: @escaping @MainActor ([AgentSearchResult]) async -> Void) async throws
+        -> (results: [AgentSearchResult], paged: [(AgentThreadID, AppleAgentProjectionRoute)], complete: Bool) {
+        let started = ContinuousClock.now
+        guard connection.supportsSearch else { return ([], group, true) }
+        var held: [String: (AgentThreadID, AppleAgentProjectionRoute)] = [:]
+        var routes: [AgentThreadID: AppleAgentProjectionRoute] = [:]
+        var order: [String] = []
+        var paged: [(AgentThreadID, AppleAgentProjectionRoute)] = []
+        for (threadID, route) in group {
+            // A reader this host lacks is paged, and fails there as before.
+            guard providerSearchable(route, on: connection), let handle = host.threads[threadID], held[handle] == nil else {
+                paged.append((threadID, route)); continue
+            }
+            held[handle] = (threadID, route); routes[threadID] = route; order.append(handle)
+        }
+        let outcome = try await AgentHostSearchRun.run(
+            handles: order, threads: held.mapValues(\.0), query: query, admitted: admitted,
+            timeLeft: { remaining - (ContinuousClock.now - started) },
+            request: { @MainActor [self] fields, deadline in
+                guard isNativeHostCurrent(host, sessionID: sessionID), host.connection === connection else { throw AgentActionError.staleBinding }
+                let reply = try await connection.request(fields, deadline: deadline)
+                guard !Task.isCancelled, isNativeHostCurrent(host, sessionID: sessionID),
+                      let id = reply.object["id"]?.stringValue, let epoch = connection.epoch else { throw AgentActionError.staleBinding }
+                return try await Self.searchReply(frames: reply.search, epoch: epoch, requestID: id)
+            },
+            accept: { @MainActor [self] match in
+                guard routes[match.threadID].map({ isSearchRouteCurrent($0, threadID: match.threadID) }) == true else { return false }
+                accepted.results.append(match)
+                return true
+            },
+            progress: progress)
+        return (outcome.results, paged + outcome.paged.compactMap { held[$0] }, outcome.complete)
+    }
+
+    /// A reply of up to a megabyte decodes off the main actor.
+    nonisolated private static func searchReply(frames: [[String: AgentJSONValue]], epoch: String, requestID: String) async throws
+        -> AgentHostSearchReply {
+        try AgentHostSearchReply(frames: frames, epoch: epoch, requestID: requestID)
+    }
+
+    /// `loaded` are what the app's loaded messages match. The rows shown when
+    /// the search starts stay while it runs, each reply that finds more adds
+    /// them, and the end shows `loaded` then everything found.
+    func searchConnectedSources(query: String, generation: UInt64, loaded: [AgentSearchResult] = []) async {
+        let needle = AgentHostSearchReply.needle(query)
         guard !needle.isEmpty else { return }
+        let shown = bridge.searchSnapshot
         let routes = projectionRoutes.merging(historicalRoutes) { live, _ in live }
         var results: [AgentSearchResult] = []
-        var unavailableHosts = Set<UUID>()
+        // In the order found, so the same search keeps the same hosts within
+        // the snapshot's four.
+        var unavailableHosts: [UUID] = []
+        func markUnavailable(_ hostID: UUID) { if !unavailableHosts.contains(hostID) { unavailableHosts.append(hostID) } }
         var resultCounts = [UUID: Int]()
         let deadline = ContinuousClock.now.advanced(by: .seconds(30))
-        for (threadID, route) in routes {
-            guard !Task.isCancelled, isEnabled, searchGeneration == generation, applicationActive, hasSurfaceDemand else { return }
-            if resultCounts[threadID.hostID, default: 0] >= 100 { continue }
-            let remaining = ContinuousClock.now.duration(to: deadline)
-            guard remaining > .zero else { unavailableHosts.insert(threadID.hostID); continue }
+        func wanted() -> Bool { searchWanted(generation: generation) }
+        // Open conversations first, then each Agent Host connection's threads
+        // together: it searches the handles it holds in one pass. A thread no
+        // open connection holds a handle for is paged.
+        var hosts: [ObjectIdentifier] = []
+        var grouped: [ObjectIdentifier: (host: AppleAgentIngestionHost, connection: AppleAgentIngestionConnection, sessionID: UUID,
+                                          threads: [(AgentThreadID, AppleAgentProjectionRoute)])] = [:]
+        var paged: [(AgentThreadID, AppleAgentProjectionRoute)] = []
+        for (threadID, route) in routes.sorted(by: { (projectionRoutes[$0.key] != nil ? 0 : 1) < (projectionRoutes[$1.key] != nil ? 0 : 1) }) {
             let routeIsCurrent = sessionRoutes[route.binding.liveSessionID]?.source.registrationID == route.source.registrationID
                 && (threadRoutes[threadID]?.binding == route.binding || historicalRoutes[threadID]?.binding == route.binding)
-            if routeIsCurrent {
-                do {
-                    let matches = try await searchNativeProvider(threadID: threadID, route: route, query: needle, remaining: remaining)
-                    guard !Task.isCancelled, isEnabled, searchGeneration == generation, applicationActive, hasSurfaceDemand else { return }
-                    guard isSearchRouteCurrent(route, threadID: threadID) else {
-                        unavailableHosts.insert(threadID.hostID); continue
-                    }
-                    let admitted = matches.prefix(max(0, 100 - resultCounts[threadID.hostID, default: 0]))
-                    results.append(contentsOf: admitted); resultCounts[threadID.hostID, default: 0] += admitted.count
-                } catch is CancellationError { return }
-                catch { unavailableHosts.insert(threadID.hostID) }
-                continue
-            }
-            unavailableHosts.insert(threadID.hostID)
+            guard routeIsCurrent else { markUnavailable(threadID.hostID); continue }
+            let sessionID = route.source.sessionID
+            guard let host = uniqueIngestionHosts(sessionID: sessionID).first(where: { $0.threads[threadID] != nil }),
+                  let connection = host.connection, !connection.isClosed else { paged.append((threadID, route)); continue }
+            let key = ObjectIdentifier(host)
+            if grouped[key] == nil { hosts.append(key); grouped[key] = (host, connection, sessionID, []) }
+            grouped[key]?.threads.append((threadID, route))
         }
-        guard !Task.isCancelled, isEnabled, searchGeneration == generation, applicationActive, hasSurfaceDemand else { return }
-        await bridge.applySearch(.init(results: results, unavailableHostIDs: Array(unavailableHosts)))
+        var hostPaged: [(AgentThreadID, AppleAgentProjectionRoute)] = []
+        for key in hosts {
+            guard wanted() else { return }
+            guard let group = grouped[key], let hostID = group.threads.first?.0.hostID else { continue }
+            if resultCounts[hostID, default: 0] >= 100 { continue }
+            let remaining = ContinuousClock.now.duration(to: deadline)
+            guard remaining > .zero else { markUnavailable(hostID); continue }
+            let accepted = AgentSearchAccepted()
+            do {
+                let admitted = resultCounts[hostID, default: 0]
+                let earlier = results
+                // The outer bound only covers reaching the host: the search
+                // itself stops in time and keeps what it found.
+                let found = try await AppleAgentIngestionConnection.withSearchDeadline(remaining + .seconds(2)) { [self] in
+                    try await searchHost(group.threads, host: group.host, connection: group.connection, sessionID: group.sessionID,
+                                         query: needle, admitted: admitted, remaining: remaining, accepted: accepted,
+                                         progress: { [self] hostFound in
+                                             await publishInterimSearch(shown: shown, loaded: loaded, found: earlier + hostFound,
+                                                                        generation: generation)
+                                         })
+                }
+                guard wanted() else { return }
+                results.append(contentsOf: found.results); resultCounts[hostID, default: 0] += found.results.count
+                hostPaged.append(contentsOf: found.paged)
+                if !found.complete { markUnavailable(hostID) }
+            } catch {
+                // A connection closed under the search fails it with a
+                // cancellation of its own: only this search's ends it. What
+                // the host found before it stopped still shows.
+                guard wanted() else { return }
+                results.append(contentsOf: accepted.results); resultCounts[hostID, default: 0] += accepted.results.count
+                markUnavailable(hostID)
+            }
+        }
+        paged = hostPaged + paged
+        for (threadID, route) in paged {
+            guard wanted() else { return }
+            if resultCounts[threadID.hostID, default: 0] >= 100 { continue }
+            let remaining = ContinuousClock.now.duration(to: deadline)
+            guard remaining > .zero else { markUnavailable(threadID.hostID); continue }
+            do {
+                let matches = try await searchNativeProvider(threadID: threadID, route: route, query: needle, remaining: remaining)
+                guard wanted() else { return }
+                guard isSearchRouteCurrent(route, threadID: threadID) else {
+                    markUnavailable(threadID.hostID); continue
+                }
+                let admitted = matches.prefix(max(0, 100 - resultCounts[threadID.hostID, default: 0]))
+                results.append(contentsOf: admitted); resultCounts[threadID.hostID, default: 0] += admitted.count
+                if !admitted.isEmpty { await publishInterimSearch(shown: shown, loaded: loaded, found: results, generation: generation) }
+            } catch {
+                guard wanted() else { return }
+                markUnavailable(threadID.hostID)
+            }
+        }
+        guard wanted() else { return }
+        await bridge.applySearch(.merging(loaded, results, unavailableHostIDs: unavailableHosts))
+        guard wanted() else { return }
         presentation.searchSnapshot = bridge.searchSnapshot
-        DiagnosticLogStore.appendAgentCenter("v2-search result=completed sources=\(routes.count) results=\(results.count) unavailableHosts=\(bridge.searchSnapshot.unavailableHostIDs.count)")
+        searchUnfinished = false
+        DiagnosticLogStore.appendAgentCenter("v2-search result=completed sources=\(routes.count) results=\(bridge.searchSnapshot.results.count) found=\(results.count) paged=\(paged.count) unavailableHosts=\(bridge.searchSnapshot.unavailableHostIDs.count)")
+    }
+
+    private func searchWanted(generation: UInt64) -> Bool {
+        !Task.isCancelled && isEnabled && searchGeneration == generation && applicationActive && hasSurfaceDemand
+    }
+
+    /// Rows found so far, after the ones shown when the search started.
+    private func publishInterimSearch(shown: AgentSearchSnapshot, loaded: [AgentSearchResult], found: [AgentSearchResult],
+                                      generation: UInt64) async {
+        guard searchWanted(generation: generation) else { return }
+        await bridge.applySearch(.merging(shown.results + loaded, found, unavailableHostIDs: shown.unavailableHostIDs))
+        guard searchWanted(generation: generation) else { return }
+        presentation.searchSnapshot = bridge.searchSnapshot
     }
 
     /// Registers an already-owned interactive session. This never connects a
@@ -966,6 +1185,10 @@ extension AgentCenterV2Coordinator {
                 scheduleProviderRegistryRefresh()
             }
             inventoryRetryTasks.removeValue(forKey: source.sessionID)?.cancel()
+            inventoryRerunRequests.remove(source.sessionID)
+            inventoryAskedConversations.removeValue(forKey: source.sessionID)
+            nativeInventoryWorked.removeValue(forKey: source.sessionID)
+            inventoryIncompleteRetried.remove(source.sessionID)
             let taskPrefix = "\(source.sessionID.uuidString):"
             inventoryRetryAfter = inventoryRetryAfter.filter { !$0.key.hasPrefix(taskPrefix) }
             for key in inventoryTasks.keys.filter({ $0.hasPrefix(taskPrefix) }) {
@@ -1010,6 +1233,10 @@ extension AgentCenterV2Coordinator {
         lifecycleDiagnosticOutcomes = lifecycleDiagnosticOutcomes.filter { !$0.key.hasPrefix("\(sessionID.uuidString):") }
         invalidateSessionRefresh(sessionID: sessionID)
         inventoryRetryTasks.removeValue(forKey: sessionID)?.cancel()
+        inventoryRerunRequests.remove(sessionID)
+        inventoryAskedConversations.removeValue(forKey: sessionID)
+        nativeInventoryWorked.removeValue(forKey: sessionID)
+        inventoryIncompleteRetried.remove(sessionID)
         inventoryRetryAfter = inventoryRetryAfter.filter { !$0.key.hasPrefix("\(sessionID.uuidString):") }
         inventoryTasks.keys.filter { $0.hasPrefix("\(sessionID.uuidString):") }.forEach {
             inventoryTasks.removeValue(forKey: $0)?.cancel()
@@ -1017,6 +1244,13 @@ extension AgentCenterV2Coordinator {
         lifecycleScanners = lifecycleScanners.filter { $0.key.sessionID != sessionID }
         clearSwipePadFocus(sessionID: sessionID)
         retireRoutes(forRegistrationID: registrationID, rememberingHostID: isEnabled ? route.hostID : nil)
+        // Its listings read through this session. Another one on the host
+        // lists them, and its live conversations, again; any one lists the
+        // whole host, preferably one whose last pass worked.
+        let others = sessionRoutes.filter { $0.value.hostID == route.hostID }.keys.sorted { $0.uuidString < $1.uuidString }
+        if let other = others.first(where: { nativeInventoryWorked[$0] == true }) ?? others.first {
+            startInventory(sessionID: other)
+        }
     }
 
     func noteOutput(
@@ -1127,6 +1361,27 @@ extension AgentCenterV2Coordinator {
         sessionRefreshTasks[sessionID] = Task { @MainActor [weak self] in
             await self?.runSessionRefreshWorker(sessionID: sessionID, taskID: taskID)
         }
+    }
+
+    /// A killed pane or window sends no lifecycle frame of its own, so its
+    /// disappearance asks for fresh occupancy proof. Only a complete window
+    /// list can show one is gone.
+    func noteTmuxTopology(_ snapshot: TmuxSnapshot, replacing previous: TmuxSnapshot?,
+                          sessionID: UUID, registrationID: UUID) {
+        guard let previous, previous.isWindowListHydrated, snapshot.isWindowListHydrated else { return }
+        let panes = Set(snapshot.windows.flatMap { $0.panes.map(\.id) })
+        guard previous.windows.contains(where: { $0.panes.contains { !panes.contains($0.id) } }) else { return }
+        noteTmuxPanesRemoved(sessionID: sessionID, registrationID: registrationID)
+    }
+
+    /// Topology is a reason to inspect, never proof that a process exited.
+    func noteTmuxPanesRemoved(sessionID: UUID, registrationID: UUID) {
+        guard isSessionRegistrationCurrent(sessionID, registrationID: registrationID),
+              threadRoutes.values.contains(where: {
+                  $0.registrationID == registrationID && $0.binding.liveSessionID == sessionID
+                      && $0.binding.agentPID != nil
+              }) else { return }
+        scheduleLivenessSweep(sessionID: sessionID)
     }
 
     private func invalidateSessionRefresh(sessionID: UUID) {
@@ -1493,6 +1748,18 @@ extension AgentCenterV2Coordinator {
                 else { return false }
                 continue
             }
+            // A conversation not held or listed here may have written a
+            // transcript the inventory has not listed. Ask at its first hook
+            // and again when its first turn ends, when its transcript exists;
+            // a refused hook repeats with every tool call.
+            if threadRoutes[threadID] == nil, historicalRoutes[threadID] == nil {
+                var asked = inventoryAskedConversations[sessionID] ?? []
+                if asked.count >= 1024 { asked.removeAll() }
+                let first = asked.insert("\(providerID.rawValue):\(event.providerSessionID)").inserted
+                let stop = ["Stop", "StopFailure", "SessionEnd"].contains(event.event) && asked.insert("\(providerID.rawValue):\(event.providerSessionID):stop").inserted
+                inventoryAskedConversations[sessionID] = asked
+                if first || stop { startInventory(sessionID: sessionID) }
+            }
             guard let envelope else { continue }
             lifecycleArrivalGeneration &+= 1
             let availability = availability(
@@ -1594,7 +1861,10 @@ extension AgentCenterV2Coordinator {
                 if projectionRoutes[threadID] == nil {
                     projectionTasks.removeValue(forKey: threadID)?.cancel()
                     projectionTaskIDs.removeValue(forKey: threadID)
+                    projectionStages.removeValue(forKey: threadID)
                     pendingProjectionRefreshes.remove(threadID)
+                    pendingSeekRequests.removeValue(forKey: threadID)
+                    presentation.abandonSearchLanding(threadID)
                     presentation.loadingTranscriptThreads.remove(threadID)
                 }
             }
@@ -1649,7 +1919,6 @@ extension AgentCenterV2Coordinator {
                     cursor: nil
                 )
             }
-            if hasSurfaceDemand { startInventory(sessionID: sessionID) }
         }
         await retireAbsentRoutes(
             registrationID: route.source.registrationID,
@@ -1756,13 +2025,20 @@ extension AgentCenterV2Coordinator {
         cancelLivePromptWatch(threadID)
         presentation.loadingTranscriptThreads.remove(threadID)
         projectionTaskIDs.removeValue(forKey: threadID)
+        projectionStages.removeValue(forKey: threadID)
         pendingProjectionRefreshes.remove(threadID)
         pendingHistoryRequests.remove(threadID)
         pendingFillRequests.remove(threadID)
         pendingLatestRequests.remove(threadID)
+        pendingSeekRequests.removeValue(forKey: threadID)
+        presentation.abandonSearchLanding(threadID)
         outgoingReceiptLeases.removeValue(forKey: threadID)
         projectionRoutes.removeValue(forKey: threadID)
         initialProjectionRoutes.removeValue(forKey: threadID)
+        // A live bind dropped its listing; only a pass lists it as history.
+        if sessionRoutes[route.location.sessionID]?.source.registrationID == route.registrationID {
+            startInventory(sessionID: route.location.sessionID)
+        }
         await invalidateAttentionIfPresent(for: threadID)
         await bridge.refresh(threadID, refreshList: false)
     }
@@ -1851,10 +2127,13 @@ extension AgentCenterV2Coordinator {
             cancelLivePromptWatch(threadID)
             if presentation.loadingTranscriptThreads.contains(threadID) { presentation.loadingTranscriptThreads.remove(threadID) }
             projectionTaskIDs.removeValue(forKey: threadID)
+            projectionStages.removeValue(forKey: threadID)
             pendingProjectionRefreshes.remove(threadID)
             pendingHistoryRequests.remove(threadID)
             pendingFillRequests.remove(threadID)
             pendingLatestRequests.remove(threadID)
+            pendingSeekRequests.removeValue(forKey: threadID)
+            presentation.abandonSearchLanding(threadID)
             outgoingReceiptLeases.removeValue(forKey: threadID)
             projectionRoutes.removeValue(forKey: threadID)
             initialProjectionRoutes.removeValue(forKey: threadID)
@@ -1899,16 +2178,16 @@ extension AgentCenterV2Coordinator {
                 else { throw AgentActionError.staleBinding }
                 // No settled frame (tmux moved the cursor mid-capture, a redraw
                 // was in flight, or a process probe missed). Callers may retry.
-                guard let target = await source.inspectInputTarget(location, expected.agentPID) else { throw AppleAgentInspectionUnavailable.capture }
+                guard let target = await AppleAgentPromptCapture.inspection(threadID.providerID, source)(location, expected.agentPID)
+                else { throw AppleAgentInspectionUnavailable.capture }
                 guard self.isCurrent(expected, threadID: threadID, registrationID: registrationID),
                       self.target(target, stillMatches: profile, binding: expected),
                       expected.agentPID.map(target.processIDs.contains) ?? true
                 else { throw AgentActionError.staleBinding }
-                let parsed = target.visibleText.flatMap { visible in
-                    AgentPromptObservationRequest(providerID: threadID.providerID,
-                        visibleText: AppleAgentPromptCapture.bottomWholeRows(visible),
-                        currentCursorLine: target.currentInputLine.map { AppleAgentPromptCapture.utf8Prefix($0, limit: 2_048) })
-                }.flatMap(AgentPromptGrammar.observe)
+                let promptRequest = AppleAgentPromptCapture.request(threadID.providerID, target)
+                // A dialog whose question scrolled off still blocks the
+                // composer; only its thread's waiting call lets it answer.
+                let parsed = promptRequest.flatMap { AgentPromptGrammar.observe($0, allowingCroppedTop: true) }
                 return AppleAgentTerminalInspection(
                     observation: AgentTerminalObservation(
                         binding: expected,
@@ -1921,6 +2200,7 @@ extension AgentCenterV2Coordinator {
                         }
                     ),
                     promptScreen: parsed,
+                    promptRequest: promptRequest,
                     composerText: target.currentInputLine,
                     queueSupported: true,
                     composerRow: target.cursorRow,
@@ -1952,6 +2232,11 @@ extension AgentCenterV2Coordinator {
                 if let refusal = source.sendRefusal?(location, Array(bytes)) {
                     throw AppleAgentSendNotWritten(error: refusal == "empty" ? .unavailable : .staleBinding,
                         reason: "transport-\(refusal)", attempts: 0, shape: nil)
+                }
+                // An answer's last admission: a prompt transition Core accepted
+                // since its check stops the bytes here, before they go.
+                if let commit = inspection.commitWrite, !commit() {
+                    throw AppleAgentSendNotWritten(error: .stalePrompt, reason: "prompt-changed", attempts: 0, shape: nil)
                 }
                 return await source.send(location, Array(bytes))
             },
@@ -2038,19 +2323,24 @@ extension AgentCenterV2Coordinator {
         threadID: AgentThreadID,
         binding: AgentTerminalBinding,
         source: AgentSessionSource,
-        cursor: String?, nativeDirection: String = "before"
+        cursor: String?, nativeDirection: String = "before", seek: AgentSearchResult? = nil
     ) {
         guard AgentCenterV2ReadPolicy.allows(
             isEnabled: isEnabled,
             applicationActive: applicationActive,
             hasSurfaceDemand: hasSurfaceDemand
-        ), !ingestionManualReadThreads.contains(threadID), ingestionReadRetryTasks[threadID] == nil else { return }
-        if cursor == nil, nativeDirection != "bootstrap", initialPrefetchTasks[threadID]?.isCancelled == false { return }
+        ), !ingestionManualReadThreads.contains(threadID), ingestionReadRetryTasks[threadID] == nil else {
+            if let seek { presentation.abandonSearchLanding(threadID, recordID: seek.recordID) }
+            return
+        }
+        if cursor == nil, nativeDirection != "bootstrap", nativeDirection != "seek",
+           initialPrefetchTasks[threadID]?.isCancelled == false { return }
         // A newest-page refresh must let its bounded in-flight read finish.
         // Source retirement cancels the old task separately; repeatedly
         // replacing it on terminal output can otherwise starve projection.
         if projectionTasks[threadID] != nil || outgoingReceiptLeases[threadID] != nil {
             if nativeDirection == "bootstrap" { pendingLatestRequests.insert(threadID) }
+            else if let seek { pendingSeekRequests[threadID] = seek }
             else if cursor == nil { pendingProjectionRefreshes.insert(threadID) }
             else if nativeDirection == "before" { pendingHistoryRequests.insert(threadID) }
             return
@@ -2065,32 +2355,55 @@ extension AgentCenterV2Coordinator {
         let registrationID = source.registrationID
         let taskID = UUID()
         projectionTaskIDs[threadID] = taskID
-        if cursor != nil || presentation.threadSnapshots[threadID]?.messages.isEmpty != false {
+        projectionStages[threadID] = "queued"
+        if cursor != nil || nativeDirection == "seek" || presentation.threadSnapshots[threadID]?.messages.isEmpty != false {
             if !presentation.loadingTranscriptThreads.contains(threadID) { presentation.loadingTranscriptThreads.insert(threadID) }
         }
+        // A read that outlasts these marks logs where it waits.
+        let slowRead = Task { @MainActor [weak self] in
+            for (mark, wait) in [(5, 5), (30, 25)] {
+                do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+                guard let self, AgentCenterV2TaskOwnership.owns(currentTaskID: self.projectionTaskIDs[threadID], taskID: taskID) else { return }
+                DiagnosticLogStore.appendAgentCenter(
+                    "v2-project slow seconds=\(mark) stage=\(self.projectionStages[threadID] ?? "none") provider=\(providerID.rawValue) direction=\(cursor == nil && nativeDirection == "before" ? "latest" : nativeDirection) loading=\(self.presentation.loadingTranscriptThreads.contains(threadID)) prefetch=\(self.initialPrefetchTasks[threadID] != nil)"
+                )
+            }
+        }
         projectionTasks[threadID] = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self else { slowRead.cancel(); return }
             let started = Date()
             defer {
+                slowRead.cancel()
                 self.performanceDiagnostics.record(cursor == nil ? "refresh" : "history", since: started)
                 if AgentCenterV2TaskOwnership.owns(
                     currentTaskID: self.projectionTaskIDs[threadID], taskID: taskID
                 ) {
                     self.projectionTasks.removeValue(forKey: threadID)
                     self.projectionTaskIDs.removeValue(forKey: threadID)
+                    self.projectionStages.removeValue(forKey: threadID)
                     if self.presentation.loadingTranscriptThreads.contains(threadID) { self.presentation.loadingTranscriptThreads.remove(threadID) }
-                    if self.pendingLatestRequests.remove(threadID) != nil, !Task.isCancelled {
+                    let queuedSeek = self.pendingSeekRequests.removeValue(forKey: threadID)
+                    // A read that ended short of the match opens at the newest
+                    // page, as does a queued match a cancelled read won't replay.
+                    for ended in [queuedSeek == nil ? seek : nil, Task.isCancelled ? queuedSeek : nil].compactMap({ $0 }) {
+                        self.presentation.abandonSearchLanding(threadID, recordID: ended.recordID)
+                    }
+                    if let queuedSeek, !Task.isCancelled { self.requestSeek(queuedSeek, replayed: true) }
+                    // A match that needs no read leaves navigation queued
+                    // after it (the newest page chosen over it) to run.
+                    let idle = !Task.isCancelled && self.projectionTasks[threadID] == nil && self.pendingSeekRequests[threadID] == nil
+                    if idle, self.pendingLatestRequests.remove(threadID) != nil {
                         self.pendingHistoryRequests.remove(threadID)
                         self.pendingProjectionRefreshes.remove(threadID)
                         self.requestNewerPage(threadID, latest: true)
-                    } else if self.pendingHistoryRequests.remove(threadID) != nil, !Task.isCancelled {
+                    } else if idle, self.pendingHistoryRequests.remove(threadID) != nil {
                         self.requestOlderPage(threadID)
-                    } else if self.pendingProjectionRefreshes.remove(threadID) != nil, !Task.isCancelled {
+                    } else if idle, self.pendingProjectionRefreshes.remove(threadID) != nil {
                         self.project(
                             transcriptRef: transcriptRef, providerID: providerID,
                             threadID: threadID, binding: binding, source: source, cursor: nil
                         )
-                    } else if self.pendingFillRequests.remove(threadID) != nil, !Task.isCancelled {
+                    } else if idle, self.pendingFillRequests.remove(threadID) != nil {
                         self.requestOlderPage(threadID, fill: true)
                     }
                 }
@@ -2104,15 +2417,18 @@ extension AgentCenterV2Coordinator {
             }
             // Wait only for canceled optional work to release its local window
             // ownership. Its unanswered read is canceled independently.
+            self.noteProjectionStage(threadID, taskID: taskID, "prefetch-join")
             await cancelledPrefetch?.value
+            self.noteProjectionStage(threadID, taskID: taskID, "started")
             guard !Task.isCancelled else { return }
             guard case .available(let factory) = source.projectorExecAvailability(binding, isCurrent) else { return }
             do {
                 if [.codex, .claude, .pi, .opencode, .kimi].contains(providerID) {
-                    try await self.projectNative(transcriptRef: transcriptRef, providerID: providerID,
-                        threadID: threadID, binding: binding, source: source, cursor: cursor, direction: nativeDirection)
-                    if cursor == nil,
-                       let route = self.projectionRoutes[threadID],
+                    // A page read around a row (a match, the reader's place)
+                    // is not the newest page older history prefetches from.
+                    let apart = try await self.projectNative(transcriptRef: transcriptRef, providerID: providerID,
+                        threadID: threadID, binding: binding, source: source, cursor: cursor, direction: nativeDirection, seek: seek)
+                    if cursor == nil, !apart, let route = self.projectionRoutes[threadID],
                        let connection = self.ingestionHosts[AppleAgentIngestionHostKey(sessionID: source.sessionID, binding: binding)]?.connection {
                         self.scheduleInitialPrefetch(threadID: threadID, route: route, nativeConnection: connection)
                     }
@@ -2130,6 +2446,7 @@ extension AgentCenterV2Coordinator {
                         limitBytes: AgentProjectionRequest.maximumBytes,
                         limitRecords: AgentProjectionRequest.maximumRecords,
                         continuationCursor: cursor == nil ? initialSnapshot?.cursor : nil) else { return }
+                self.noteProjectionStage(threadID, taskID: taskID, "project-stream")
                 for try await page in try await channel.project(request) {
                     guard !Task.isCancelled,
                           self.isProjectionEndpointCurrent(binding, threadID: threadID, registrationID: registrationID),
@@ -2175,7 +2492,8 @@ extension AgentCenterV2Coordinator {
                     self.ingestionManualReadThreads.insert(threadID)
                 }
                 if self.presentation.ingestionReadStatuses[threadID]?.recovery == .retryRead {
-                    self.ingestionRetryPageRequests[threadID] = (cursor, nativeDirection)
+                    // A retried seek has lost its landing; it reads the newest page.
+                    self.ingestionRetryPageRequests[threadID] = (cursor, seek == nil ? nativeDirection : "before")
                 }
                 DiagnosticLogStore.appendAgentCenter(
                     "v2-project result=failed provider=\(providerID.rawValue) older=\(cursor != nil) reason=\(Self.projectionFailureReason(error))"
@@ -2187,7 +2505,25 @@ extension AgentCenterV2Coordinator {
         }
     }
 
-    func startInventory(sessionID: UUID) {
+    /// The sessions whose native pass lists their host. Any one session's
+    /// pass lists the whole host; each other session on it would walk the
+    /// host again. A session that has not finished a pass still runs its own,
+    /// since that pass also proves its Tier-C providers, and the host's lister
+    /// is a session whose last pass worked: one with a dropped carrier would
+    /// fail every time while a working tab on the host stayed unasked.
+    func nativeInventoryListers() -> Set<UUID> {
+        var listers = Set<UUID>()
+        let hosts = Dictionary(grouping: sessionRoutes.keys.sorted { $0.uuidString < $1.uuidString }) { sessionRoutes[$0]!.hostID }
+        for sessions in hosts.values {
+            let unfinished = sessions.filter { nativeInventoryWorked[$0] == nil }
+            listers.formUnion(unfinished)
+            if let worked = sessions.first(where: { nativeInventoryWorked[$0] == true }) { listers.insert(worked) }
+            else if unfinished.isEmpty, let first = sessions.first { listers.insert(first) }
+        }
+        return listers
+    }
+
+    func startInventory(sessionID: UUID, native: Bool = true) {
         guard AgentCenterV2ReadPolicy.allows(
             isEnabled: isEnabled,
             applicationActive: applicationActive,
@@ -2208,7 +2544,7 @@ extension AgentCenterV2Coordinator {
         // projector routes fail closed when the CLI, schema, hook install, or
         // RPC wire does not match; only a clean completed inventory enables
         // the manifest for this authenticated session.
-        startNativeInventory(sessionID: sessionID)
+        if native { startNativeInventory(sessionID: sessionID) }
         let providers = AgentProviderRegistry.builtIn.allManifests.filter { ![.custom, .codex, .claude, .pi, .opencode, .kimi].contains($0.id) }
         for provider in providers {
             let taskKey = "\(sessionID.uuidString):\(provider.id.rawValue)"
@@ -2337,7 +2673,7 @@ extension AgentCenterV2Coordinator {
                         await self.markProviderConforming(provider.id, sessionID: sessionID)
                     }
                     await self.synchronizePresentation()
-                    if inventoryChanged,
+                    if inventoryChanged || self.searchAwaitsRerun,
                        !self.presentation.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                        self.isEnabled,
                        self.applicationActive,
@@ -2381,9 +2717,17 @@ extension AgentCenterV2Coordinator {
                   let sessionID = object["sessionID"]?.stringValue,
                   let handle = object["thread"]?.stringValue, AgentIngestionRange.identifier(handle),
                   let path = object["transcriptRef"]?.stringValue,
-                  path.hasPrefix("/") || (path.isEmpty && [.codex, .opencode].contains(provider.id) && object["nativeSessionID"]?.stringValue == sessionID),
-                  let thread = AgentThreadID(hostID: session.hostID, providerID: provider.id, providerSessionID: sessionID),
-                  seen.insert(thread).inserted else { throw AgentIngestionError.malformedFrame }
+                  path.hasPrefix("/") || (path.isEmpty && [.codex, .opencode].contains(provider.id) && object["nativeSessionID"]?.stringValue == sessionID)
+            else { throw AgentIngestionError.malformedFrame }
+            // A session ID no thread can carry (a control character in a
+            // file name) is that row's problem: failing the page failed the
+            // pass, which retried every 10 s and listed nothing past it.
+            guard let thread = AgentThreadID(hostID: session.hostID, providerID: provider.id, providerSessionID: sessionID)
+            else { continue }
+            // Two rows for one thread (a session ID differing only by
+            // surrounding space, or one rollout in two directories): keep the
+            // first rather than fail the page for good.
+            guard seen.insert(thread).inserted else { continue }
             try validateNativeThreadClaim(thread, host: host)
             let locator = path.isEmpty ? "native:" + sessionID : Data(path.utf8).base64EncodedString()
                 .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
@@ -2421,6 +2765,9 @@ extension AgentCenterV2Coordinator {
     func cancelInventoryRetries() {
         inventoryRetryTasks.values.forEach { $0.cancel() }
         inventoryRetryTasks.removeAll()
+        inventoryRerunRequests.removeAll()
+        inventoryAskedConversations.removeAll()
+        inventoryIncompleteRetried.removeAll()
     }
 
     /// A quiet shell emits no output after a failed inventory. Keep exactly
@@ -2445,12 +2792,16 @@ extension AgentCenterV2Coordinator {
     private func startNativeInventory(sessionID: UUID) {
         guard let session = sessionRoutes[sessionID] else { return }
         let key = "\(sessionID.uuidString):native"
-        guard inventoryTasks[key] == nil else { return }
+        guard inventoryTasks[key] == nil else {
+            inventoryRerunRequests.insert(sessionID)
+            return
+        }
         guard inventoryRetryAfter[key].map({ $0 <= Date() }) ?? true else {
             scheduleInventoryRetry(sessionID: sessionID, registrationID: session.source.registrationID)
             return
         }
         inventoryRetryTasks.removeValue(forKey: sessionID)?.cancel()
+        inventoryRerunRequests.remove(sessionID)
         inventoryRetryAfter[key] = Date().addingTimeInterval(10)
         let taskID = UUID()
         inventoryTaskIDs[key] = taskID
@@ -2460,7 +2811,8 @@ extension AgentCenterV2Coordinator {
             defer {
                 if self.inventoryTaskIDs[key] == taskID {
                     self.inventoryTasks.removeValue(forKey: key); self.inventoryTaskIDs.removeValue(forKey: key)
-                    if !completed, !Task.isCancelled {
+                    let rerun = self.inventoryRerunRequests.remove(sessionID) != nil
+                    if !completed || rerun, !Task.isCancelled {
                         self.scheduleInventoryRetry(sessionID: sessionID, registrationID: session.source.registrationID)
                     }
                 }
@@ -2484,7 +2836,21 @@ extension AgentCenterV2Coordinator {
                     guard applied else { return }
                     await self.synchronizePresentation()
                     self.scheduleNativeInterests()
-                    guard reply.object["hasMore"]?.boolValue == true else { completed = true; return }
+                    guard reply.object["hasMore"]?.boolValue == true else {
+                        self.nativeInventoryWorked[sessionID] = true
+                        // The host skipped a source still being written: one
+                        // retry lists it once written. Only one: a source the
+                        // host cannot read while its agent keeps writing ends
+                        // every pass incomplete.
+                        let incomplete = reply.object["incomplete"]?.boolValue == true
+                        let retried = self.inventoryIncompleteRetried.remove(sessionID) != nil
+                        completed = !incomplete || retried
+                        if !completed {
+                            self.inventoryIncompleteRetried.insert(sessionID)
+                            DiagnosticLogStore.appendAgentCenter("v2-native-inventory result=incomplete")
+                        }
+                        return
+                    }
                     guard let next = reply.object["cursor"]?.stringValue, seen.insert(next).inserted else {
                         throw AgentIngestionError.malformedFrame
                     }
@@ -2492,7 +2858,10 @@ extension AgentCenterV2Coordinator {
                 }
                 throw AgentIngestionError.capacityExceeded
             } catch is CancellationError { return }
-            catch { DiagnosticLogStore.appendAgentCenter("v2-native-inventory result=failed failureType=\(String(describing: type(of: error))) reason=\(Self.projectionFailureReason(error))") }
+            catch {
+                if self.inventoryTaskIDs[key] == taskID { self.nativeInventoryWorked[sessionID] = false }
+                DiagnosticLogStore.appendAgentCenter("v2-native-inventory result=failed failureType=\(String(describing: type(of: error))) reason=\(Self.projectionFailureReason(error))")
+            }
         }
     }
 
@@ -2558,10 +2927,13 @@ extension AgentCenterV2Coordinator {
             projectionTasks.removeValue(forKey: threadID)?.cancel()
             if presentation.loadingTranscriptThreads.contains(threadID) { presentation.loadingTranscriptThreads.remove(threadID) }
             projectionTaskIDs.removeValue(forKey: threadID)
+            projectionStages.removeValue(forKey: threadID)
             pendingProjectionRefreshes.remove(threadID)
             pendingHistoryRequests.remove(threadID)
             pendingFillRequests.remove(threadID)
             pendingLatestRequests.remove(threadID)
+            pendingSeekRequests.removeValue(forKey: threadID)
+            presentation.abandonSearchLanding(threadID)
             await bridge.retireProjection(for: threadID)
         }
 
@@ -2635,16 +3007,22 @@ extension AgentCenterV2Coordinator {
         defer {
             if outgoingReceiptLeases[threadID] == lease.token {
                 outgoingReceiptLeases.removeValue(forKey: threadID)
+                if Task.isCancelled, let seek = pendingSeekRequests.removeValue(forKey: threadID) {
+                    presentation.abandonSearchLanding(threadID, recordID: seek.recordID)
+                }
                 if !Task.isCancelled {
-                    if pendingLatestRequests.remove(threadID) != nil {
+                    // No read ran for a match queued behind the receipt.
+                    if let seek = pendingSeekRequests.removeValue(forKey: threadID) { requestSeek(seek) }
+                    let idle = projectionTasks[threadID] == nil && pendingSeekRequests[threadID] == nil
+                    if idle, pendingLatestRequests.remove(threadID) != nil {
                         pendingHistoryRequests.remove(threadID)
                         pendingProjectionRefreshes.remove(threadID)
                         requestNewerPage(threadID, latest: true)
-                    } else if pendingHistoryRequests.remove(threadID) != nil {
+                    } else if idle, pendingHistoryRequests.remove(threadID) != nil {
                         requestOlderPage(threadID)
-                    } else if pendingProjectionRefreshes.remove(threadID) != nil {
+                    } else if idle, pendingProjectionRefreshes.remove(threadID) != nil {
                         refreshVisibleTranscript(threadID)
-                    } else if pendingFillRequests.remove(threadID) != nil {
+                    } else if idle, pendingFillRequests.remove(threadID) != nil {
                         requestOlderPage(threadID, fill: true)
                     }
                 }
@@ -2803,6 +3181,206 @@ extension AgentCenterV2Coordinator {
             source: route.source, cursor: latest ? nil : window?.after, nativeDirection: latest ? "bootstrap" : "after")
     }
 
+    /// A tapped result is marked in the same turn its open is decided, and
+    /// only while its thread is still the one selected.
+    func openSearchResult(_ result: AgentSearchResult) {
+        guard presentation.beginSearchLanding(result) else { return }
+        // The match supersedes navigation queued before it, and the place.
+        readerPlaces.removeValue(forKey: result.threadID)
+        pendingLatestRequests.remove(result.threadID)
+        pendingHistoryRequests.remove(result.threadID)
+        pendingFillRequests.remove(result.threadID)
+        requestSeek(result)
+    }
+
+    /// Opens a search match where it lies, for as long as the reader waits on
+    /// it. A read in flight may still move the window, so the match waits for
+    /// its end (the open read's, or a receipt's) and is checked again. A match
+    /// loaded by then needs no read; otherwise the host reads the page around
+    /// it from the live cursor (`window.seek.v1`), opening the thread first
+    /// if it has no window yet. A provider that cannot seek opens an empty
+    /// thread at its newest page, which may hold the match. A refused or
+    /// unreadable match leaves the thread at its newest page. `replayed`
+    /// marks the check after this match's own newest-page read.
+    func requestSeek(_ result: AgentSearchResult, replayed: Bool = false) {
+        let threadID = result.threadID
+        pendingSeekRequests.removeValue(forKey: threadID)
+        guard let landing = presentation.searchLanding, landing.threadID == threadID,
+              landing.recordID == result.recordID else { return }
+        guard projectionTasks[threadID] == nil, outgoingReceiptLeases[threadID] == nil else {
+            pendingSeekRequests[threadID] = result
+            // The read in flight may replace the rows on screen; the detail
+            // lands only once it ends (its end clears this).
+            if projectionTasks[threadID] != nil, !presentation.loadingTranscriptThreads.contains(threadID) {
+                presentation.loadingTranscriptThreads.insert(threadID)
+            }
+            return
+        }
+        let messages = presentation.threadSnapshots[threadID]?.messages ?? []
+        let route = projectionRoutes[threadID] ?? historicalRoutes[threadID] ?? initialProjectionRoutes[threadID]
+        // Rows no host holds open are an earlier window's, which the next
+        // read replaces: a match among them is read again.
+        let stale = !messages.isEmpty && Self.readsNatively(threadID.providerID) && !(route.map { route in
+            uniqueIngestionHosts(sessionID: route.source.sessionID).contains { $0.bootstrapped.contains(threadID) }
+        } ?? false)
+        guard stale || !messages.contains(where: { $0.recordID == result.recordID }) else { return }
+        let seeks = result.sequence != nil && Self.seeksNatively(threadID.providerID)
+        guard seeks || ((messages.isEmpty || stale) && !replayed),
+              AgentCenterV2ReadPolicy.allows(isEnabled: isEnabled, applicationActive: applicationActive,
+                  hasSurfaceDemand: hasSurfaceDemand),
+              let route,
+              isProjectionEndpointCurrent(route.binding, threadID: threadID, registrationID: route.source.registrationID) else {
+            presentation.abandonSearchLanding(threadID, recordID: result.recordID)
+            return
+        }
+        cancelInitialPrefetch(threadID)
+        clearNativeReadFailure(threadID)
+        // The match's read replaces the window any queued navigation was for.
+        pendingLatestRequests.remove(threadID)
+        pendingHistoryRequests.remove(threadID)
+        pendingFillRequests.remove(threadID)
+        project(transcriptRef: route.transcriptRef, providerID: route.providerID, threadID: threadID, binding: route.binding,
+            source: route.source, cursor: nil, nativeDirection: seeks ? "seek" : "before", seek: seeks ? result : nil)
+        if !seeks {
+            // The newest page's end checks it once more.
+            if projectionTasks[threadID] != nil { pendingSeekRequests[threadID] = result }
+            else { presentation.abandonSearchLanding(threadID, recordID: result.recordID) }
+        }
+    }
+
+    /// Where a read that opens the selected thread on a connection with no
+    /// window for it (the app was away, the connection dropped) opens a
+    /// reader who was in history: the page around the row their view starts
+    /// at, landed there unmarked. A place kept from an interrupted read
+    /// comes first (`readerPlaces`); Core knows it only until the newest page
+    /// replaces its window. A reader following the newest page, or one the
+    /// newest page or a match is already opening for, has none.
+    private func readerPlace(_ threadID: AgentThreadID) async -> AgentSearchResult? {
+        func open() -> Bool {
+            !Task.isCancelled && applicationActive && presentation.selectedThreadID == threadID
+                && presentation.searchLanding?.threadID != threadID && !pendingLatestRequests.contains(threadID)
+                && !readerPlacesGivenUp.contains(threadID)
+        }
+        guard open() else { return nil }
+        var place = readerPlaces[threadID]
+        if place == nil, presentation.threadSnapshots[threadID]?.ingestionWindow != nil {
+            place = await runtime.ingestionReaderPlace(for: threadID)
+        }
+        guard let place, open(), presentation.beginSearchLanding(place, marked: false) else { return nil }
+        readerPlaces[threadID] = place
+        if !presentation.loadingTranscriptThreads.contains(threadID) { presentation.loadingTranscriptThreads.insert(threadID) }
+        return place
+    }
+
+    /// Opens a notification's conversation at its newest reply, unless a
+    /// window on a live connection still shows the reader's place there: a
+    /// notification never waits on a read of that place (`readerPlace`). A
+    /// place read already under way shows the newest page it read first.
+    func openNotificationThread(_ threadID: AgentThreadID) async {
+        let shown = uniqueIngestionHosts().contains { $0.connection?.isClosed == false && $0.bootstrapped.contains(threadID) }
+        guard !shown || readerPlaces[threadID] != nil else { return }
+        readerPlacesGivenUp.insert(threadID)
+        readerPlaces.removeValue(forKey: threadID)
+        presentation.requestLatestOpening(threadID)
+        if let landing = presentation.searchLanding, landing.threadID == threadID, !landing.marked {
+            presentation.dropSearchLanding(threadID)
+            if let hold = presentationHolds[threadID] {
+                releasePresentationHold(threadID, hold, shows: true)
+                // The newest page shows; the seek's reply, dropped, is not waited on.
+                if shown { presentation.loadingTranscriptThreads.remove(threadID) }
+            }
+        }
+        await runtime.setIngestionViewportAnchor(nil, for: threadID)
+    }
+
+    /// OpenCode orders count from wherever a read began, so no seek lands
+    /// there; the host refuses it too.
+    private static func seeksNatively(_ providerID: AgentProviderID) -> Bool {
+        [.codex, .claude, .pi, .kimi].contains(providerID)
+    }
+
+    private static func readsNatively(_ providerID: AgentProviderID) -> Bool {
+        [.codex, .claude, .pi, .opencode, .kimi].contains(providerID)
+    }
+
+    /// How a seek ended: its page applied for the reader still waiting on
+    /// it, refused or left (`ended`), or cut off with its connection.
+    enum NativeSeekOutcome { case landed, ended, interrupted }
+
+    /// Reads the page around a match, from the live cursor, into a viewport
+    /// apart from the head. A refusal (the record moved, a source that cannot
+    /// seek, a cursor the head moved past) opens the thread at its newest
+    /// page.
+    private func seekNative(_ target: AgentSearchResult, handle: String, host: AppleAgentIngestionHost,
+                            connection: AppleAgentIngestionConnection, binding: AgentTerminalBinding,
+                            source: AgentSessionSource) async throws -> NativeSeekOutcome {
+        let threadID = target.threadID
+        // A reader who left the match (another thread, the newest page)
+        // keeps the window they chose.
+        var landingID = target.recordID
+        // Not a [weak self] closure: Swift 6.4 reads self as nil in one that
+        // also captures a mutated local.
+        func awaited() -> Bool {
+            presentation.searchLanding.map { $0.threadID == threadID && $0.recordID == landingID } == true
+        }
+        guard awaited(), let order = target.sequence,
+              let window = await runtime.ingestionWindowSnapshot(for: threadID), let live = window.liveCursor else { return .ended }
+        var fields: [String: AgentJSONValue] = ["kind": .string("window.read"), "operation": .string("seek"),
+            "thread": .string(handle), "windowVersion": .number(Decimal(window.version)), "cursor": .string(live),
+            // The record ID names the generation the order counts in.
+            "order": .number(Decimal(order)), "recordID": .string(target.recordID)]
+        if let offset = target.sourceOffset { fields["sourceOffset"] = .number(Decimal(offset)) }
+        if let token = target.seekToken { fields["seekToken"] = .string(token) }
+        var limit = 100
+        do {
+            while true {
+                fields["limit"] = .number(Decimal(limit))
+                let reply = try await connection.request(fields)
+                guard !Task.isCancelled, isNativeHostCurrent(host, sessionID: source.sessionID),
+                      isProjectionEndpointCurrent(binding, threadID: threadID, registrationID: source.registrationID),
+                      let page = reply.page else { throw AgentActionError.staleBinding }
+                guard awaited() else {
+                    if let transaction = page.ingestion?.requestID { try? await connection.cancelWindow(transaction, thread: handle) }
+                    DiagnosticLogStore.appendAgentCenter("v2-seek result=dropped provider=\(threadID.providerID.rawValue)")
+                    return .ended
+                }
+                let applied = await apply(page: page, to: threadID)
+                if !applied.accepted {
+                    if let transaction = page.ingestion?.requestID { try? await connection.cancelWindow(transaction, thread: handle) }
+                    guard applied == .capacityExceeded, limit > 4 else { throw AgentIngestionError.remote("seekRejected") }
+                    limit /= 2; continue
+                }
+                guard isNativeHostCurrent(host, sessionID: source.sessionID),
+                      isProjectionEndpointCurrent(binding, threadID: threadID, registrationID: source.registrationID),
+                      let committed = await runtime.ingestionWindowSnapshot(for: threadID) else { throw AgentActionError.staleBinding }
+                try await connection.acknowledgeWindow(page, thread: handle, snapshot: committed)
+                // An index the host rebuilt since the search (its cache
+                // evicted it) numbers the same record under a new ID.
+                if let landed = page.records.first(where: { $0.sequence == order })?.recordID, landed != landingID,
+                   presentation.retargetSearchLanding(threadID, from: landingID, to: landed) { landingID = landed }
+                // Core clears the anchor with the old viewport; a head that
+                // rolls before the reader lands keeps the match. A reader who
+                // left it while the page applied goes back to the newest page;
+                // one who tapped another match here lands there instead.
+                if awaited() { await runtime.setIngestionViewportAnchor(landingID, for: threadID); return .landed }
+                if presentation.searchLanding?.threadID != threadID { pendingLatestRequests.insert(threadID) }
+                return .ended
+            }
+        } catch {
+            DiagnosticLogStore.appendAgentCenter(
+                "v2-seek result=refused provider=\(threadID.providerID.rawValue) reason=\(Self.projectionFailureReason(error))")
+            if error is CancellationError || error as? AgentActionError == .staleBinding { throw error }
+            // The connection went, not the record: the next connection tries again.
+            if connection.isClosed || !isNativeHostCurrent(host, sessionID: source.sessionID) { return .interrupted }
+            // Even from another match's page; the read's end reads it. Core's
+            // window, since a held detail still shows the rows before.
+            if awaited(), await runtime.ingestionWindowSnapshot(for: threadID)?.atLiveHead == false {
+                pendingLatestRequests.insert(threadID)
+            }
+            return .ended
+        }
+    }
+
     func cancelLivePromptWatch(_ threadID: AgentThreadID) {
         livePromptWatchTasks.removeValue(forKey: threadID)?.task.cancel()
         livePromptLifecycleSequences.removeValue(forKey: threadID)
@@ -2853,7 +3431,8 @@ extension AgentCenterV2Coordinator {
                 if sequence != nil || generation != nil,
                    let source = self.sessionRoutes[route.binding.liveSessionID]?.source,
                    source.registrationID == route.registrationID {
-                    var inspected = await source.inspectInputTarget(route.location, route.binding.agentPID)
+                    let inspect = AppleAgentPromptCapture.inspection(threadID.providerID, source)
+                    var inspected = await inspect(route.location, route.binding.agentPID)
                     if inspected?.visibleText == nil {
                         try? await Task.sleep(for: .milliseconds(150))
                         guard !Task.isCancelled,
@@ -2861,7 +3440,7 @@ extension AgentCenterV2Coordinator {
                             exit = "superseded"
                             break
                         }
-                        inspected = await source.inspectInputTarget(route.location, route.binding.agentPID)
+                        inspected = await inspect(route.location, route.binding.agentPID)
                     }
                     outcome = inspected == nil ? "inspect-failed"
                         : inspected.map { self.target($0, stillMatches: route.profile, binding: route.binding) } == false ? "target-moved"
@@ -2869,10 +3448,7 @@ extension AgentCenterV2Coordinator {
                     if !Task.isCancelled, let fresh = inspected,
                        self.isCurrent(route.binding, threadID: threadID, registrationID: route.registrationID),
                        self.target(fresh, stillMatches: route.profile, binding: route.binding),
-                       let visible = fresh.visibleText,
-                       let request = AgentPromptObservationRequest(providerID: threadID.providerID,
-                           visibleText: AppleAgentPromptCapture.bottomWholeRows(visible),
-                           currentCursorLine: fresh.currentInputLine.map { AppleAgentPromptCapture.utf8Prefix($0, limit: 2_048) }) {
+                       let request = AppleAgentPromptCapture.request(threadID.providerID, fresh) {
                         // The conversation can leave the screen while the capture runs.
                         let changed = await self.runtime.observeLivePrompt(request, threadID: threadID,
                             binding: route.binding, observedGeneration: generation, observedLifecycleSequence: sequence,
@@ -3133,7 +3709,7 @@ extension AgentCenterV2Coordinator {
               target.location == route.location,
               self.target(target, stillMatches: route.profile, binding: route.binding)
         else {
-            presentation.reportUnavailable("The original terminal is unavailable.")
+            presentation.reportUnavailable(String(localized: "The original terminal is unavailable."))
             return
         }
         onOpenExactTerminal?(route.binding)
@@ -3267,7 +3843,7 @@ extension AgentCenterV2Coordinator {
             rootAgentID: event.rootAgentID,
             eventSequence: arrivalSequence,
             sourceTimestampNanoseconds: event.timestampNanoseconds
-        )?.withInputHint(AgentLifecycleInputHint(reason: event.reason, event: kind))
+        )?.withInputHint(AgentLifecycleInputHint(reason: event.reason, event: kind), toolUseID: event.toolUseID)
     }
 
     private func coreStatus(_ status: AgentStatus, event: String) -> TesseraCore.AgentStatus {

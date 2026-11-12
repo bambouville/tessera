@@ -10,7 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bambouville.tessera.design.TesseraTheme
 import com.bambouville.tessera.feature.agentcenter.AgentComposerKeyboardFixture
@@ -72,7 +72,9 @@ class AgentComposerActionsInstrumentedTest {
         try {
             resolver.openOutputStream(file)!!.use { it.write("Tessera native attachment fixture\n".toByteArray()) }
             resolver.update(file, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            // "+" offers File or Photo; File opens the document picker.
             compose.onNodeWithTag("agent-attach").performClick()
+            compose.onNodeWithTag("agent-attach-file").performClick()
             waitForSystemNode { it.packageName?.toString()?.endsWith(".documentsui") == true }
             capture("picker")
             instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
@@ -80,6 +82,7 @@ class AgentComposerActionsInstrumentedTest {
             assertEquals("", compose.onNodeWithTag("agent-composer").fetchSemanticsNode()
                 .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
             compose.onNodeWithTag("agent-attach").performClick()
+            compose.onNodeWithTag("agent-attach-file").performClick()
             // The document provider's navigation drawer is native, not a
             // Tessera imitation. Select the owned Downloads fixture.
             clickSystemNode { it.contentDescription?.toString() in setOf("Show roots", "Show navigation drawer") }
@@ -186,7 +189,9 @@ class AgentComposerNativeWindowInstrumentedTest {
                 assertTrue(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, textArgs))
                 android.os.SystemClock.sleep(1_500)
                 capture("focused", scenario)
-                clickSystemNode { it.contentDescription?.toString() == "attach file" }
+                // "+" offers File or Photo; File opens the document picker.
+                clickSystemNode { it.contentDescription?.toString() == "add attachment" }
+                clickSystemNode { it.text?.toString() == "File" }
                 waitForSystemNode { it.packageName?.toString()?.endsWith(".documentsui") == true }
                 capture("picker", scenario)
                 android.os.SystemClock.sleep(600)

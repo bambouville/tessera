@@ -65,6 +65,9 @@ std::atomic<jlong> next_cross_device_runtime_token = 1;
 std::atomic<jlong> next_agent_runtime_token = 1;
 
 void throw_java(JNIEnv* env, const char* class_name, const char* message) {
+    // A failed lookup leaves its own exception pending, and any JNI call made
+    // over it aborts the process; let that one reach Kotlin instead.
+    if (env->ExceptionCheck()) return;
     jclass exception_class = env->FindClass(class_name);
     if (exception_class != nullptr) {
         env->ThrowNew(exception_class, message);
@@ -2132,7 +2135,7 @@ jstring agent_integration_parse_output(
 
 template <typename Function>
 jstring agent_markdown_parse_output(
-    JNIEnv* env, jobject input, jint input_count
+    JNIEnv* env, jobject input, jint input_count, const char* symbol = "tessera_agent_markdown_parse"
 ) {
     const std::uint8_t* bytes = nullptr;
     std::size_t size = 0;
@@ -2143,7 +2146,7 @@ jstring agent_markdown_parse_output(
         throw_java(env, "java/lang/IllegalArgumentException", "invalid Agent Markdown input");
         return nullptr;
     }
-    const Function function = require_symbol<Function>(env, "tessera_agent_markdown_parse");
+    const Function function = require_symbol<Function>(env, symbol);
     if (function == nullptr) return nullptr;
     const std::int32_t required = function(bytes, size, nullptr, 0);
     if (required <= 0 || static_cast<std::size_t>(required) > kAgentMarkdownMaxOutputBytes) {
@@ -2214,6 +2217,14 @@ Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_agentMarkdownParse(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_agentMarkdownParseDocument(
+    JNIEnv* env, jobject /* receiver */, jobject input, jint input_count
+) {
+    using Function = std::int32_t (*)(const std::uint8_t*, std::size_t, std::uint8_t*, std::size_t);
+    return agent_markdown_parse_output<Function>(env, input, input_count, "tessera_agent_markdown_parse_document");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_agentPageSearch(
     JNIEnv* env, jobject, jobject input, jint input_count
 ) {
@@ -2227,6 +2238,24 @@ Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_agentPageSearch(
     const Function function = require_symbol<Function>(env, "tessera_agent_page_search");
     if (function == nullptr) return nullptr;
     return build_shared_command(env, "shared Agent page search failed", [&](std::uint8_t* output, std::size_t capacity) {
+        return function(bytes, size, output, capacity);
+    });
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_agentHostSearch(
+    JNIEnv* env, jobject, jobject input, jint input_count
+) {
+    const std::uint8_t* bytes = nullptr;
+    std::size_t size = 0;
+    if (input_count <= 0 || !borrow_optional_buffer(env, input, input_count, &bytes, &size) || size > 6000000 || bytes == nullptr) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid Agent host search input");
+        return nullptr;
+    }
+    using Function = std::int32_t (*)(const std::uint8_t*, std::size_t, std::uint8_t*, std::size_t);
+    const Function function = require_symbol<Function>(env, "tessera_agent_host_search");
+    if (function == nullptr) return nullptr;
+    return build_shared_command(env, "shared Agent host search failed", [&](std::uint8_t* output, std::size_t capacity) {
         return function(bytes, size, output, capacity);
     });
 }
@@ -3995,6 +4024,286 @@ Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_forwardingWebTarget(
     return shared_text_from_buffer(
         env, "tessera_forwarding_web_target", "shared forwarding web target failed",
         rule, rule_count
+    );
+}
+
+// MARK: - artifacts
+
+// Matches TESSERA_ARTIFACTS_ABI_MAX_PAYLOAD_BYTES in TesseraCoreABI.h.
+constexpr std::size_t kArtifactsMaxInputBytes = 128 * 1024 * 1024;
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsReduce(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_reduce", "shared artifacts reduce failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsOverview(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_overview", "shared artifacts overview failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsQuickOpenParse(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_quick_open_parse", "shared artifacts quick_open_parse failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsQuickOpenSuggestions(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_quick_open_suggestions", "shared artifacts quick_open_suggestions failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsClassifyLink(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_classify_link", "shared artifacts classify_link failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsDocumentLink(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_document_link", "shared artifacts document_link failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsListeningPortsCommand(
+    JNIEnv* env, jobject /* receiver */
+) {
+    return shared_text_no_input(
+        env, "tessera_artifacts_listening_ports_command", "shared artifacts command failed"
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsListeningPortsParse(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_listening_ports_parse", "shared artifacts listening_ports_parse failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsForwardPlan(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_forward_plan", "shared artifacts forward_plan failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsKeepAsRule(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_keep_as_rule", "shared artifacts keep_as_rule failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsCacheKey(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_cache_key", "shared artifacts cache_key failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsCacheEvictions(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_cache_evictions", "shared artifacts cache_evictions failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsCachePresentation(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_cache_presentation", "shared artifacts cache_presentation failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsDecodeState(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_decode_state", "shared artifacts decode_state failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeArtifactsPersistenceBindings_encodeState(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_encode_state", "shared artifacts encode_state failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeArtifactsPersistenceBindings_splitState(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_split_state", "shared artifacts split_state failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeArtifactsPersistenceBindings_blobDigests(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_state_blob_digests", "shared artifacts state_blob_digests failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeArtifactsPersistenceBindings_joinState(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_join_state", "shared artifacts join_state failed",
+        request, request_count
+    );
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bambouville_tessera_core_bridge_NativeCoreBindings_artifactsKind(
+    JNIEnv* env, jobject /* receiver */, jobject request, jint request_count
+) {
+    // Artifacts carry embedded diffs; their ABI has a separate 128 MiB ceiling.
+    if (request_count <= 0 || static_cast<std::size_t>(request_count) > kArtifactsMaxInputBytes) {
+        throw_java(env, "java/lang/IllegalArgumentException", "invalid artifacts payload size");
+        return nullptr;
+    }
+    return shared_text_from_buffer(
+        env, "tessera_artifacts_kind", "shared artifacts kind failed",
+        request, request_count
     );
 }
 

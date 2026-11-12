@@ -3,7 +3,10 @@
     native <methods>;
 }
 
-# The native callback resolves this method by its stable JVM name/signature.
+# The native callbacks resolve these methods by their stable JVM name/signature.
 -keep class com.bambouville.tessera.core.bridge.NativeEventSink {
+    void onEvent(java.nio.ByteBuffer);
+}
+-keep class com.bambouville.tessera.core.bridge.NativeAgentEventSink {
     void onEvent(java.nio.ByteBuffer);
 }

@@ -937,7 +937,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(fresh['sourceEnd'], path.stat().st_size)
         self.assertFalse(fresh['hasNewer'])
 
-    def native_codex(self, count=250, native_only=False):
+    def native_codex(self, count=250, native_only=False, listed=None):
         path = self.root / 'codex/sessions/2026/09/12/rollout-00000000-0000-0000-0000-000000000001.jsonl'
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps({'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant',
@@ -999,7 +999,7 @@ for raw in sys.stdin:
         executable.chmod(0o700)
         native_mock(executable)
         self.service(lease=30000, extra_environment={'PATH': str(executable.parent) + os.pathsep + os.environ['PATH'],
-            'MOCK_ITEMS': str(fixture), 'MOCK_TRANSCRIPT': str(path), 'MOCK_CALLS': str(self.root / 'native-calls'),
+            'MOCK_ITEMS': str(fixture), 'MOCK_TRANSCRIPT': str(listed or path), 'MOCK_CALLS': str(self.root / 'native-calls'),
             'MOCK_NATIVE_ONLY': '1' if native_only else '0'})
         client, _ = self.client()
         client.sendall(frame({'kind': 'resolve', 'id': 'resolve', 'provider': 'codex', 'transcriptRef': str(path)}))
@@ -1839,6 +1839,206 @@ for raw in sys.stdin:
             if not value['hasMore']: break
             cursor = value['cursor']
         self.assertEqual(len(set(sources)), 105)
+
+    @unittest.skipIf(os.geteuid() == 0, 'root reads mode-0 files')
+    def test_inventory_lists_from_the_walk_without_opening_each_transcript(self):
+        # Opening every listed file again from / cost about a millisecond of
+        # kernel time per file on a WSL home (8 s for 5,500 transcripts), and
+        # one unreadable file failed the whole inventory. Reads still open it.
+        readable = self.transcript('00000000-0000-0000-0000-000000000001', 1)
+        sealed = self.transcript('00000000-0000-0000-0000-000000000002', 1)
+        sealed.chmod(0)
+        self.service(lease=10000)
+        client, _ = self.client()
+        client.sendall(frame({'kind': 'inventory', 'id': 'inventory'}))
+        self.assertEqual(receive(client)['kind'], 'inventory.begin')
+        rows = {}
+        while True:
+            value = receive(client)
+            self.assertNotEqual(value['kind'], 'error', value)
+            if value['kind'] == 'inventory.end': break
+            rows[value['sessionID']] = value
+        self.assertEqual(set(rows), {readable.stem, sealed.stem})
+        self.assertEqual(rows[sealed.stem]['bytes'], sealed.stat().st_size)
+        client.sendall(frame({'kind': 'resolve', 'id': 'sealed', 'provider': 'claude', 'transcriptRef': str(sealed)}))
+        self.assertEqual(receive(client)['code'], 'sourceMissing')
+
+    def inventory_rows(self, client):
+        client.sendall(frame({'kind': 'inventory', 'id': 'inventory'}))
+        self.assertEqual(receive(client)['kind'], 'inventory.begin')
+        rows = []
+        while True:
+            value = receive(client)
+            self.assertNotEqual(value['kind'], 'error', value)
+            if value['kind'] == 'inventory.end': return rows, value
+            rows.append(value)
+
+    def test_inventory_lists_a_conversation_in_both_codex_roots_once(self):
+        # A rollout copied into archived_sessions was listed twice under two
+        # handles; each client failed every pass on the second handle.
+        (self.root / 'codex/sessions/2026/09/12').mkdir(parents=True, exist_ok=True)
+        path = self.canonical_codex_file([self.canonical_codex_row(1, 'item-0', 'copied')])
+        archived = self.root / 'codex/archived_sessions' / path.name
+        archived.parent.mkdir(exist_ok=True)
+        shutil.copy(path, archived)
+        os.utime(archived, (time.time() - 100, time.time() - 100))
+        self.service(lease=20000)
+        client, _ = self.client()
+        rows, _ = self.inventory_rows(client)
+        codex = [row for row in rows if row['provider'] == 'codex']
+        self.assertEqual([row['transcriptRef'] for row in codex], [str(path)], 'the newer copy, once')
+
+    @unittest.skipIf(os.geteuid() == 0, 'root reads mode-0 files')
+    def test_inventory_skips_only_the_rows_it_cannot_use(self):
+        # One unusable transcript failed every provider's inventory until it
+        # changed: a Pi format this host does not know yet stayed failed until
+        # the next app update. Only its row is left out now, and reported.
+        pi = self.root / 'pi/sessions/--synthetic--'; pi.mkdir(parents=True)
+        for name, version in (('readable', 3), ('sealed', 3), ('future', 4)):
+            (pi / f'timestamp_{name}.jsonl').write_text(
+                json.dumps(dict(type='session', version=version, id=f'pi-{name}', cwd='/synthetic')) + '\n')
+        kimi = self.root / 'kimi'; entries = []
+        for name, agents in (('readable', ('main', 'helper', 'odd:name')), ('sealed', ('main',))):
+            directory = kimi / f'sessions/work/session_{name}'
+            for agent in agents:
+                wire = directory / 'agents' / agent / 'wire.jsonl'; wire.parent.mkdir(parents=True)
+                wire.write_text(json.dumps(dict(type='metadata', protocol_version='1.4')) + '\n')
+            entries.append(dict(sessionId=directory.name, sessionDir=str(directory), workDir='/synthetic'))
+        index = kimi / 'session_index.jsonl'
+        index.write_text(''.join(json.dumps(entry) + '\n' for entry in entries)); index.chmod(0o600)
+        sealed = [pi / 'timestamp_sealed.jsonl', kimi / 'sessions/work/session_sealed/agents/main/wire.jsonl']
+        for path in sealed: path.chmod(0)
+        claude = self.transcript('00000000-0000-0000-0000-000000000001', 1)
+        self.service(lease=20000)
+        client, _ = self.client()
+        rows, end = self.inventory_rows(client)
+        self.assertEqual({row['sessionID'] for row in rows},
+                         {claude.stem, 'pi-readable', 'session_readable', 'session_readable@helper'})
+        self.assertEqual(end['skippedSources'], 4, end)
+        self.assertIn(end['skipReason'], {'sourceUnreadable', 'piFormatUnsupported', 'sourceNotAuthorized'})
+        # None of these is a writer still finishing: none asks again.
+        self.assertNotIn('incomplete', end)
+        # Skipping poisons neither the header cache nor the catalog budget.
+        for path in sealed: path.chmod(0o600)
+        time.sleep(5.2)  # The shared inventory is reused for 5 s.
+        rows, end = self.inventory_rows(client)
+        self.assertEqual({row['sessionID'] for row in rows},
+                         {claude.stem, 'pi-readable', 'pi-sealed', 'session_readable', 'session_readable@helper', 'session_sealed'})
+        self.assertEqual(end['skippedSources'], 2, end)
+
+    def test_inventory_lists_other_providers_past_an_unproven_kimi_index(self):
+        kimi = self.root / 'kimi'; (kimi / 'sessions').mkdir(parents=True)
+        index = kimi / 'session_index.jsonl'
+        index.write_text(json.dumps(dict(sessionId='session_x', sessionDir='/elsewhere/session_x', workDir='/synthetic')) + '\n')
+        index.chmod(0o600)
+        claude = self.transcript('00000000-0000-0000-0000-000000000001', 1)
+        self.service(lease=10000)
+        client, _ = self.client()
+        rows, end = self.inventory_rows(client)
+        self.assertEqual({row['sessionID'] for row in rows}, {claude.stem})
+        self.assertEqual((end['skippedSources'], end['skipReason'], end.get('incomplete')), (1, 'kimiIndexUnproven', True))
+        # A line half-appended a minute ago is not being finished.
+        stale = time.time() - 120; os.utime(index, (stale, stale))
+        time.sleep(5.2)  # The shared inventory is reused for 5 s.
+        rows, end = self.inventory_rows(client)
+        self.assertEqual((end['skippedSources'], end.get('incomplete')), (1, None))
+
+    def test_inventory_asks_again_for_a_header_still_being_written(self):
+        pi = self.root / 'pi/sessions/--synthetic--'; pi.mkdir(parents=True)
+        partial = pi / 'timestamp_partial.jsonl'
+        partial.write_text(json.dumps(dict(type='session', version=3, cwd='/synthetic')) + '\n')
+        claude = self.transcript('00000000-0000-0000-0000-000000000001', 1)
+        self.service(lease=20000)
+        client, _ = self.client()
+        rows, end = self.inventory_rows(client)
+        self.assertEqual({row['sessionID'] for row in rows}, {claude.stem})
+        self.assertEqual((end['skippedSources'], end['skipReason'], end.get('incomplete')), (1, 'piHeaderMissing', True))
+        stale = time.time() - 120; os.utime(partial, (stale, stale))
+        time.sleep(5.2)  # The shared inventory is reused for 5 s.
+        rows, end = self.inventory_rows(client)
+        self.assertEqual((end['skippedSources'], end.get('incomplete')), (1, None))
+
+    def test_inventory_still_fails_past_its_catalog_budget(self):
+        # Listing part of a host as if it were all of it would be wrong;
+        # only unusable sources are skipped, never the catalog's own bounds.
+        for project in range(8):
+            directory = self.root / 'claude/projects' / (f'{project}' * 200)
+            directory.mkdir(parents=True)
+            for n in range(1000): (directory / f'00000000-0000-0000-{project:04x}-{n:012x}.jsonl').touch()
+        self.service(lease=30000)
+        client, _ = self.client()
+        client.sendall(frame({'kind': 'inventory', 'id': 'inventory'}))
+        reply = receive(client)
+        self.assertEqual((reply['kind'], reply.get('code')), ('error', 'catalogBudgetExceeded'), reply)
+
+    @unittest.skipIf(os.geteuid() == 0, 'root reads mode-0 directories')
+    def test_inventory_skips_directories_it_cannot_read_or_search(self):
+        claude = self.transcript('00000000-0000-0000-0000-000000000001', 1)
+        sealed = self.root / 'claude/projects/sealed'; unsearchable = self.root / 'claude/projects/unsearchable'
+        for directory in (sealed, unsearchable):
+            directory.mkdir()
+            (directory / '00000000-0000-0000-0000-000000000002.jsonl').write_text('{}\n')
+        codex = self.root / 'codex/sessions'; codex.mkdir(parents=True)
+        (codex / 'rollout-00000000-0000-0000-0000-000000000003.jsonl').write_text('{}\n')
+        modes = [(sealed, 0), (unsearchable, 0o600), (codex, 0)]
+        try:
+            for directory, mode in modes: directory.chmod(mode)
+            self.service(lease=10000)
+            client, _ = self.client()
+            rows, end = self.inventory_rows(client)
+        finally:
+            for directory, _ in modes: directory.chmod(0o700)
+        self.assertEqual({row['sessionID'] for row in rows}, {claude.stem})
+        self.assertEqual((end['skippedSources'], end['skipReason'], end.get('incomplete')), (3, 'catalogSourceUnreadable', None))
+
+    def test_inventory_lists_other_providers_past_a_corrupt_opencode_store(self):
+        store = self.root / 'xdg-data/opencode/opencode.db'; store.parent.mkdir(parents=True)
+        store.write_bytes(b'not a database' * 512)
+        stale = time.time() - 120; os.utime(store, (stale, stale))
+        claude = self.transcript('00000000-0000-0000-0000-000000000001', 1)
+        self.service(lease=10000)
+        client, _ = self.client()
+        rows, end = self.inventory_rows(client)
+        self.assertEqual({row['sessionID'] for row in rows}, {claude.stem})
+        self.assertEqual((end['skippedSources'], end.get('incomplete')), (1, None), end)
+
+    def test_native_inventory_reaches_the_walked_rollout_through_a_linked_directory(self):
+        # Codex records a rollout under the spelling of its home it ran with;
+        # the walk lists the real path. Both are the same thread.
+        path = self.root / 'codex/sessions/2026/09/12/rollout-00000000-0000-0000-0000-000000000001.jsonl'
+        (self.root / 'linked').symlink_to(self.root / 'codex/sessions')
+        client, thread, _ = self.native_codex(1, listed=self.root / 'linked/2026/09/12' / path.name)
+        rows, end = self.inventory_rows(client)
+        self.assertNotIn('fallbackReason', end)
+        native = next(row for row in rows if row['sessionID'] == '00000000-0000-0000-0000-000000000002')
+        self.assertEqual((native['thread'], native['transcriptRef']), (thread, str(path)))
+
+    def assert_native_only_past_an_unusable_rollout(self, case):
+        # A rollout the service cannot open stays native-only, as when each
+        # path was opened again: its reads use the native store, not the file.
+        # So does one spelled in a way remember() refuses.
+        path = self.root / 'codex/sessions/2026/09/12/rollout-00000000-0000-0000-0000-000000000001.jsonl'
+        link = path.with_name('rollout-linked.jsonl')
+        listed = {'sealed': None, 'link': link, 'dotted': f'{path.parent}/./{path.name}'}[case]
+        client, _, _ = self.native_codex(2, listed=listed)
+        if case == 'sealed': path.chmod(0)
+        elif case == 'link': link.symlink_to(path)
+        rows, end = self.inventory_rows(client)
+        self.assertNotIn('fallbackReason', end)
+        native = next(row for row in rows if row['sessionID'] == '00000000-0000-0000-0000-000000000002')
+        self.assertEqual((native['transcriptRef'], native.get('nativeSessionID')), ('', native['sessionID']))
+        _, records, _ = self.window_page(client, native['thread'], 'bootstrap', 0)
+        self.assertEqual([record['recordID'] for record in records], ['item-0', 'item-1'])
+
+    def test_native_inventory_keeps_a_linked_rollout_native_only(self):
+        self.assert_native_only_past_an_unusable_rollout('link')
+
+    def test_native_inventory_keeps_a_dot_segment_rollout_native_only(self):
+        self.assert_native_only_past_an_unusable_rollout('dotted')
+
+    @unittest.skipIf(os.geteuid() == 0, 'root reads mode-0 files')
+    def test_native_inventory_keeps_an_unreadable_rollout_native_only(self):
+        self.assert_native_only_past_an_unusable_rollout('sealed')
 
     def test_inventory_requested_limit_is_bounded_and_byte_capped(self):
         for n in range(505): self.transcript(f'00000000-0000-0000-0000-{n:012x}', 1)

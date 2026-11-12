@@ -11,6 +11,22 @@ struct WindowReply {
     std::vector<WindowPartition> partitions;
 };
 
+// Where a seek lands: a record's order in the window's source, the record ID
+// the search reported for it (which names the generation it counted the
+// order in), its source byte offset when the search reported one, and the
+// seek token the search reported, which prove that order still names the
+// same record.
+struct WindowSeek {
+    uint64_t order = 0;
+    std::string recordID, token;
+    std::optional<uint64_t> sourceOffset;
+};
+
+// What a search or page reports a record by for a later seek: a digest of
+// its JSON, then its provider's own ID when it has a short plain one.
+std::string seekToken(const NormalizedRecord& record);
+bool validSeekToken(const std::string& token);
+
 // Confined to the worker. The outer map keys this object by authenticated
 // client token AND thread handle. No client can guess another client's range.
 class WindowSession {
@@ -19,7 +35,7 @@ public:
     WindowReply read(WindowPageReader& reader, CodexServer& codex, const Source& source,
                      const std::string& transaction, const std::string& operation,
                      const std::string& cursor, uint64_t version, size_t limit, bool automatic,
-                     size_t serviceBytes);
+                     size_t serviceBytes, const WindowSeek& seek = {});
     void acknowledge(const std::string& transaction, uint64_t version,
                      const std::vector<std::string>& viewport, const std::string& head);
     void cancel(const std::string& transaction);

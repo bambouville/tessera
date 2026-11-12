@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forwarding_title">reenvío de puertos</string>
+    <string name="forwarding_intro">Las escuchas locales y dinámicas permanecen en este dispositivo. Los enlaces remotos están en el servidor.</string>
+    <string name="forwarding_add">añadir</string>
+    <string name="forwarding_no_rules">No hay reglas de reenvío.</string>
+    <string name="forwarding_enabled">activada</string>
+    <string name="forwarding_open">↗ abrir</string>
+    <string name="forwarding_edit">editar</string>
+    <string name="forwarding_delete">eliminar</string>
+    <string name="forwarding_stop">detener</string>
+    <string name="forwarding_start">iniciar</string>
+    <string name="forwarding_summary_remote">%1$s → dispositivo %2$s</string>
+    <string name="forwarding_rule_title">regla de reenvío</string>
+    <string name="forwarding_edit_title">editar %1$s</string>
+    <string name="forwarding_cancel">cancelar</string>
+    <string name="forwarding_save">guardar</string>
+    <string name="forwarding_label">etiqueta</string>
+    <string name="forwarding_optional">opcional</string>
+    <string name="forwarding_bind_address">dirección de enlace</string>
+    <string name="forwarding_loopback_only">solo loopback</string>
+    <string name="forwarding_bind_port">puerto de enlace</string>
+    <string name="forwarding_bind_port_zero_allowed">puerto de enlace · 0 permitido</string>
+    <string name="forwarding_remote_host">host remoto</string>
+    <string name="forwarding_device_host">host del dispositivo</string>
+    <string name="forwarding_target_port">puerto de destino</string>
+    <string name="forwarding_ports_whole_numbers">Los puertos deben ser números enteros.</string>
+    <string name="forwarding_direction_local">Local</string>
+    <string name="forwarding_direction_remote">Remoto</string>
+    <string name="forwarding_direction_dynamic">Dinámico</string>
+    <string name="forwarding_status_stopped">Detenida</string>
+    <string name="forwarding_status_starting">Iniciando</string>
+    <string name="forwarding_status_serving">responde · 0 activas</string>
+    <string name="forwarding_status_nothing_serving">escuchando · nada responde en el puerto remoto %1$s</string>
+    <string name="forwarding_status_checking">escuchando · comprobando…</string>
+    <string name="forwarding_status_listening">escuchando · 0 activas</string>
+    <string name="forwarding_invalid_bind_address">Se necesita una dirección de enlace.</string>
+    <string name="forwarding_invalid_bind_port">El puerto de enlace debe ser válido.</string>
+    <string name="forwarding_non_loopback_local_bind">El reenvío local y el dinámico deben enlazarse a loopback.</string>
+    <string name="forwarding_missing_target">Se necesita un destino.</string>
+    <string name="forwarding_invalid_target_address">Se necesita un host de destino.</string>
+    <string name="forwarding_invalid_target_port">El puerto de destino debe ser válido.</string>
+    <string name="forwarding_dynamic_cannot_have_target">El reenvío dinámico elige el destino en cada solicitud SOCKS.</string>
+    <string name="forwarding_bind_collision">Otro servicio de escucha local ya usa este puerto.</string>
+    <string name="forwarding_runtime_unavailable">El reenvío SSH no está disponible</string>
+    <string name="forwarding_listener_stopped">El servicio de escucha del reenvío se detuvo de forma inesperada</string>
+    <string name="forwarding_mosh_without_side_channel">Mosh no tiene un canal lateral SSH autenticado</string>
+    <string name="forwarding_transport_unsupported_local">Este transporte no admite el reenvío local</string>
+    <string name="forwarding_transport_unsupported_remote">Este transporte no admite el reenvío remoto</string>
+    <string name="forwarding_transport_unsupported_dynamic">Este transporte no admite el reenvío dinámico</string>
+    <string name="forwarding_chrome_label">Reenvío de puertos</string>
+    <plurals name="forwarding_chrome_label_serving">
+        <item quantity="one">Reenvío de puertos, %1$d con respuesta</item>
+        <item quantity="many">Reenvío de puertos, %1$d con respuesta</item>
+        <item quantity="other">Reenvío de puertos, %1$d con respuesta</item>
+    </plurals>
+    <string name="forwarding_browser_back">atrás</string>
+    <string name="forwarding_browser_forward">adelante</string>
+    <string name="forwarding_browser_stop">detener</string>
+    <string name="forwarding_browser_reload">recargar</string>
+    <string name="forwarding_browser_done">listo</string>
+    <string name="forwarding_browser_no_answer">este túnel no respondió</string>
+    <string name="forwarding_browser_check_rule">comprueba que la regla esté escuchando y que el servicio remoto esté activo.</string>
+    <string name="forwarding_browser_retry">reintentar</string>
+    <string name="forwarding_browser_connection_failed">la conexión falló</string>
+    <plurals name="forwarding_status_active_connections">
+        <item quantity="one">%1$d conexión activa</item>
+        <item quantity="many">%1$d conexiones activas</item>
+        <item quantity="other">%1$d conexiones activas</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels">
+        <item quantity="one">%1$d túnel activo</item>
+        <item quantity="many">%1$d túneles activos</item>
+        <item quantity="other">%1$d túneles activos</item>
+    </plurals>
+    <plurals name="forwarding_chrome_active_tunnels_serving">
+        <item quantity="one">%1$d túnel activo, %2$d con respuesta</item>
+        <item quantity="many">%1$d túneles activos, %2$d con respuesta</item>
+        <item quantity="other">%1$d túneles activos, %2$d con respuesta</item>
+    </plurals>
+</resources>

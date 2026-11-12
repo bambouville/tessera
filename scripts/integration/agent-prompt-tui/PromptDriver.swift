@@ -54,7 +54,7 @@ func capture() -> (text: String, cursor: String?) {
     let cursor = rows.indices.contains(cursorY) ? rows[cursorY] : nil
     // Bottom whole rows within 16 KiB, as both platforms send.
     var bytes = 0
-    let cells = cursor.map(AgentPromptGrammar.withoutEscapes).map { row in
+    let cells = cursor.map { AgentPromptGrammar.withoutEscapes($0) }.map { row in
         String(row.prefix { bytes += $0.utf8.count; return bytes <= 2_048 })
     }
     return (AgentPromptGrammar.promptText(fromCapture: previous), cells)
@@ -70,7 +70,7 @@ func observe() -> AgentPromptObservationResult? {
 func describe(_ o: AgentPromptObservationResult?) -> String {
     guard let o else { return "no prompt" }
     let options = o.options.map { "\($0.id)\($0.isDefault ? "*" : "")\($0.isChecked == true ? "☑" : "")=\($0.label)" }.joined(separator: " | ")
-    return "kind=\(o.kind) blocking=\(o.isBlocking) q=\(o.question ?? "-") options=[\(options)] controls=\(o.controls.map { $0.kind.rawValue }) entry=\(o.entry.map { "\($0.optionID ?? "nil"):\($0.text)" } ?? "-") focus=\(o.textFocus.map { "\($0)" } ?? "-") pending=\(o.pendingCount.map(String.init) ?? "-") token=\(AgentPromptGrammar.actionToken(for: o.signature).rawValue)"
+    return "kind=\(o.kind) blocking=\(o.isBlocking) q=\(o.question ?? "-") options=[\(options)] controls=\(o.controls.map { $0.kind.rawValue }) entry=\(o.entry.map { "\($0.optionID ?? "nil"):\($0.text)" } ?? "-") focus=\(o.textFocus.map { "\($0)" } ?? "-") pending=\(o.pendingCount.map(String.init) ?? "-") place=\(o.placement.map { $0.replacingOccurrences(of: "\u{1f}", with: ",") } ?? "-") token=\(AgentPromptGrammar.actionToken(for: o.signature).rawValue)"
 }
 
 let initial = observe()
@@ -110,6 +110,8 @@ for iteration in 0...AgentPromptAnswerPlanner.maximumSteps {
         history.append(.wait)
         print("wait")
     case .send:
+        // What the field read back as the answer, whitespace aside.
+        if step.phase == .submit, let entry = observation?.entry { print("read:", entry.text.filter { !$0.isWhitespace }) }
         let bytes = step.bytes!
         let hex = bytes.utf8.map { String(format: "%02x", $0) }
         _ = run(["tmux", "-S", socket, "send-keys", "-t", target, "-H"] + hex)

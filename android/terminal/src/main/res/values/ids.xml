@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- TalkBack's page actions: a page of history on the shell, a full-screen program's page keys. -->
+  <item name="terminal_accessibility_page_up" type="id" />
+  <item name="terminal_accessibility_page_down" type="id" />
+</resources>

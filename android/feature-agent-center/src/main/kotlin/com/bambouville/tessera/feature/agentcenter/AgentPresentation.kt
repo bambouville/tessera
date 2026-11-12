@@ -5,6 +5,8 @@ import com.bambouville.tessera.core.bridge.SharedAgentSnapshotKind
 import com.bambouville.tessera.core.bridge.SharedAgentValue
 import com.bambouville.tessera.core.bridge.SharedAgentReadStatus
 import com.bambouville.tessera.agent.platform.AgentEndpointBinding
+import com.bambouville.tessera.design.ArtifactOpenOrigin
+import com.bambouville.tessera.design.ArtifactOpenRequest
 import org.json.JSONObject
 import java.util.Locale
 
@@ -33,6 +35,12 @@ data class AgentCenterUiState(
     val searchQuery: String = "",
     val searchResults: List<AgentSearchResultRow> = emptyList(),
     val unavailableSearchHostCount: Int = 0,
+    /** A search runs: its rows so far show, with a spinner below them. */
+    val searching: Boolean = false,
+    /** A search result the detail opens at, once its transcript holds the record. */
+    val searchLanding: AgentSearchLanding? = null,
+    /** A thread whose detail opens at its newest page, whatever place its reader kept (a notification opened it). */
+    val latestOpening: String? = null,
     val notice: String? = null,
     /** The exact current notice carrying a one-shot composer-verification retry. */
     val sendAnywayNotice: String? = null,
@@ -68,6 +76,8 @@ internal fun AgentCenterUiState.withListSnapshot(
         detail = detail?.takeIf { it.row.key == selected }?.let { it.withListedTitle(rowsByKey[it.row.key]) }
             ?: selected?.let(projectedDetails::get),
         projectedDetails = projectedDetails,
+        // A match opens only in the thread still selected.
+        searchLanding = searchLanding?.takeIf { it.threadKey == selected },
     )
 }
 
@@ -112,7 +122,26 @@ internal fun AgentThreadDetail.withKnownFreshPrompt(previous: AgentThreadDetail?
 
 data class AgentAcceptedSend(val token: String, val threadKey: String, val text: String)
 
-data class AgentSearchResultRow(val threadKey: String, val recordID: String, val excerpt: String)
+/**
+ * One match. [sequence] and [sourceOffset] place its record for a seek, as
+ * decimal strings: the host's orders and offsets are unsigned 64-bit.
+ * [seekToken] is what the host names the record by, sent back with the seek.
+ */
+data class AgentSearchResultRow(
+    val threadKey: String,
+    val recordID: String,
+    val excerpt: String,
+    val sequence: String? = null,
+    val sourceOffset: String? = null,
+    val seekToken: String? = null,
+)
+
+/**
+ * Each landing is its own request: opening the same match again lands again.
+ * A match is [marked] for a moment; a reader's own place, read again on
+ * another connection, is not.
+ */
+data class AgentSearchLanding(val threadKey: String, val recordID: String, val id: Long, val marked: Boolean = true)
 
 data class AgentTerminalCandidate(
     val key: String,
@@ -168,6 +197,26 @@ data class AgentThreadRow(
     val livePromptWatch: Boolean = false,
 )
 
+/** List identity matches iOS; model and permission mode belong in the detail header. */
+internal fun AgentThreadRow.listMetadata(words: AgentRowWords): String =
+    listOfNotNull(provider, location.takeIf { it.isNotBlank() }, if (isFork) words.fork else null)
+        .filter(String::isNotBlank).joinToString(" · ")
+
+internal fun AgentThreadRow.accessibilityDescription(words: AgentRowWords): String = listOfNotNull(
+    title,
+    listMetadata(words).takeIf { it.isNotBlank() },
+    host.takeIf { it.isNotBlank() }?.let(words.host),
+    when (status) {
+        "waitingForInput" -> words.needsInput
+        "working" -> words.working
+        "idle" -> words.idle
+        "finished" -> words.finished
+        else -> words.unavailable
+    },
+    queuedCount?.let(words.queued),
+    attention.takeIf { it == "needsYou" }?.let { words.needsYourAttention },
+).joinToString(", ")
+
 data class AgentOutgoingMessage(val id: String, val text: String, val status: String)
 
 data class AgentHistoryWindow(val version: Long, val atLiveHead: Boolean, val hasNewer: Boolean,
@@ -222,6 +271,10 @@ internal fun AgentThreadDetail.attentionDeliveryKey(): String? =
 /** Stable live carrier identity for root navigation; no terminal object crosses this boundary. */
 fun AgentThreadDetail.liveSessionID(): String? = binding?.string("liveSessionID")?.canonicalAgentUUID()
 
+/** The bound tmux pane (`%N`) as tmux's pane number; null for a raw shell or a malformed binding. */
+fun AgentThreadDetail.boundTmuxPaneID(): Int? =
+    binding?.string("paneID")?.takeIf { it.startsWith('%') }?.drop(1)?.toIntOrNull()?.takeIf { it >= 0 }
+
 /** Navigation may reveal an existing carrier, never reconnect a similarly named host. */
 fun AgentThreadDetail.targetsLiveSession(hostID: String, liveSessionID: String?): Boolean =
     hostID.isNotBlank() && liveSessionID?.isNotBlank() == true &&
@@ -253,7 +306,17 @@ data class AgentBlock(
     val displayTimeMillis: Long? = null,
     /** Parent AgentMessage metadata drives the chat layout; blocks do not invent authorship. */
     val role: String = "assistant",
+    /** Structured edit fields, kept separate from the bounded card preview. */
+    val path: String? = null,
+    val diff: String? = null,
 )
+
+internal fun AgentBlock.artifactChange(hostId: String, sessionHint: String? = null): ArtifactOpenRequest.Change? {
+    if (hostId.isBlank() || kind.lowercase(Locale.ROOT) !in setOf("edit", "change", "diff")) return null
+    val path = path?.takeIf(String::isNotBlank) ?: return null
+    val diff = diff?.takeIf(String::isNotBlank) ?: return null
+    return ArtifactOpenRequest.Change(hostId, path, diff, title.ifBlank { path }, ArtifactOpenOrigin.AgentEdit, sessionHint)
+}
 
 data class AgentPrompt(
     val title: String,
@@ -352,7 +415,12 @@ internal object AgentPresentation {
     fun search(snapshot: SharedAgentSnapshot): Pair<List<AgentSearchResultRow>, Int> {
         if (snapshot.kind != SharedAgentSnapshotKind.Search) return emptyList<AgentSearchResultRow>() to 0
         val search = snapshot.payload.obj("search") ?: return emptyList<AgentSearchResultRow>() to 0
-        val rows = search.array("results").orEmpty().mapNotNull { value ->
+        return searchResults(search) to search.array("unavailableHostIDs").orEmpty().size
+    }
+
+    /** A search snapshot's rows: a search's matches, or a reader's place. */
+    fun searchResults(search: SharedAgentValue.ObjectValue): List<AgentSearchResultRow> =
+        search.array("results").orEmpty().mapNotNull { value ->
             val result = value as? SharedAgentValue.ObjectValue ?: return@mapNotNull null
             val id = result.obj("threadID") ?: return@mapNotNull null
             val host = id.string("hostID") ?: return@mapNotNull null
@@ -362,10 +430,11 @@ internal object AgentPresentation {
                 threadKey = canonicalAgentThreadKey(host, provider, session),
                 recordID = result.string("recordID") ?: return@mapNotNull null,
                 excerpt = result.string("excerpt")?.take(16_384) ?: return@mapNotNull null,
+                sequence = result.number("sequence")?.takeIf { it.toULongOrNull() != null },
+                sourceOffset = result.number("sourceOffset")?.takeIf { it.toULongOrNull() != null },
+                seekToken = result.string("seekToken"),
             )
         }.take(100)
-        return rows to search.array("unavailableHostIDs").orEmpty().size
-    }
 
     private fun row(value: SharedAgentValue): AgentThreadRow? {
         val summary = value as? SharedAgentValue.ObjectValue ?: return null
@@ -488,15 +557,18 @@ internal object AgentPresentation {
     private fun changeBlocks(edits: List<SharedAgentValue>?): List<AgentBlock> = edits.orEmpty().map { edit ->
         val value = edit as? SharedAgentValue.ObjectValue
         val path = value?.string("path") ?: "change"
+        val diff = value?.string("diff")
         val totals = listOfNotNull(
             value?.number("additions")?.let { "+$it" },
             value?.number("deletions")?.let { "−$it" },
         ).joinToString(" ")
         AgentBlock(
             title = path,
-            body = listOfNotNull(path, totals.takeIf(String::isNotBlank), value?.string("diff")).joinToString("\n").take(4_096),
+            body = listOfNotNull(path.take(4_096), totals.takeIf(String::isNotBlank), diff?.take(4_096)).joinToString("\n").take(4_096),
             kind = "change",
             recordID = value?.string("id") ?: value?.string("recordID"),
+            path = value?.string("path"),
+            diff = diff,
         )
     }
 
@@ -521,6 +593,9 @@ internal object AgentPresentation {
         val encoded = enumEntry?.value ?: objectValue
         val payload = encoded?.associatedValue() ?: encoded
         val rendered = renderSemanticBlock(semanticKind, payload)
+        val edit = (payload as? SharedAgentValue.ObjectValue)?.takeIf {
+            semanticKind.lowercase(Locale.ROOT) in setOf("edit", "change", "diff")
+        }
         return AgentBlock(
             title = rendered.title.take(512),
             body = rendered.body.take(MAX_AGENT_BLOCK_BODY_CHARS),
@@ -528,6 +603,8 @@ internal object AgentPresentation {
             recordID = recordID ?: objectValue?.string("recordID") ?: objectValue?.string("id"),
             displayTimeMillis = displayTimeMillis ?: objectValue?.agentABIDateMillis("displayTime"),
             role = role,
+            path = edit?.string("path"),
+            diff = edit?.string("diff"),
         )
     }
 
@@ -562,10 +639,10 @@ internal object AgentPresentation {
             }
             "systemEvent" -> labeled("system", text("text", "detail", "_0"))
             "compactSummary" -> labeled("context compacted", text("text", "detail", "_0"))
-            "completion" -> labeled("completed", text("text", "detail", "_0") ?: "finished")
+            "completion" -> labeled("completed", text("text", "detail", "_0") ?: AGENT_COMPLETION_PLACEHOLDER_BODY)
             "attachment" -> {
                 val name = objectValue?.firstString("name") ?: "attachment"
-                labeled(objectValue?.firstString("mediaType") ?: "attachment", name)
+                labeled(objectValue?.firstString("mediaType") ?: AGENT_ATTACHMENT_PLACEHOLDER_TITLE, name)
             }
             "actionPrompt" -> {
                 val prompt = objectValue ?: payload as? SharedAgentValue.ObjectValue
@@ -641,9 +718,13 @@ internal fun agentStatusDotTone(status: String, attention: String): AgentStatusD
     else -> AgentStatusDotTone.Faint
 }
 
+/** A card's text when Core gave none; the transcript card shows each in the reader's language. */
+internal const val AGENT_COMPLETION_PLACEHOLDER_BODY = "finished"
+internal const val AGENT_ATTACHMENT_PLACEHOLDER_TITLE = "attachment"
+
 private const val MAX_AGENT_BLOCK_BODY_CHARS = 16_384
 private val AGENT_MESSAGE_ROLES = setOf("user", "assistant", "system", "tool", "unknown")
-private val AGENT_BLOCK_KINDS = setOf(
+internal val AGENT_BLOCK_KINDS = setOf(
     "text", "thinking", "toolCall", "toolResult", "edit", "permission", "question", "queuedMessage",
     "workflow", "subagent", "systemEvent", "compactSummary", "completion", "attachment", "actionPrompt", "workflowTasks",
     "subagentGroup", "unknown",

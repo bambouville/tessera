@@ -28,7 +28,8 @@ public struct AgentIngestionPartition: Equatable, Codable, Sendable {
 }
 
 public struct AgentIngestionWindowTransaction: Equatable, Codable, Sendable {
-    public enum Lane: String, Codable, Sendable { case bootstrap, before, after, head, revisions }
+    /// `seek` is a history page away from the viewport, at a search match.
+    public enum Lane: String, Codable, Sendable { case bootstrap, before, after, head, revisions, seek }
     public let lane: Lane
     public let version: UInt64
     public let segmentID: String?
@@ -255,10 +256,11 @@ public struct AgentIngestionWindow: Equatable, Sendable {
         var next = self
         let previousIDs = Set(next.records.map(\.recordID))
         guard segment.records.allSatisfy({ !previousIDs.contains($0.recordID) }) else { throw AgentIngestionError.malformedFrame }
-        // The rolling live head may be detached from the contiguous viewport.
+        // The rolling live head and its bridge may be detached from the contiguous viewport.
         // History may overlap it, but cannot reassign its identity/provenance
         // or reintroduce a stale body under an already observed revision.
-        let live = Dictionary(uniqueKeysWithValues: (head?.records ?? []).map { ($0.recordID, $0) })
+        let live = Dictionary((bridge + (head?.records ?? [])).map { ($0.recordID, $0) },
+            uniquingKeysWith: { lhs, rhs in lhs.revision >= rhs.revision ? lhs : rhs })
         for record in segment.records {
             if let prior = live[record.recordID] {
                 guard prior.sequence == record.sequence,
@@ -284,6 +286,26 @@ public struct AgentIngestionWindow: Equatable, Sendable {
         next.settleBridge()
         try next.advanceVersion()
         self = next
+    }
+
+    /// A page away from the viewport, as at a search match: it replaces the
+    /// viewport and leaves the head apart, where paging newer meets it. It
+    /// may overlap the head, but cannot reassign a record the head holds.
+    public mutating func seek(_ segment: AgentIngestionSegment, expectedVersion: UInt64) throws {
+        guard expectedVersion == version, let head, segment.source == head.source,
+              !retainedIDs.contains(segment.id) else { throw AgentIngestionError.staleEpoch }
+        let live = Dictionary((bridge + head.records).map { ($0.recordID, $0) },
+            uniquingKeysWith: { lhs, rhs in lhs.revision >= rhs.revision ? lhs : rhs })
+        for record in segment.records {
+            if let prior = live[record.recordID] {
+                guard prior.sequence == record.sequence,
+                      AgentIngestionSegment.validOffsetRevision(from: prior, to: record, source: segment.source),
+                      record.revision >= prior.revision,
+                      record.revision != prior.revision || record == prior else { throw AgentIngestionError.staleEpoch }
+            }
+        }
+        try advanceVersion()
+        viewport = [segment]; bridge = []; bridgeFrom = nil
     }
 
     public mutating func returnToHead() throws {

@@ -21,13 +21,15 @@ public:
     WindowPageReader(Catalog& catalog, CodexServer& codex, std::function<bool()> cancelled, ClaudeChainCache* chains = nullptr, bool automatic = false, CodexHistoryCache* histories = nullptr, KimiHistoryCache* kimi = nullptr)
         : catalog_(catalog), codex_(codex), cancelled_(std::move(cancelled)), chains_(chains ? chains : &localChains_), histories_(histories ? histories : &localHistories_), kimi_(kimi ? kimi : &localKimi_), automatic_(automatic) {}
     bool cancelled() const { return cancelled_ && cancelled_(); }
-    void setValidationRefresh(bool value) { refreshValidation_ = value; }
     // App Server pagination has no rollout-materialization freshness witness.
     // A verified supported rollout header makes its canonical history the
     // authority; absent/unmarked files retain the structured-store capability.
     bool canonicalCodexAvailable(Source& source, uint64_t& bytesRead);
+    // `seek`: the anchor stands at a search match's order, which a position
+    // past the index's end refuses as moved rather than as a changed source.
     WindowRead read(const Source& source, const std::string& generation,
-                    const std::optional<WindowAnchor>& anchor, bool forward, size_t limit, uint64_t& revision);
+                    const std::optional<WindowAnchor>& anchor, bool forward, size_t limit, uint64_t& revision,
+                    bool seek = false);
     PositionedRecord reviseNative(const PositionedRecord& record, const WindowRecordAnchors& anchors,
                                   const Source& source, uint64_t& revision,
                                   std::chrono::steady_clock::time_point deadline, uint64_t initialBytes);
@@ -73,6 +75,5 @@ private:
     size_t historyCount_ = 0;
     uint64_t historySourceEnd_ = 0;
     bool automatic_;
-    bool refreshValidation_ = true;
 };
 }

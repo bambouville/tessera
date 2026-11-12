@@ -111,14 +111,6 @@
     "zh-Hans": "正在连接 %@。设备名称只是标签；真正验证通道的是下一屏的代码。",
     "zh-Hant": "正在連線 %@。裝置名稱只是標籤；真正驗證通道的是下一畫面的代碼。"
   },
-  "Waiting for the other device": {
-    "de": "Warte auf das andere Gerät",
-    "es": "Esperando al otro dispositivo",
-    "fr": "En attente de l'autre appareil",
-    "ja": "もう一方のデバイスを待っています",
-    "zh-Hans": "正在等待另一台设备",
-    "zh-Hant": "正在等待另一台裝置"
-  },
   "Stopping nearby setup": {
     "de": "Einrichtung in der Nähe wird abgebrochen",
     "es": "Deteniendo la configuración cercana",
@@ -254,14 +246,6 @@
     "ja": "ホストへの付与",
     "zh-Hans": "主机授权",
     "zh-Hant": "主機授權"
-  },
-  "hosts, jump routes, port forwards, and portable appearance": {
-    "de": "Hosts, Jump-Routen, Portweiterleitungen und übertragbare Darstellung",
-    "es": "hosts, rutas de salto, reenvíos de puertos y apariencia portable",
-    "fr": "hôtes, routes de rebond, redirections de ports et apparence transférable",
-    "ja": "ホスト・踏み台ルート・ポート転送・持ち運べる外観",
-    "zh-Hans": "主机、跳板路由、端口转发和可迁移的外观",
-    "zh-Hant": "主機、跳板路由、連接埠轉發和可遷移的外觀"
   },
   "launch commands": {
     "de": "Startbefehle",

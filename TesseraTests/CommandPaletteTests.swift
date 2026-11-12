@@ -1,9 +1,41 @@
 import XCTest
 import TmuxControl
+import TesseraArtifactsCore
 @testable import Tessera
 
 @MainActor
 final class CommandPaletteTests: XCTestCase {
+    func testArtifactsFollowSessionsInMRUOrderAndCommitStableTabID() {
+        let palette = CommandPalette()
+        let session = makeLive(name: "host")
+        let older = ArtifactTab(id: "old", hostID: "h", hostLabel: "alpha", target: .file(path: "/srv/notes.md"), title: "notes.md", openedAt: 1, viewedAt: 10)
+        let newer = ArtifactTab(id: "new", hostID: "h", hostLabel: "alpha", target: .page(scheme: "http", port: 5173, path: "/"), title: ":5173", openedAt: 2, viewedAt: 20)
+        palette.updateArtifacts([older, newer])
+        palette.open(sessions: [session])
+        XCTAssertEqual(palette.entries.map(\.id), [.session(session.id), .artifact("new"), .artifact("old")])
+        palette.selectedIndex = 1
+        XCTAssertEqual(palette.commitResult(), .artifact("new"))
+        palette.open(sessions: [])
+        XCTAssertEqual(palette.artifactResults.map(\.id), ["new", "old"], "terminal-owned opens retain the artifact snapshot")
+    }
+
+    func testArtifactFilterMatchesTitleHostAndPathAndClampsAfterClose() {
+        let palette = CommandPalette()
+        let doc = ArtifactTab(id: "doc", hostID: "h", hostLabel: "Build Box", target: .file(path: "/srv/reports/plan.md"), title: "plan.md", openedAt: 1, viewedAt: 1)
+        palette.updateArtifacts([doc])
+        palette.open(sessions: [])
+        for query in ["PLAN", "build box", "/srv/reports"] {
+            palette.query = query
+            XCTAssertEqual(palette.artifactResults.map(\.id), ["doc"])
+        }
+        palette.query = "@agent"
+        XCTAssertTrue(palette.artifactResults.isEmpty)
+        palette.query = ""
+        palette.updateArtifacts([])
+        XCTAssertEqual(palette.selectedIndex, 0)
+        XCTAssertNil(palette.commitResult())
+    }
+
     func test_open_seedsSnapshotAndFocusToken() {
         let palette = CommandPalette()
         let a = makeLive(name: "alpha")
@@ -235,6 +267,21 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(palette.sessions.count, 0)
     }
 
+    func testWindowRowsShareTheTabPolicyAndUseOnlyTheActivePanesProvider() {
+        let window = TmuxController.WindowInfo(
+            id: WindowId(3), windowName: "sh", activePaneId: PaneId(12),
+            activePaneTitle: "devbox", activePaneTitleIsDefault: true,
+            panes: [.init(id: PaneId(11), isActive: false, currentCommand: "node"),
+                    .init(id: PaneId(12), isActive: true, currentCommand: "sh")]
+        )
+        let windows = CommandPaletteTmuxSnapshot.buildWindows([window]) { pane in
+            pane == PaneId(12) ? "claude" : "codex"
+        }
+        XCTAssertEqual(windows[0].title, window.agentDisplayName(agentProvider: "claude"))
+        XCTAssertEqual(windows[0].title, "claude")
+        XCTAssertEqual(windows[0].renameSeed, "sh")
+    }
+
     func test_sharedTmuxBuilderPreservesOrderNamesAndPaneTitlePrecedence() {
         let windows = CommandPaletteTmuxSnapshot.buildWindows([
             TmuxController.WindowInfo(
@@ -255,7 +302,7 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(windows.map(\.id), [WindowId(7), WindowId(2)])
         XCTAssertEqual(windows.map(\.position), [0, 1])
         XCTAssertEqual(windows.map(\.tmuxIndex), [4, 9])
-        XCTAssertEqual(windows[0].title, "claude")
+        XCTAssertEqual(windows[0].title, "agent work")
         XCTAssertEqual(windows[0].renameSeed, "agent work")
         XCTAssertEqual(windows[0].panes.map(\.title), ["claude", "README", "htop", "agent work"])
         XCTAssertEqual(windows[0].panes[0].command, "sh")
@@ -490,47 +537,78 @@ final class CompactNavigationPresentationTests: XCTestCase {
         let id = UUID()
         assertPresentation(nil, tab: .hosts)
         assertPresentation(.host(id), tab: .hosts)
-        assertPresentation(.session(id), tab: .sessions, sessions: .sessions)
-        assertPresentation(.agents, tab: .sessions, sessions: .agents)
-        assertPresentation(.keys, tab: .keys, keys: .keys)
-        assertPresentation(.knownHosts, tab: .keys, keys: .knownHosts)
+        assertPresentation(.session(id), tab: .sessions)
+        assertPresentation(.agents, tab: .agents)
+        assertPresentation(.artifacts, tab: .artifacts)
+        assertPresentation(.keys, tab: .settings)
+        assertPresentation(.knownHosts, tab: .settings)
+        assertPresentation(.tunnels, tab: .artifacts)
         assertPresentation(.settings, tab: .settings)
     }
 
-    func test_iPadOnlyTunnelsFallsBackToHostsWithoutOwningRegularSelection() {
-        var presentation = CompactNavigationPresentation(tab: .settings)
+    func test_disabledAgentCenterReconcilesToSessions() {
+        var presentation = CompactNavigationPresentation(tab: .agents)
 
-        presentation.reconcile(with: .tunnels)
+        presentation.reconcile(with: .agents, agentCenterEnabled: false)
 
-        XCTAssertEqual(presentation.tab, .hosts)
+        XCTAssertEqual(presentation.tab, .sessions)
     }
 
-    func test_unrelatedSubviewChoicesSurviveReconciliation() {
-        var presentation = CompactNavigationPresentation(
-            tab: .keys,
-            sessionsView: .agents,
-            keysView: .knownHosts
-        )
+    func test_everyDestinationReplacesAStaleCompactTab() {
+        let id = UUID()
+        let destinations: [(SidebarItem?, CompactRootTab)] = [
+            (nil, .hosts), (.host(id), .hosts), (.session(id), .sessions),
+            (.agents, .agents), (.artifacts, .artifacts), (.keys, .settings),
+            (.knownHosts, .settings), (.tunnels, .artifacts), (.settings, .settings),
+        ]
+        for initialTab in [CompactRootTab.hosts, .sessions, .agents, .artifacts, .settings] {
+            for (selection, expectedTab) in destinations {
+                var presentation = CompactNavigationPresentation(tab: initialTab)
+                presentation.reconcile(with: selection)
+                XCTAssertEqual(presentation.tab, expectedTab)
+            }
+        }
+    }
 
-        presentation.reconcile(with: .settings)
+    func test_settingsPlacesKeysAndKnownHostsImmediatelyAfterSecurity() throws {
+        let sections = SettingsSection.allCases
+        let securityIndex = try XCTUnwrap(sections.firstIndex(of: .security))
+        XCTAssertEqual(Array(sections[(securityIndex + 1)...].prefix(2)), [.keys, .knownHosts])
+    }
 
-        XCTAssertEqual(presentation.tab, .settings)
-        XCTAssertEqual(presentation.sessionsView, .agents)
-        XCTAssertEqual(presentation.keysView, .knownHosts)
+    func test_legacySettingsRoutesSelectTheMatchingSection() {
+        XCTAssertEqual(SettingsSection.legacyDestination(for: .keys), .keys)
+        XCTAssertEqual(SettingsSection.legacyDestination(for: .knownHosts), .knownHosts)
+        XCTAssertNil(SettingsSection.legacyDestination(for: .tunnels))
+        let selections: [SidebarItem?] = [nil, .settings, .artifacts, .agents, .host(UUID()), .session(UUID())]
+        for selection in selections {
+            XCTAssertNil(SettingsSection.legacyDestination(for: selection))
+        }
+    }
+
+    func test_sidebarIdentifiersRetainLegacyTokensAndAddArtifacts() {
+        let id = UUID()
+        let items: [(SidebarItem, String)] = [
+            (.session(id), "session-\(id)"), (.host(id), "host-\(id)"),
+            (.agents, "agents"), (.artifacts, "artifacts"), (.keys, "keys"),
+            (.knownHosts, "known-hosts"), (.tunnels, "tunnels"), (.settings, "settings"),
+        ]
+        for (item, identifier) in items {
+            XCTAssertEqual(item.identifier, identifier)
+        }
+        XCTAssertEqual(Set(items.map { $0.0.identifier }).count, items.count)
+        XCTAssertEqual(SettingsSection.keys.identifier, "keys")
+        XCTAssertEqual(SettingsSection.knownHosts.identifier, "known-hosts")
     }
 
     private func assertPresentation(
         _ selection: SidebarItem?,
         tab: CompactRootTab,
-        sessions: CompactSessionsView = .sessions,
-        keys: CompactKeysView = .keys,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         var presentation = CompactNavigationPresentation()
         presentation.reconcile(with: selection)
         XCTAssertEqual(presentation.tab, tab, file: file, line: line)
-        XCTAssertEqual(presentation.sessionsView, sessions, file: file, line: line)
-        XCTAssertEqual(presentation.keysView, keys, file: file, line: line)
     }
 }

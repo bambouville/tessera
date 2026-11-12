@@ -105,7 +105,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/bambouville/SwiftTerm",
       "state" : {
-        "revision" : "177748f1313591e2c8c00309f5ff74e8ee6077f7"
+        "revision" : "6f8a065bb7cd9ab622716094b9e43ba821fdb744"
       }
     }
   ],

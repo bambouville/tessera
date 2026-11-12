@@ -6,23 +6,83 @@ import UIKit
 
 struct SettingsPageView: View {
     @Environment(\.designTokens) private var T
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.duoRailMode) private var duoRailMode
+    @Environment(\.duoOpenSwitcher) private var duoOpenSwitcher
     @Environment(SwipePadProfileStore.self) private var swipePadStore
 
-    var onUploadDiagnosticLog: () -> Void = {}
+    private let selectedSection: Binding<SettingsSection?>?
+    private let keysPagePresentation: KeysPagePresentationState
+    private let onUploadDiagnosticLog: () -> Void
 
-    @State private var selectedSection: SettingsSection = .appearance
+    @State private var localSelectedSection: SettingsSection?
+    @State private var fold: DuoFold?
+
+    init(
+        selectedSection: Binding<SettingsSection?>? = nil,
+        keysPagePresentation: KeysPagePresentationState = KeysPagePresentationState(),
+        onUploadDiagnosticLog: @escaping () -> Void = {}
+    ) {
+        self.selectedSection = selectedSection
+        self.keysPagePresentation = keysPagePresentation
+        self.onUploadDiagnosticLog = onUploadDiagnosticLog
+    }
+
+    private var sectionSelection: Binding<SettingsSection?> {
+        selectedSection ?? $localSelectedSection
+    }
+
+    private var managementSelection: ManagementSelection<SettingsSection> {
+        ManagementSelection(section: sectionSelection.wrappedValue)
+    }
+
+    private var currentSection: SettingsSection {
+        managementSelection.detail(defaultSection: .appearance)
+    }
+
+    private var phonePath: Binding<[SettingsSection]> {
+        Binding(
+            get: { managementSelection.phonePath },
+            set: {
+                var selection = managementSelection
+                selection.phonePath = $0
+                sectionSelection.wrappedValue = selection.section
+            }
+        )
+    }
 
     private var isPhone: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone
+        CompactLayout.isPhone(horizontalSizeClass)
+    }
+
+    /// Laptop pose has no rail; its settled fold alone stacks the list over the detail.
+    private var hasLaptopFold: Bool {
+        isPhone && fold?.splitsSideBySide == false
     }
 
     @ViewBuilder
     var body: some View {
-        if isPhone {
+        if duoRailMode || hasLaptopFold {
+            GeometryReader { geometry in
+                railBody(container: geometry.size)
+            }
+            .background {
+                // Read against the keyboard-free frame: typing on the desk
+                // ends the page at the fold's top, and the split must hold.
+                Color.clear
+                    .ignoresSafeArea(.keyboard)
+                    .onDuoFoldChange(noteFold)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .ignoresSafeArea(.container, edges: duoRailMode ? .top : [])
+        } else if isPhone {
+            // Inert off Duo: only a Duo reports a fold.
             phoneBody
+                .onDuoFoldChange(noteFold)
         } else {
             HStack(spacing: 0) {
-                leftPane
+                leftPane()
 
                 rightPane
             }
@@ -31,36 +91,105 @@ struct SettingsPageView: View {
         }
     }
 
-    private var phoneBody: some View {
+    private func noteFold(_ settledFold: DuoFold?) {
+        if fold != settledFold { fold = settledFold }
+    }
+
+    private func railBody(container: CGSize) -> some View {
+        let arrangement = ManagementSplitPolicy.arrangement(isRailMode: duoRailMode, container: container, fold: fold)
+        return Group {
+            switch arrangement {
+            case .single:
+                phoneBody
+            case .listBesideDetail(let listWidth):
+                railSplitBody {
+                    HStack(spacing: railFoldGap(container: container)) {
+                        leftPane(width: listWidth)
+                        rightPane
+                    }
+                }
+            case .listOverDetail(let split):
+                let detail = ManagementSplitPolicy.detailFrame(split)
+                let coversList = detail != split.detail
+                railSplitBody {
+                    ZStack(alignment: .topLeading) {
+                        leftPane(width: split.list.width, showsTrailingBorder: false)
+                            .frame(width: split.list.width, height: split.list.height)
+                            .clipped()
+                            .position(x: split.list.midX, y: split.list.midY)
+                            .opacity(coversList ? 0 : 1)
+                            .allowsHitTesting(!coversList)
+                            .accessibilityHidden(coversList)
+                        rightPane
+                            .frame(width: detail.width, height: detail.height)
+                            .clipped()
+                            .position(x: detail.midX, y: detail.midY)
+                    }
+                }
+            }
+        }
+        .onChange(of: arrangement, initial: true) { _, next in
+            retainSection(for: next)
+        }
+    }
+
+    /// A split displays the default section even before the first row tap.
+    /// Remember it so returning to the phone stack shows that same detail.
+    private func retainSection(for arrangement: ManagementSplitPolicy.Arrangement) {
+        var selection = managementSelection
+        selection.retainDetail(for: arrangement, defaultSection: .appearance)
+        if sectionSelection.wrappedValue != selection.section {
+            sectionSelection.wrappedValue = selection.section
+        }
+    }
+
+    private func railFoldGap(container: CGSize) -> CGFloat {
+        guard fold?.splitsSideBySide == true,
+              let split = ManagementSplitPolicy.foldSplit(container: container, fold: fold) else { return 0 }
+        return split.detail.minX - split.list.maxX
+    }
+
+    private func railSplitBody<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         NavigationStack {
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(T.bg)
+                .modifier(SettingsRailChrome(isEnabled: duoRailMode))
+                // Without the rail (laptop), the panes' own mono header replaces the bar, as on the phone.
+                .toolbar(duoRailMode ? .visible : .hidden, for: .navigationBar)
+                .toolbar { railSwitcherToolbar }
+        }
+        .tint(T.accent)
+    }
+
+    @ToolbarContentBuilder
+    private var railSwitcherToolbar: some ToolbarContent {
+        if duoRailMode, let openSwitcher = duoOpenSwitcher {
+            ToolbarItem(placement: .primaryAction) {
+                Button("switcher", systemImage: "chevron.down") { openSwitcher() }
+                    .accessibilityIdentifier("duo-rail-switcher")
+            }
+        }
+    }
+
+    private var phoneBody: some View {
+        NavigationStack(path: phonePath) {
             ScrollView {
                 // Custom mono header instead of the system large title so the
-                // settings tab matches the hosts/sessions/keys header voice.
-                Text("settings")
-                    .font(Typography.pageTitle)
-                    .foregroundStyle(T.fg)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 16)
-                    .padding(.bottom, 14)
+                // settings tab matches the hosts/sessions/artifacts header voice.
+                DuoTitleSwitcher(identifier: "settings-title-switcher") {
+                    Text("settings")
+                        .font(Typography.pageTitle)
+                        .foregroundStyle(T.fg)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 14)
 
                 LazyVStack(spacing: 0) {
                     ForEach(phoneSections, id: \.self) { section in
-                        NavigationLink {
-                            ScrollView {
-                                sectionContent(section)
-                                    .padding(.horizontal, 18)
-                                    .padding(.top, 22)
-                                    .padding(.bottom, 32)
-                            }
-                            .background(T.bg.ignoresSafeArea())
-                            // No nav-bar title: each section's content opens
-                            // with its own mono SettingsH heading of the same
-                            // name, so a principal title would duplicate it
-                            // verbatim. The root's hidden-bar navigationTitle
-                            // supplies the "settings" back label.
-                            .navigationBarTitleDisplayMode(.inline)
-                        } label: {
+                        NavigationLink(value: section) {
                             HStack(spacing: 12) {
                                 Image(systemName: settingsIcon(for: section))
                                     .font(.system(size: 15, weight: .medium))
@@ -86,16 +215,27 @@ struct SettingsPageView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings-section-\(section.identifier)")
                     }
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
             }
             .background(T.bg.ignoresSafeArea())
-            // Bar hidden (the custom mono header above replaces it), but the
+            // Outside the rail the mono header replaces the hidden bar; the
             // title still feeds pushed sections' back-button label.
-            .navigationTitle("settings")
-            .toolbar(.hidden, for: .navigationBar)
+            .navigationTitle(duoRailMode ? LocalizedStringKey("") : LocalizedStringKey("settings"))
+            .toolbar(duoRailMode ? .visible : .hidden, for: .navigationBar)
+            .modifier(SettingsRailChrome(isEnabled: duoRailMode))
+            .toolbar { railSwitcherToolbar }
+            .navigationDestination(for: SettingsSection.self) { section in
+                phoneSection(section)
+                    .background(T.bg.ignoresSafeArea())
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar(.visible, for: .navigationBar)
+                    .modifier(SettingsRailChrome(isEnabled: duoRailMode))
+                    .toolbar { railSwitcherToolbar }
+            }
         }
         .tint(T.accent)
     }
@@ -115,6 +255,8 @@ struct SettingsPageView: View {
         case .themes: return "paintpalette"
         case .keyboard: return "keyboard"
         case .security: return "lock.shield"
+        case .keys: return "key"
+        case .knownHosts: return "lock.shield"
         case .experimental: return "flask"
         case .diagnostics: return "stethoscope"
         case .unlimited: return "infinity"
@@ -122,65 +264,78 @@ struct SettingsPageView: View {
         }
     }
 
-    private var leftPane: some View {
+    private func leftPane(width: CGFloat = 220, showsTrailingBorder: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("settings")
-                .font(Typography.pageTitle)
-                .foregroundStyle(T.fg)
-                // The rail is a fixed-width column, so a longer translation
-                // ("Einstellungen") wraps mid-word rather than reflowing.
-                // Shrink the title instead of breaking the word.
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .padding(.top, 28)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 18)
-
-            VStack(spacing: 2) {
-                ForEach(SettingsSection.allCases, id: \.self) { section in
-                    settingsRow(section)
-                }
+            // Laptop pose: the list's title carries the switcher.
+            DuoTitleSwitcher(identifier: "settings-title-switcher") {
+                Text("settings")
+                    .font(Typography.pageTitle)
+                    .foregroundStyle(T.fg)
+                    // The rail is a fixed-width column, so a longer translation
+                    // ("Einstellungen") wraps mid-word rather than reflowing.
+                    // Shrink the title instead of breaking the word.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
-            .padding(.horizontal, 8)
+            .padding(.top, 28)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
+
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(SettingsSection.allCases, id: \.self) { section in
+                        settingsRow(section)
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
 
             Spacer(minLength: 0)
         }
-        .frame(width: 220)
+        .frame(width: width)
         .frame(maxHeight: .infinity)
         .background(T.bg)
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(T.border)
-                .frame(width: 1)
+            if showsTrailingBorder {
+                Rectangle()
+                    .fill(T.border)
+                    .frame(width: 1)
+            }
         }
     }
 
+    @ViewBuilder
     private var rightPane: some View {
-        ScrollView {
-            HStack(alignment: .top, spacing: 0) {
-                sectionContent
-                    .frame(maxWidth: 560, alignment: .leading)
+        if currentSection == .keys || currentSection == .knownHosts {
+            sectionContent(currentSection)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                HStack(alignment: .top, spacing: 0) {
+                    sectionContent(currentSection)
+                        .frame(maxWidth: 560, alignment: .leading)
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 28)
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
             }
-            .padding(.top, 28)
-            .padding(.horizontal, 40)
-            .padding(.bottom, 40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(T.bg)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(T.bg)
     }
 
     private func settingsRow(_ section: SettingsSection) -> some View {
-        let isSelected = selectedSection == section
+        let isSelected = currentSection == section
 
         return Button {
-            selectedSection = section
+            sectionSelection.wrappedValue = section
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: settingsIcon(for: section))
                     .font(Typography.tesseraMono(size: 12))
-                    .foregroundStyle(isSelected ? T.accent : T.fgMuted)
+                    .foregroundStyle(T.fgMuted)
 
                 Text(section.title)
                     .font(Typography.tesseraMono(size: 13))
@@ -190,17 +345,29 @@ struct SettingsPageView: View {
             }
             .padding(.vertical, 9)
             .padding(.horizontal, 12)
+            .frame(minHeight: 44)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isSelected ? T.accentSoft : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("settings-section-\(section.identifier)")
     }
 
     @ViewBuilder
-    private var sectionContent: some View {
-        sectionContent(selectedSection)
+    private func phoneSection(_ section: SettingsSection) -> some View {
+        if section == .keys || section == .knownHosts {
+            // These pages own their heading, scrolling, and modal presenters.
+            sectionContent(section)
+        } else {
+            ScrollView {
+                sectionContent(section)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 22)
+                    .padding(.bottom, 32)
+            }
+        }
     }
 
     @ViewBuilder
@@ -220,6 +387,10 @@ struct SettingsPageView: View {
             KeyboardSettingsView()
         case .security:
             SecuritySettingsView()
+        case .keys:
+            KeysPageView(presentation: keysPagePresentation)
+        case .knownHosts:
+            KnownHostsPageView()
         case .experimental:
             ExperimentalSettingsView(store: swipePadStore)
         case .diagnostics:
@@ -228,6 +399,24 @@ struct SettingsPageView: View {
             UnlimitedHostsSettingsView()
         case .about:
             AboutSettingsView()
+        }
+    }
+}
+
+private struct SettingsRailChrome: ViewModifier {
+    var isEnabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(.visible, for: .navigationBar)
+                .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+                .ignoresSafeArea(.container, edges: .top)
+        } else {
+            content
         }
     }
 }
@@ -249,7 +438,7 @@ struct SettingsH: View {
     }
 }
 
-private enum SettingsSection: String, CaseIterable {
+enum SettingsSection: String, CaseIterable {
     case appearance
     case continuity = "sync & continuity"
     case terminal
@@ -257,10 +446,27 @@ private enum SettingsSection: String, CaseIterable {
     case themes
     case keyboard = "keyboard & input"
     case security
+    case keys
+    case knownHosts = "known hosts"
     case experimental
     case diagnostics
     case unlimited = "unlimited hosts"
     case about
+
+    var identifier: String {
+        self == .knownHosts ? "known-hosts" : rawValue
+    }
+
+    /// Compatibility for old call sites: keys and known hosts are settings
+    /// sections now. Tunnels is not: its pages open as artifact tabs and its
+    /// rules live in each host's editor (see `SidebarItem.artifacts`).
+    static func legacyDestination(for selection: SidebarItem?) -> SettingsSection? {
+        switch selection {
+        case .keys: return .keys
+        case .knownHosts: return .knownHosts
+        default: return nil
+        }
+    }
 
     /// The nav label. Separate from `rawValue`, which is the stable
     /// persistence/identity token and must not change with the language.
@@ -273,6 +479,8 @@ private enum SettingsSection: String, CaseIterable {
         case .themes:       return "themes"
         case .keyboard:     return "keyboard & input"
         case .security:     return "security"
+        case .keys:         return "keys"
+        case .knownHosts:   return "known hosts"
         case .experimental: return "experimental"
         case .diagnostics:  return "diagnostics"
         case .unlimited:    return "unlimited hosts"
@@ -330,7 +538,8 @@ enum DiagnosticLogStore {
     private static let fileName = "tessera-diagnostics.log"
     private static let queue = DispatchQueue(label: "app.tessera.diagnostic-log")
     private static var rateStates: [String: RateState] = [:]
-    private static let sanitizationRules: [(NSRegularExpression, String)] = [
+    /// Applied in order, before the shared endpoint stage.
+    private static let fieldRules: [(NSRegularExpression, String)] = [
         (
             try! NSRegularExpression(
                 pattern: #"(?i)\b(currentProfile|title)=.*?(?=\s+[A-Za-z][A-Za-z0-9_-]*=|$)"#
@@ -349,7 +558,9 @@ enum DiagnosticLogStore {
             ),
             "<uuid>"
         ),
-        (try! NSRegularExpression(pattern: #"\S+@\S+"#), "<redacted-endpoint>"),
+    ]
+    /// Applied in order, after the shared endpoint stage.
+    private static let trailingRules: [(NSRegularExpression, String)] = [
         (try! NSRegularExpression(pattern: #"failed\([^)]*\)"#), "failed(<redacted>)"),
         (try! NSRegularExpression(pattern: #" {2,}"#), " "),
     ]
@@ -751,21 +962,23 @@ enum DiagnosticLogStore {
         // (`token=` in the SwipePad and tmux launch lines) — redacting those
         // would cost the correlation the lines exist for, exactly as
         // `LaunchDiagnosticsPrivacyTests` documents for `nameHash=`.
-        // `endpointIdentifier` IS applied, but below, from
-        // `sanitizationRules`, where it has always run: after the field
-        // allowlists and before `failed(…)`, both of which its greedy
-        // `\S+@\S+` match would otherwise reshape.
+        // `endpointIdentifier` IS applied, but below, where it has always
+        // run: after the field allowlists, which would otherwise see
+        // `<redacted-endpoint>` as a field's value, and before `failed(…)`.
+        // It is the shared stage itself, not a copy: a copy kept the old
+        // `\S+@\S+`, which erased every `(@3` and `=@3` window id the shared
+        // rule was narrowed to keep.
         var sanitized = SensitiveDataRedactor.redact(message)
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\t", with: " ")
 
-        for (expression, template) in sanitizationRules {
-            sanitized = replacingMatches(
-                in: sanitized,
-                expression: expression,
-                template: template
-            )
+        for (expression, template) in fieldRules {
+            sanitized = replacingMatches(in: sanitized, expression: expression, template: template)
+        }
+        sanitized = SensitiveDataRedactor.redactEndpoints(sanitized)
+        for (expression, template) in trailingRules {
+            sanitized = replacingMatches(in: sanitized, expression: expression, template: template)
         }
         return sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
     }

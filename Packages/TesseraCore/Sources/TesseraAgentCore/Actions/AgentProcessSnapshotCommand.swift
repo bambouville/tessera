@@ -11,7 +11,18 @@ public enum AgentProcessSnapshotCommand {
         if let rootPID, rootPID > 0 {
             rootAssignment = "r=\(rootPID); "
         } else {
-            rootAssignment = "r=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' '); "
+            // The connection's sshd parents every channel's command, but a
+            // login shell such as tcsh or fish (or bash after an rc file sets
+            // a trap) forks the command it is handed instead of becoming it.
+            // Walk up to that sshd; failing that, keep the immediate parent.
+            // macOS reports the title sshd gives itself ("sshd-session:
+            // user@ttys002"), Linux the executable's name.
+            rootAssignment = "r=''; p=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' '); i=0; "
+            + "while [ \"$i\" -lt 8 ] && [ \"${p:-0}\" -gt 1 ] 2>/dev/null; do "
+            + "c=$(ps -o comm= -p \"$p\" 2>/dev/null | awk '{ print $1 }'); "
+            + "case \"${c##*/}\" in sshd|sshd:|sshd-session|sshd-session:|dropbear) r=$p; break ;; esac; "
+            + "p=$(ps -o ppid= -p \"$p\" 2>/dev/null | tr -d ' '); i=$((i + 1)); done; "
+            + "[ -n \"$r\" ] || r=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' '); "
         }
 
         let expected = expectedPID.flatMap { $0 > 1 ? $0 : nil } ?? 0

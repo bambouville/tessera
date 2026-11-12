@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Why an agent integration check is unavailable (AgentSessionIntegrationReason). The English
+         matches the status detail the coordinator keeps for diagnostics. %1$s: a transport code or
+         an endpoint's own reason, shown as it came. -->
+    <string name="agent_platform_integration_check_failed">The host integration check failed.</string>
+    <string name="agent_platform_integration_shared_unavailable">The shared Agent integration is unavailable.</string>
+    <string name="agent_platform_integration_probe_failed">The host integration probe failed.</string>
+    <string name="agent_platform_integration_process_state_unverified">The terminal process state could not be verified.</string>
+    <string name="agent_platform_integration_provider_settings_unreadable">Provider settings could not be read safely.</string>
+    <string name="agent_platform_integration_provider_settings_too_large">Provider settings exceed the safe installation limit.</string>
+    <string name="agent_platform_integration_install_unconfirmed">Could not verify Agent Center integration.</string>
+    <string name="agent_platform_integration_install_unconfirmed_code">Could not verify Agent Center integration: %1$s</string>
+    <string name="agent_platform_integration_installed_shell_changed">Integration was installed, but the foreground shell changed before activation.</string>
+    <string name="agent_platform_integration_installed_not_enabled">Integration was installed, but could not be enabled here: %1$s</string>
+    <string name="agent_platform_integration_provider_settings_changing">Provider settings changed during installation. Retry when they are idle.</string>
+    <string name="agent_platform_integration_shell_unverified">The current shell could not be verified.</string>
+    <string name="agent_platform_integration_shell_changed">The foreground shell changed before activation.</string>
+    <string name="agent_platform_integration_install_not_verified">The host did not confirm the Agent integration was installed.</string>
+    <string name="agent_platform_integration_install_not_current">The Agent integration was written, but the host still reports it out of date.</string>
+    <string name="agent_platform_integration_newer_installed">This host has a newer Agent Center integration from a newer Tessera. Update this app instead.</string>
+    <!-- Why an endpoint is unavailable (AgentEndpointUnavailableReason). Results, diagnostics and tests
+         keep the endpoint's English reason; these show it in the reader's language. -->
+    <string name="agent_platform_endpoint_agent_runtime_unavailable">Agent runtime unavailable</string>
+    <string name="agent_platform_endpoint_terminal_uploads_unavailable">File uploads are unavailable for this terminal</string>
+    <string name="agent_platform_endpoint_uploads_unavailable">File uploads are unavailable</string>
+    <string name="agent_platform_endpoint_process_occupancy_unavailable">Process occupancy is unavailable for this terminal</string>
+    <string name="agent_platform_endpoint_process_root_unavailable">Process root is unavailable</string>
+    <string name="agent_platform_endpoint_mosh_process_root_unavailable">mosh process root is unavailable</string>
+    <string name="agent_platform_endpoint_foreground_shell_proof_unavailable">foreground shell proof is unavailable</string>
+    <string name="agent_platform_endpoint_fresh_terminal_evidence_unavailable">fresh terminal evidence is unavailable</string>
+    <string name="agent_platform_endpoint_terminal_capture_unavailable">terminal capture is unavailable</string>
+    <string name="agent_platform_endpoint_launch_directory_unproven">launch requires a proven SSH+tmux pane directory</string>
+    <string name="agent_platform_endpoint_raw_transport_one_focus">raw transport has one focused terminal</string>
+    <string name="agent_platform_endpoint_raw_prompt_capture_unavailable">raw transport has no authoritative prompt capture yet</string>
+    <string name="agent_platform_endpoint_raw_terminal_route_unavailable">raw terminal route unavailable</string>
+    <string name="agent_platform_endpoint_route_proof_rejected">remote server did not accept the route proof marker</string>
+    <string name="agent_platform_endpoint_spawn_requires_tmux">spawn and fork require tmux</string>
+    <string name="agent_platform_endpoint_tmux_control_unavailable">tmux control is unavailable</string>
+    <string name="agent_platform_endpoint_tmux_control_route_unavailable">tmux control route unavailable</string>
+    <string name="agent_platform_endpoint_remote_data_unavailable">remote data unavailable</string>
+    <string name="agent_platform_endpoint_session_closed">session closed</string>
+</resources>

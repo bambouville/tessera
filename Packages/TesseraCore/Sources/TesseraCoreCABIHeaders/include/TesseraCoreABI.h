@@ -152,10 +152,10 @@ size_t tessera_agent_integration_abi_max_install_attempts(void);
 // Shared observation intervals in milliseconds as bounded JSON. As with command
 // exports, a null output buffer returns the required byte count.
 int32_t tessera_agent_integration_check_policy(
-    uint32_t consecutive_failures, uint8_t *output_bytes, size_t output_capacity);
+    uint32_t consecutive_failures, uint8_t * _Nullable output_bytes, size_t output_capacity);
 
-int32_t tessera_agent_host_deployment_command(const uint8_t *input_bytes, size_t input_count,
-                                            uint8_t *output_bytes, size_t output_capacity);
+int32_t tessera_agent_host_deployment_command(const uint8_t * _Nullable input_bytes, size_t input_count,
+                                            uint8_t * _Nullable output_bytes, size_t output_capacity);
 int32_t tessera_agent_integration_status_command(
     uint8_t * _Nullable output_bytes, size_t output_capacity
 );
@@ -252,9 +252,23 @@ int32_t tessera_agent_markdown_parse(
     const uint8_t * _Nullable input_bytes, size_t input_count,
     uint8_t * _Nullable output_bytes, size_t output_capacity
 );
+/* The same, for a document shown in Artifacts: every link destination is kept
+ * as written, for the viewer to resolve against the document's host.
+ */
+int32_t tessera_agent_markdown_parse_document(
+    const uint8_t * _Nullable input_bytes, size_t input_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
 
 /* Bounded framed canonical page and query -> display-only search matches. */
 int32_t tessera_agent_page_search(
+    const uint8_t * _Nullable input_bytes, size_t input_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+
+/* One framed Agent Host search response, query and held thread handles ->
+ * display-only exact matches, skipped threads and the continuation cursor. */
+int32_t tessera_agent_host_search(
     const uint8_t * _Nullable input_bytes, size_t input_count,
     uint8_t * _Nullable output_bytes, size_t output_capacity
 );
@@ -1804,6 +1818,205 @@ int32_t tessera_agent_initial_load_page_count(void);
 uint64_t tessera_agent_process_proof_timeout_milliseconds(void);
 uint64_t tessera_agent_read_retry_delay_milliseconds(int32_t consecutive_failures);
 int32_t tessera_agent_initial_load_should_prefetch(int32_t completed_pages, uint32_t flags);
+
+/*
+ * Artifacts (v1). JSON in -> canonical JSON out under the string contract:
+ * NULL/zero-capacity output queries length; undersized output returns -1
+ * without copying. Invalid arguments, malformed JSON and invalid UTF-8 return
+ * -1. Inputs are bounded by TESSERA_ARTIFACTS_ABI_MAX_PAYLOAD_BYTES. Sorted keys,
+ * literal slashes, absent optionals omitted. All times are Int64 milliseconds.
+ * Enum discriminators are lowerCamel strings in a flat "type" field.
+ * Swift structs in ArtifactsABI.swift and the replay fixture
+ * Tests/TesseraCoreABITests/Fixtures/artifacts-abi-golden.json are the contract.
+ *
+ * State: {"version":1,"tabs":[],"filter":"all","tabCap":64,"selectedID":"t1"}
+ * (selectedID optional). Targets: {"type":"file","path":"/a.md"},
+ * {"type":"page","scheme":"http","port":5173,"path":"/a?b#c"}, or
+ * {"type":"change","path":"/a.swift","diff":"...","summary":"..."}.
+ * Tab: {"id":"t1","hostID":"h1","hostLabel":"dev","target":{...},
+ * "kind":"docs","title":"a.md","origin":"files","openedAt":1,
+ * "viewedAt":1,"pinned":false,"unseenChange":false}. Optional sessionHint,
+ * agentEditedAt, cache:{"fetchedAt":1,"remoteMTime":1,"size":10,"isStale":false}.
+ * Kinds/filters: docs, pages, changes, files (filter also all).
+ */
+#define TESSERA_ARTIFACTS_ABI_MAX_PAYLOAD_BYTES 134217728u
+/* Separate from the generic 1 MiB ceiling: 64 x 256 KiB embedded diffs,
+ * including worst-case 6x JSON escaping, must round-trip through the ABI. */
+
+/* Request {"state":{"tabs":[]},"action":{"type":"select","tabID":"t1","nowMillis":10}}.
+ * Response {"state":{...},"evictedTabIDs":[],"focusedTabID":"t1"}.
+ * focusedTabID optional; navigatedPath is included on page opens and page
+ * navigations, e.g. "/a#b".
+ * Actions: open (open:{id,hostID,hostLabel,target,title,origin,sessionHint?,
+ * newTab?}), navigate (tabID,target,title),
+ * select/close (tabID), closeAll/hostRemoved (hostID), pin (tabID,pinned),
+ * setFilter (filter), titleLearned (tabID,title), fetched (tabID,cache),
+ * remoteStatObserved (tabID,remoteMTime?,size?,visible), agentEditObserved
+ * (hostID,path), hostRelabelled (hostID,label). Every action has nowMillis.
+ */
+int32_t tessera_artifacts_reduce(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"state":{"tabs":[]},"filter":"all","query":""}.
+ * Response {"groups":[],"countsByKind":{"docs":0,"pages":0,"changes":0,"files":0},
+ * "totalCount":0,"filter":"all","query":""}. Groups: {hostID,hostLabel,tabIDs}.
+ * Counts include the query before the kind filter. Hosts/tabs are most-recent first.
+ */
+int32_t tessera_artifacts_overview(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"input":":5173","context":{"hosts":[{"id":"h1","label":"dev","home":"/home/me"}],
+ * "currentHostID":"h1","cwd":"/work","listeningPorts":[]}}. home/currentHostID/cwd optional.
+ * Response {"type":"page","hostID":"h1","scheme":"http","port":5173,"path":"/"}.
+ * Other intents: file/directory (hostID,path), search (text), invalid (reason).
+ * Reasons: emptyInput, invalidInput, unknownHost, ambiguousHost, missingHost,
+ * missingCwd, unsupportedURL, invalidPort. User parse failures are valid responses.
+ */
+int32_t tessera_artifacts_quick_open_parse(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"input":"plan","state":{"tabs":[]},"context":{"hosts":[],"listeningPorts":[]},
+ * "recents":[],"limit":8}. Recents: {title,subtitle,intent,viewedAt}.
+ * Response [{"kind":"openTab","title":"PLAN.md","subtitle":"dev", "tabID":"t1",
+ * "intent":{"type":"file","hostID":"h1","path":"/PLAN.md"}}].
+ * kind: hostPrefix, openTab, listeningPort, recent. tabID optional; select an
+ * open change's tabID to retain its snapshot. limit<=0 returns [].
+ */
+int32_t tessera_artifacts_quick_open_suggestions(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"urlString":"http://0.0.0.0:8000/x?y#z"}.
+ * Response {"type":"remoteLoopback","scheme":"http","port":8000,"pathAndQuery":"/x?y#z"},
+ * {"type":"external"}, or {"type":"unsupported"}. Includes fragment.
+ * Rejects userinfo. Default ports 80/443. 127/8, ::1, 0.0.0.0 and :: are remote loopback.
+ */
+int32_t tessera_artifacts_classify_link(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"link":"../README.md","documentPath":"/work/docs/guide.md","home":"/home/me"}.
+ * home optional; without it a "~" link is refused.
+ * Response {"type":"file","path":"/work/README.md"},
+ * {"type":"page","scheme":"http","port":3000,"pathAndQuery":"/x?y#z"},
+ * {"type":"external"}, {"type":"refused"} or {"type":"ignored"}.
+ * File and page are on the document's own host; they open as Artifacts tabs.
+ */
+int32_t tessera_artifacts_document_link(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* No input. Response {"command":"sh -c '...'"}. POSIX one-second watchdog;
+ * tries ss, Linux/macOS netstat, then lsof. Run on an existing authenticated connection.
+ */
+int32_t tessera_artifacts_listening_ports_command(
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"output":"TESSERA_ARTIFACTS_PORTS:ss\n...","sshPort":2222}.
+ * sshPort optional; always excludes 22. Last marker selects format:
+ * ss, netstatLinux, netstatMacOS, lsof (none yields []).
+ * Response [{"port":8000,"bindAddress":"127.0.0.1","process":"python3"}].
+ * process optional; ports deduplicated and ascending.
+ */
+int32_t tessera_artifacts_listening_ports_parse(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"remotePort":5173,"hostRules":[]} (nonzero UInt16).
+ * Response {"type":"reuse","ruleID":"...","target":{"scheme":"http","host":"127.0.0.1",
+ * "port":5173,"url":"http://127.0.0.1:5173/"}} or {"type":"ephemeral","rule":{...}}.
+ * Ephemeral rule: enabled=true, autoStart=false, direction=local, bind/target
+ * host=127.0.0.1, target.port=remotePort; bind.port=same port if >=1024 and free,
+ * else 0. Its ID is 00000000-0000-0000-0000-000000000000, never persisted.
+ */
+int32_t tessera_artifacts_forward_plan(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"ephemeral":{...PortForwardRule...},"label":"dev app","ruleID":"...","hostRules":[]}.
+ * hostRules optional. Response {"id":"...","enabled":true,"autoStart":true,"direction":"local",
+ * "bind":{"host":"127.0.0.1","port":5173},"target":{"host":"127.0.0.1","port":5173},"label":"dev app"}.
+ * Caller must replace port 0 with the assigned port. Shared validator failure returns -1.
+ */
+int32_t tessera_artifacts_keep_as_rule(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"tab":{...ArtifactTab...}}. Response {"key":"fc41..."}.
+ * 64 lowercase hex digits: pure-Swift SHA-256 of hostID|kind|normalized path.
+ * Pages include scheme/port and omit fragment from that path.
+ */
+int32_t tessera_artifacts_cache_key(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"entries":[{"key":"a","size":100,"viewedAt":10,"pinned":false}],
+ * "budgetBytes":0,"protectedKeys":[]}. Protect selected keys explicitly.
+ * Response {"keys":["a"]}; oldest viewed first, lexical key breaks ties.
+ */
+int32_t tessera_artifacts_cache_evictions(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"tab":{...ArtifactTab...},"liveConnection":false,"nowMillis":1000}.
+ * Response {"state":"cached","fetchedAt":10,"canRefresh":false}.
+ * state: live, cached, stale, offline, none. fetchedAt optional.
+ * Without a live connection canRefresh is always false; never reconnect for a tab.
+ */
+int32_t tessera_artifacts_cache_presentation(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request is the raw persistence object, e.g. {"version":1,"tabs":[{"broken":true}]}.
+ * Response {"filter":"all","tabCap":64,"tabs":[],"version":1}.
+ * Lenient per-tab decode, max 64 persisted tabs, max 256 KiB UTF-8 per diff.
+ * Invalid JSON/UTF-8/non-object input returns -1. Unsupported versions yield empty v1.
+ */
+int32_t tessera_artifacts_decode_state(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Raw ArtifactsState -> canonical inline state, bounded without a JSON round trip. */
+int32_t tessera_artifacts_encode_state(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Raw ArtifactsState -> {"stateJSON":"{...manifest...}","blobs":{"<sha256>":"diff"}}.
+ * A change target in the manifest has diffDigest instead of diff. Write missing
+ * UTF-8 changes/<digest>.diff blobs before the manifest; collect after replacement.
+ */
+int32_t tessera_artifacts_split_state(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Raw manifest -> {"digests":["<sha256>"]}, sorted unique lowercase 64-digit hex.
+ * Inline files and unsupported versions return no blob references.
+ */
+int32_t tessera_artifacts_state_blob_digests(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* {"stateJSON":"{...manifest or inline state...}","blobs":{"<sha256>":"diff"}}
+ * -> canonical inline ArtifactsState. Invalid inner JSON/non-object returns -1.
+ * Missing, tampered and >256 KiB blobs drop only their tabs. Decoding and opens
+ * evict oldest unpinned, unselected changes above 4 MiB of retained UTF-8 diffs.
+ */
+int32_t tessera_artifacts_join_state(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
+/* Request {"path":"/PLAN.mdx","mimeHint":"text/markdown"} (mimeHint optional).
+ * Response {"kind":"docs","viewer":"markdown"}. Classifies files.
+ * Viewers: markdown, html, web, image, pdf, text, diff, other.
+ * Page targets are pages/web; change targets are changes/diff.
+ */
+int32_t tessera_artifacts_kind(
+    const uint8_t * _Nullable request_bytes, size_t request_count,
+    uint8_t * _Nullable output_bytes, size_t output_capacity
+);
 
 #ifdef __cplusplus
 }

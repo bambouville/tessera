@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -39,6 +39,8 @@ class AgentComposerKeyboardInstrumentedTest {
                 }
             }
         }
+        compose.onNodeWithTag("root-artifacts").assertIsDisplayed()
+        compose.onNodeWithTag("root-keys").assertDoesNotExist()
         val field = compose.onNodeWithTag("agent-composer")
         field.performClick()
         compose.waitUntil(5_000) { imeBottom() > 0 }

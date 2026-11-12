@@ -1,5 +1,7 @@
 package com.bambouville.tessera.networking
 
+import com.bambouville.tessera.forwarding.ForwardingTransport
+import com.bambouville.tessera.forwarding.PortForwardingRuntime
 import java.io.Closeable
 import java.io.InputStream
 import java.io.OutputStream
@@ -35,6 +37,7 @@ class SshFileConnection internal constructor(
     private val owner: SshRouteOwner,
     private val sftp: SFTPClient,
     private val closeRouteOnClose: Boolean,
+    private val forwardingRuntimeFactory: AuthenticatedForwardingRuntimeFactory,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
 
@@ -48,6 +51,14 @@ class SshFileConnection internal constructor(
      */
     val isOpen: Boolean
         get() = !closed.get() && owner.isConnected && runCatching { sftp.sftpEngine.subsystem.isOpen }.getOrDefault(false)
+
+    /** Forwarding on this already-open route, without exposing its SSH client. */
+    fun createForwardingRuntime(
+        transport: ForwardingTransport = ForwardingTransport.Ssh,
+    ): PortForwardingRuntime {
+        check(isOpen) { "files connection is closed" }
+        return forwardingRuntimeFactory.create(transport)
+    }
 
     suspend fun realPath(path: String): String = io { sftp.canonicalize(path) }
 
@@ -270,9 +281,10 @@ suspend fun AndroidSshBackend.connectFiles(
 
 /**
  * The size a server reported, or null when it gave none a transfer can use:
- * the field is optional, and SFTP's uint64 lands in a signed Long. sshj 0.40
- * refuses values past Long.MAX_VALUE rather than wrapping them, but a
- * negative size must never reach read-ahead or the progress total.
+ * the field is optional, and SFTP's uint64 lands in a signed Long. sshj keeps
+ * a value past Long.MAX_VALUE as its raw 64 bits (Apache MINA reports
+ * 0xFFFFFFFFFFFFFFFF for directories), and a negative size must never reach
+ * read-ahead or the progress total.
  */
 internal fun FileAttributes.reportedSize(): Long? =
     size.takeIf { has(FileAttributes.Flag.SIZE) && it >= 0 }

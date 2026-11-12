@@ -37,6 +37,22 @@
       "versionInfo": "3.15.1"
     },
     {
+      "SPDXID": "SPDXRef-Package-SwiftMarkdown",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "3c6f9523da3a1ec2fd829673e472d95b8097a3b8"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/swiftlang/swift-markdown.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 WITH Swift-exception",
+      "licenseDeclared": "Apache-2.0 WITH Swift-exception",
+      "name": "swift-markdown",
+      "versionInfo": "0.8.0"
+    },
+    {
       "SPDXID": "SPDXRef-Package-SwiftASN1",
       "checksums": [
         {
@@ -51,6 +67,22 @@
       "licenseDeclared": "Apache-2.0",
       "name": "swift-asn1",
       "versionInfo": "1.7.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SwiftCmark",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "924936d0427cb25a61169739a7660230bffa6ea6"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/swiftlang/swift-cmark.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause AND MIT",
+      "licenseDeclared": "BSD-2-Clause AND MIT",
+      "name": "swift-cmark",
+      "versionInfo": "0.8.0"
     },
     {
       "SPDXID": "SPDXRef-Package-Mosh",
@@ -128,6 +160,16 @@
       "relatedSpdxElement": "SPDXRef-Package-OpenSSL",
       "relationshipType": "DEPENDS_ON",
       "spdxElementId": "SPDXRef-Package-Mosh"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-SwiftCmark",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-SwiftMarkdown"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-SwiftMarkdown",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-Package-TesseraSharedCore"
     }
   ],
   "spdxVersion": "SPDX-2.3"

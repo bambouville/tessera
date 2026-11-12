@@ -154,7 +154,7 @@ enum HarnessLoopbackProbe {
         let connection = NWConnection(host: "127.0.0.1", port: nwPort, using: .tcp)
         return await withCheckedContinuation { continuation in
             let answered = HarnessOnce()
-            func answer(_ result: ForwardedServiceProbeResult) {
+            @Sendable func answer(_ result: ForwardedServiceProbeResult) {
                 guard answered.claim() else { return }
                 connection.cancel()
                 continuation.resume(returning: result)
@@ -263,7 +263,7 @@ final class HarnessLoopbackWebServer {
         }
     }
 
-    private static func page(for path: String) -> String {
+    private nonisolated static func page(for path: String) -> String {
         let second = path.hasPrefix("/second")
         let heading = second ? "second page" : "tunnelled dev server"
         return """

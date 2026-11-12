@@ -18,4 +18,25 @@
     <string name="tmux_split_left">Diviser à gauche</string>
     <string name="tmux_split_down">Diviser vers le bas</string>
     <string name="tmux_split_up">Diviser vers le haut</string>
+
+    <!-- tmux window and pane verbs shared by the switcher, the window strip and their dialogs -->
+    <string name="session_new_tmux_window">Nouvelle fenêtre tmux</string>
+    <string name="session_tmux_rename">renommer</string>
+    <string name="session_tmux_zoom_pane_menu">agrandir le volet</string>
+    <string name="session_tmux_unzoom_pane_menu">réduire le volet</string>
+    <string name="session_tmux_close_window_menu">fermer la fenêtre</string>
+    <string name="session_tmux_close_window_title">Fermer %1$s ?</string>
+    <string name="session_tmux_close_pane_title">Fermer le volet %1$s ?</string>
+    <string name="session_tmux_close_body">Le processus tmux distant de cette cible sera arrêté.</string>
+    <string name="session_tmux_rename_window_title">renommer la fenêtre</string>
+    <string name="session_tmux_rename_confirm">Renommer</string>
+    <string name="session_tmux_window_name">Nom de la fenêtre</string>
+    <string name="session_tmux_rename_window_description">Renommer la fenêtre</string>
+    <string name="session_tmux_split_left_right_description">Diviser le volet à gauche et à droite</string>
+    <string name="session_tmux_split_top_bottom_description">Diviser le volet en haut et en bas</string>
+    <string name="session_tmux_zoom_pane_description">Agrandir le volet</string>
+    <string name="session_tmux_unzoom_pane_description">Réduire le volet</string>
+    <string name="session_tmux_panes_kicker">volets</string>
+    <string name="session_tmux_close_pane_description">Fermer le volet</string>
+    <string name="session_tmux_close_window_description">Fermer la fenêtre</string>
 </resources>

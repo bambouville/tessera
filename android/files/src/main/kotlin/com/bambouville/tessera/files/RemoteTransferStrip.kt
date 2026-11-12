@@ -18,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bambouville.tessera.design.LocalTesseraTokens
@@ -84,7 +86,7 @@ fun RemoteTransferStrip(
             )
             if (head.phase != TransferPhase.CANCELLING) {
                 TesseraButton(
-                    text = "cancel",
+                    text = stringResource(R.string.files_transfer_cancel),
                     onClick = { onCancel(head) },
                     compact = true,
                     modifier = Modifier.testTag("transfer-strip-cancel"),
@@ -110,6 +112,7 @@ fun RemoteTransferStrip(
 }
 
 /** Byte counts, then what this row is doing and what waits behind it. */
+@Composable
 private fun stripDetail(item: TransferItem, remaining: Int): String {
     val total = item.totalBytes
     val bytes = if (total != null && total > 0) {
@@ -117,12 +120,15 @@ private fun stripDetail(item: TransferItem, remaining: Int): String {
     } else {
         formatBytes(item.transferredBytes)
     }
-    val phase = when (item.phase) {
-        TransferPhase.QUEUED -> "queued"
-        TransferPhase.CANCELLING -> "cancelling…"
-        else -> if (item.direction == TransferDirection.UPLOAD) "uploading" else "downloading"
-    }
-    return bytes + " · " + phase + if (remaining > 0) " · +$remaining more" else ""
+    val phase = stringResource(
+        when (item.phase) {
+            TransferPhase.QUEUED -> R.string.files_phase_queued
+            TransferPhase.CANCELLING -> R.string.files_strip_cancelling
+            else -> if (item.direction == TransferDirection.UPLOAD) R.string.files_strip_uploading else R.string.files_strip_downloading
+        },
+    )
+    val more = if (remaining > 0) " · " + pluralStringResource(R.plurals.files_strip_more, remaining, remaining) else ""
+    return bytes + " · " + phase + more
 }
 
 /** Transfers worth reporting over the terminal: the ones still moving. */

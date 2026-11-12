@@ -1,6 +1,7 @@
 package com.bambouville.tessera.files
 
 import android.net.Uri
+import com.bambouville.tessera.design.DisplayText
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,9 @@ data class RemoteFileEntry(
     val isHidden: Boolean get() = name.startsWith('.')
 }
 
+/** The two selection actions: Open in Artifacts and Reveal in Files. */
+enum class SelectedPathIntent { OPEN_IN_ARTIFACTS, REVEAL_IN_FILES }
+
 enum class TransferDirection { DOWNLOAD, UPLOAD }
 enum class TransferPhase { QUEUED, RUNNING, CANCELLING, COMPLETED, FAILED, CANCELLED }
 
@@ -32,7 +36,7 @@ data class TransferItem(
     val transferredBytes: Long = 0,
     val totalBytes: Long? = null,
     val replaceExisting: Boolean = false,
-    val error: String? = null,
+    val error: DisplayText? = null,
 )
 
 data class RemoteFilesState(
@@ -40,7 +44,7 @@ data class RemoteFilesState(
     val homePath: String? = null,
     val entries: List<RemoteFileEntry> = emptyList(),
     val loading: Boolean = false,
-    val error: String? = null,
+    val error: DisplayText? = null,
     /** Last cwd the terminal reported, whatever transport discovered it. */
     val terminalDirectory: String? = null,
     val followEnabled: Boolean = true,
@@ -109,6 +113,21 @@ interface RemoteFilesPresenter {
     fun quickOpenSelectedFile(
         selection: String,
         terminalDirectory: String? = null,
+        onPresentationLaunched: () -> Unit = {},
+        onFailure: (String) -> Unit = {},
+    )
+    /**
+     * A path selected in an agent transcript, resolved exactly as a terminal
+     * selection is (both readings, canonicalize, stat, tolerant walk) with
+     * two differences: a relative path anchors only to [paneDirectory] — the
+     * browser's location is no signal for where an agent ran — and a
+     * directory always reveals in Files, whichever [intent] asked.
+     */
+    fun openTranscriptSelectedPath(
+        selection: String,
+        paneDirectory: String?,
+        intent: SelectedPathIntent,
+        onRevealRequested: () -> Unit = {},
         onPresentationLaunched: () -> Unit = {},
         onFailure: (String) -> Unit = {},
     )

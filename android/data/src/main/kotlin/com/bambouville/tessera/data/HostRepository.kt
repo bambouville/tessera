@@ -1,6 +1,7 @@
 package com.bambouville.tessera.data
 
 import android.content.Context
+import androidx.annotation.StringRes
 import com.bambouville.tessera.core.bridge.SharedTargetValidation
 import com.bambouville.tessera.core.bridge.SharedTmuxNameRejection
 import java.util.UUID
@@ -23,11 +24,14 @@ interface HostRepository {
 class AndroidHostRepository private constructor(
     private val dao: HostDao,
     private val clock: () -> Long,
+    /** Resolves the validation messages the host editor shows. */
+    private val appContext: Context,
     private val scope: CoroutineScope = repositoryScope(),
 ) : HostRepository {
     constructor(context: Context) : this(
         dao = TesseraDatabase.get(context).hostDao(),
         clock = System::currentTimeMillis,
+        appContext = context.applicationContext,
     )
 
     override val loadedHosts: StateFlow<List<SavedHost>?> =
@@ -39,7 +43,11 @@ class AndroidHostRepository private constructor(
     override suspend fun host(id: String): SavedHost? = dao.get(normalizeUuid(id))?.toSavedHost()
 
     override suspend fun save(draft: HostDraft): SavedHost {
-        val normalized = HostDraftValidator.normalize(draft)
+        val normalized = try {
+            HostDraftValidator.normalize(draft)
+        } catch (invalid: HostDraftInvalidException) {
+            throw IllegalArgumentException(appContext.getString(invalid.messageRes), invalid)
+        }
         val existing = normalized.id?.let { dao.get(it) }
         val now = clock()
         val entity = HostEntity(
@@ -60,7 +68,7 @@ class AndroidHostRepository private constructor(
             createdAtEpochMilliseconds = existing?.createdAtEpochMilliseconds ?: now,
             updatedAtEpochMilliseconds = now,
         )
-        require(entity.jumpHostId != entity.id) { "a host cannot jump through itself" }
+        require(entity.jumpHostId != entity.id) { appContext.getString(R.string.data_host_jump_through_itself) }
         validateJumpRoute(entity.id, entity.jumpHostId)
         dao.upsert(entity)
         return entity.toSavedHost()
@@ -73,9 +81,9 @@ class AndroidHostRepository private constructor(
         val visited = mutableSetOf<String>()
         var next: String? = normalizeUuid(hostId)
         while (next != null) {
-            require(visited.add(next)) { "jump route contains a cycle" }
-            require(reversed.size < MAX_ROUTE_HOPS) { "jump route exceeds $MAX_ROUTE_HOPS hosts" }
-            val host = dao.get(next)?.toSavedHost() ?: error("route host is unavailable")
+            require(visited.add(next)) { appContext.getString(R.string.data_jump_route_cycle) }
+            require(reversed.size < MAX_ROUTE_HOPS) { jumpRouteTooLong() }
+            val host = dao.get(next)?.toSavedHost() ?: error(appContext.getString(R.string.data_route_host_unavailable))
             reversed += host
             next = host.jumpHostId
         }
@@ -87,12 +95,15 @@ class AndroidHostRepository private constructor(
         var next = firstJumpHostId
         var count = 1
         while (next != null) {
-            require(visited.add(next)) { "jump route contains a cycle" }
-            require(count++ < MAX_ROUTE_HOPS) { "jump route exceeds $MAX_ROUTE_HOPS hosts" }
-            val jumpHost = dao.get(next) ?: error("jump host is unavailable")
+            require(visited.add(next)) { appContext.getString(R.string.data_jump_route_cycle) }
+            require(count++ < MAX_ROUTE_HOPS) { jumpRouteTooLong() }
+            val jumpHost = dao.get(next) ?: error(appContext.getString(R.string.data_jump_host_unavailable))
             next = jumpHost.jumpHostId
         }
     }
+
+    private fun jumpRouteTooLong(): String =
+        appContext.resources.getQuantityString(R.plurals.data_jump_route_too_long, MAX_ROUTE_HOPS, MAX_ROUTE_HOPS)
 
     private companion object {
         const val MAX_ROUTE_HOPS = 8
@@ -110,23 +121,28 @@ object HostDraftValidator {
         }
         val username = draft.username.trim()
         val displayName = draft.displayName.trim().ifEmpty { hostname }
-        require(hostname.isNotEmpty()) { "hostname is required" }
-        require(hostname.none(Char::isWhitespace)) { "hostname cannot contain whitespace" }
-        require(hostname.none(Char::isISOControl)) { "hostname cannot contain control characters" }
-        require(username.isNotEmpty()) { "username is required" }
-        require(username.none(Char::isWhitespace)) { "username cannot contain whitespace" }
-        require(username.none(Char::isISOControl)) { "username cannot contain control characters" }
-        require(displayName.none(Char::isISOControl)) { "name cannot contain control characters" }
-        require(draft.port in 1..65535) { "port must be between 1 and 65535" }
+        invalidUnless(hostname.isNotEmpty(), R.string.data_hostname_required)
+        invalidUnless(hostname.none(Char::isWhitespace), R.string.data_hostname_whitespace)
+        invalidUnless(hostname.none(Char::isISOControl), R.string.data_hostname_control_characters)
+        invalidUnless(username.isNotEmpty(), R.string.data_username_required)
+        invalidUnless(username.none(Char::isWhitespace), R.string.data_username_whitespace)
+        invalidUnless(username.none(Char::isISOControl), R.string.data_username_control_characters)
+        invalidUnless(displayName.none(Char::isISOControl), R.string.data_name_control_characters)
+        invalidUnless(draft.port in 1..65535, R.string.data_port_range)
         listOf(draft.launchCommand, draft.notes, draft.envVars, draft.startupSnippet).forEach {
-            require(it == null || (it.toByteArray(Charsets.UTF_8).size <= 65_536 && '\u0000' !in it)) { "host text exceeds 64 KiB or contains a NUL character" }
+            invalidUnless(
+                it == null || (it.toByteArray(Charsets.UTF_8).size <= 65_536 && '\u0000' !in it),
+                R.string.data_host_text_too_long,
+            )
         }
-        require(draft.tmuxMode in setOf(TmuxModes.OFF, TmuxModes.AUTOMATIC, TmuxModes.PINNED)) {
-            "invalid tmux mode"
-        }
-        require(draft.transportKind in setOf(TransportKinds.SSH, TransportKinds.MOSH)) {
-            "invalid transport kind"
-        }
+        invalidUnless(
+            draft.tmuxMode in setOf(TmuxModes.OFF, TmuxModes.AUTOMATIC, TmuxModes.PINNED),
+            R.string.data_invalid_tmux_mode,
+        )
+        invalidUnless(
+            draft.transportKind in setOf(TransportKinds.SSH, TransportKinds.MOSH),
+            R.string.data_invalid_transport_kind,
+        )
         val tmuxTarget = draft.tmuxTarget?.trim()?.takeIf(String::isNotEmpty)
         if (draft.tmuxMode == TmuxModes.PINNED) {
             // One grammar, owned by the shared core: this field, the tmux
@@ -137,13 +153,11 @@ object HostDraftValidator {
             when (SharedTargetValidation.tmuxSessionNameRejection(tmuxTarget.orEmpty())) {
                 null -> Unit
                 SharedTmuxNameRejection.Empty ->
-                    throw IllegalArgumentException("a pinned tmux target is required")
+                    throw HostDraftInvalidException(R.string.data_tmux_target_required)
                 SharedTmuxNameRejection.TooLong ->
-                    throw IllegalArgumentException("tmux target is too long")
+                    throw HostDraftInvalidException(R.string.data_tmux_target_too_long)
                 SharedTmuxNameRejection.UnsafeCharacter ->
-                    throw IllegalArgumentException(
-                        "tmux target must use letters, digits, underscore, dash, or dot",
-                    )
+                    throw HostDraftInvalidException(R.string.data_tmux_target_characters)
             }
         }
         return draft.copy(
@@ -155,4 +169,14 @@ object HostDraftValidator {
             tmuxTarget = tmuxTarget,
         )
     }
+
+    private fun invalidUnless(valid: Boolean, @StringRes messageRes: Int) {
+        if (!valid) throw HostDraftInvalidException(messageRes)
+    }
 }
+
+/**
+ * A draft the host editor must correct. [messageRes] is what the user reads;
+ * [AndroidHostRepository.save] rethrows it with that text resolved.
+ */
+class HostDraftInvalidException(@param:StringRes val messageRes: Int) : IllegalArgumentException()

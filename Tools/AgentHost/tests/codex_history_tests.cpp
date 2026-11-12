@@ -2,6 +2,7 @@
 #include "Json.h"
 #include <cassert>
 #include <fstream>
+#include <iterator>
 #include <unistd.h>
 
 int main() {
@@ -196,6 +197,17 @@ int main() {
     catch (const std::runtime_error& error) { assert(std::string(error.what()) == "cancelled"); }
     assert(legacyResumed.size() > 2 && legacyResumed.size() < 152);
     refresh(legacyResumed); assert(legacyResumed.size() == 152 && legacyResumed.mirroredRecords() == 150);
+    // The service hands the reader and refresh one cancellation flag. The
+    // boundary witness still completes, so the next refresh resumes the
+    // committed prefix instead of rebuilding from the first byte.
+    Index sharedResumed; size_t sharedChecks = 0; bool sharedCancelled = false;
+    try {
+        tessera::JsonlReader reader(filename, "codex", -1, [&] { return sharedChecks >= 23; }, Index::metadata);
+        sharedResumed.refresh(reader, [&] { return ++sharedChecks >= 23; });
+    } catch (const std::runtime_error& error) { sharedCancelled = std::string(error.what()) == "cancelled"; }
+    assert(sharedCancelled && sharedResumed.size() > 2 && sharedResumed.size() < 152);
+    const auto sharedGeneration = sharedResumed.generation();
+    refresh(sharedResumed); assert(sharedResumed.generation() == sharedGeneration && sharedResumed.size() == 152);
     // Positional annotations can exclude injected fragments from the visible
     // response. Raw concatenation is then not proof of authored equality.
     { std::ofstream file(filename); file << legacyMeta
@@ -211,6 +223,25 @@ int main() {
     } catch (const std::runtime_error& error) { cancelled = std::string(error.what()) == "cancelled"; }
     assert(cancelled); const auto resumableGeneration = resumed.generation(); refresh(resumed);
     assert(resumed.generation() == resumableGeneration && resumed.size() == 399);
+    // A same-width interior rewrite that also appends keeps the stat's growth
+    // and the boundary witness. The record contradicting its proof fails once
+    // and the next refresh rebuilds, rather than every read failing.
+    {
+        std::string content;
+        { std::ifstream file(filename, std::ios::binary); content.assign(std::istreambuf_iterator<char>(file), {}); }
+        const auto at = content.find("\"id10\""); assert(at != std::string::npos);
+        content.replace(at + 1, 4, "idXX");
+        content += item(401, "child", "id401", "fixture");
+        { std::fstream file(filename, std::ios::in | std::ios::out | std::ios::binary); file << content; }
+        refresh(resumed); assert(resumed.generation() == resumableGeneration && resumed.size() == 400);
+        size_t contradictions = 0;
+        for (size_t i = 0; i < resumed.size() && !contradictions; ++i)
+            try { (void)selected(resumed, i); }
+            catch (const std::runtime_error& error) { assert(std::string(error.what()) == "sourceChanged"); ++contradictions; }
+        assert(contradictions == 1);
+        refresh(resumed); assert(resumed.generation() != resumableGeneration && resumed.size() == 400);
+        for (size_t i = 0; i < resumed.size(); ++i) (void)selected(resumed, i);
+    }
     // A 64 MiB read slice ends inside the next record, evicting the last
     // admitted boundary. Canonical indexing must still witness and commit
     // that prefix, then resume without missing or duplicating ordinals.

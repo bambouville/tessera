@@ -292,8 +292,7 @@ private final class ServerConnectionRequests: GlobalRequestDelegate {
 /// An SSH Server implementation.
 /// This class is used to start an SSH server on a specified host and port.
 /// The server can be closed using the `close()` method.
-/// - Note: This class is not thread safe.
-public final class SSHServer {
+public final class SSHServer: Sendable {
     let channel: Channel
     let delegate: CitadelServerDelegate
     let logger: Logger
@@ -352,7 +351,7 @@ public final class SSHServer {
         algorithms: SSHAlgorithms = SSHAlgorithms(),
         protocolOptions: Set<SSHProtocolOption> = [],
         logger: Logger = Logger(label: "nl.orlandos.citadel.server"),
-        authenticationDelegate: NIOSSHServerUserAuthenticationDelegate,
+        authenticationDelegate: NIOSSHServerUserAuthenticationDelegate & Sendable,
         group: MultiThreadedEventLoopGroup = .init(numberOfThreads: 1)
     ) async throws -> SSHServer {
         let delegate = CitadelServerDelegate()
@@ -380,16 +379,18 @@ public final class SSHServer {
                     option.apply(to: &server)
                 }
 
-                return channel.pipeline.addHandlers([
-                    NIOSSHHandler(
-                        role: .server(server),
-                        allocator: channel.allocator,
-                        inboundChildChannelInitializer: { childChannel, channelType in
-                            delegate.initializeSshChildChannel(childChannel, channelType, username: authentication.username)
-                        }
-                    ),
-                    CloseErrorHandler(logger: logger)
-                ])
+                return channel.eventLoop.makeCompletedFuture {
+                    try channel.pipeline.syncOperations.addHandlers([
+                        NIOSSHHandler(
+                            role: .server(server),
+                            allocator: channel.allocator,
+                            inboundChildChannelInitializer: { childChannel, channelType in
+                                delegate.initializeSshChildChannel(childChannel, channelType, username: authentication.username)
+                            }
+                        ),
+                        CloseErrorHandler(logger: logger)
+                    ])
+                }
             }
             .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
             .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)

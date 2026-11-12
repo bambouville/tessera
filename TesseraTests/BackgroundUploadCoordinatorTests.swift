@@ -421,8 +421,8 @@ private final class RecordingTransferQueue: TransferQueueing {
     var backgroundAttention: BackgroundTransferAttention = .none
     private(set) var cancellations: [Cancellation] = []
 
-    init(item: TransferItem) {
-        items = [item]
+    init(item: TransferItem? = nil) {
+        items = item.map { [$0] } ?? []
     }
 
     var hasActive: Bool {
@@ -435,7 +435,10 @@ private final class RecordingTransferQueue: TransferQueueing {
     }
 
     func enqueueDownload(remotePath: String, displayName: String, to localURL: URL) -> TransferItem {
-        fatalError("unused")
+        let item = TransferItem(direction: .download, displayName: displayName, remotePath: remotePath, localURL: localURL)
+        item.phase = .completed
+        items.append(item)
+        return item
     }
 
     func enqueueUpload(localURL: URL, toDirectory remoteDirectory: String) -> TransferItem {
@@ -457,4 +460,198 @@ private final class RecordingTransferQueue: TransferQueueing {
     func acknowledgeBackgroundAttention() {}
     func clearFinished() {}
     func scheduleReaperIfNeeded(freshConnect: Bool) {}
+}
+
+@MainActor
+final class FilesPanelControllerArtifactTests: XCTestCase {
+    func testRowOpenUsesArtifactsWithoutStaging() {
+        let (controller, bridge, queue, entry) = fixture()
+        var opened: [RemoteFileEntry] = []
+        controller.onOpenInArtifacts = { opened.append($0) }
+
+        controller.openFile(entry)
+
+        XCTAssertEqual(opened, [entry])
+        XCTAssertTrue(queue.items.isEmpty)
+        XCTAssertTrue(bridge.downloadedPaths.isEmpty)
+        XCTAssertNil(controller.presentedPreview)
+    }
+
+    func testQuickOpenUsesArtifactsWithoutStaging() async {
+        let (controller, bridge, queue, entry) = fixture()
+        var opened: [RemoteFileEntry] = []
+        controller.onOpenInArtifacts = { opened.append($0) }
+        controller.terminalReportedDirectory("/fixture")
+
+        let dismiss = await controller.quickOpen("report.txt")
+
+        XCTAssertTrue(dismiss)
+        XCTAssertEqual(opened, [entry])
+        XCTAssertTrue(queue.items.isEmpty)
+        XCTAssertTrue(bridge.downloadedPaths.isEmpty)
+        XCTAssertNil(controller.presentedPreview)
+    }
+
+    func testTerminalOpenUsesArtifactsWhilePanelIsClosedWithoutStaging() async throws {
+        let (controller, bridge, queue, entry) = fixture()
+        var opened: [RemoteFileEntry] = []
+        controller.onOpenInArtifacts = { opened.append($0) }
+
+        controller.openTerminalPath("report.txt", cwd: "/fixture", intent: .openInArtifacts) {
+            XCTFail($0)
+        }
+        try await waitFor { !opened.isEmpty }
+
+        XCTAssertEqual(opened, [entry])
+        XCTAssertFalse(controller.isOpen)
+        XCTAssertTrue(queue.items.isEmpty)
+        XCTAssertTrue(bridge.downloadedPaths.isEmpty)
+        XCTAssertNil(controller.presentedPreview)
+    }
+
+    func testTerminalArtifactOpenDoesNotRequireATransferQueue() async throws {
+        let (controller, _, queue, entry) = fixture()
+        controller.transfers = nil
+        var opened: [RemoteFileEntry] = []
+        controller.onOpenInArtifacts = { opened.append($0) }
+
+        controller.openTerminalPath(entry.path, cwd: nil, intent: .openInArtifacts) {
+            XCTFail($0)
+        }
+        try await waitFor { !opened.isEmpty }
+
+        XCTAssertEqual(opened, [entry])
+        XCTAssertTrue(queue.items.isEmpty)
+    }
+
+    func testTerminalOpenUsesSelectionSpecificHandler() async throws {
+        let (controller, _, queue, entry) = fixture()
+        var filesOpens: [RemoteFileEntry] = []
+        var selectionOpens: [RemoteFileEntry] = []
+        controller.onOpenInArtifacts = { filesOpens.append($0) }
+
+        controller.openTerminalPath(
+            entry.path, cwd: nil, intent: .openInArtifacts,
+            openInArtifacts: { selectionOpens.append($0) }
+        ) { XCTFail($0) }
+        try await waitFor { !selectionOpens.isEmpty }
+
+        XCTAssertEqual(selectionOpens, [entry])
+        XCTAssertTrue(filesOpens.isEmpty)
+        XCTAssertTrue(queue.items.isEmpty)
+    }
+
+    func testRowOpenStagesPreviewWhenArtifactsIsAbsent() async throws {
+        let (controller, _, queue, entry) = fixture()
+        defer { cleanUp(controller, queue: queue) }
+        controller.open()
+
+        controller.openFile(entry)
+        try await waitFor { controller.presentedPreview != nil }
+
+        assertStagedPreview(controller, queue: queue, entry: entry)
+    }
+
+    func testQuickOpenStagesPreviewWhenArtifactsIsAbsent() async throws {
+        let (controller, _, queue, entry) = fixture()
+        defer { cleanUp(controller, queue: queue) }
+        controller.open()
+
+        let dismiss = await controller.quickOpen(entry.path)
+        try await waitFor { controller.presentedPreview != nil }
+
+        XCTAssertTrue(dismiss)
+        assertStagedPreview(controller, queue: queue, entry: entry)
+    }
+
+    func testTerminalOpenStagesPreviewWithPanelClosedWhenArtifactsIsAbsent() async throws {
+        let (controller, _, queue, entry) = fixture()
+        defer { cleanUp(controller, queue: queue) }
+
+        controller.openTerminalPath(entry.path, cwd: nil, intent: .openInArtifacts) {
+            XCTFail($0)
+        }
+        try await waitFor { controller.presentedPreview != nil }
+
+        XCTAssertFalse(controller.isOpen)
+        assertStagedPreview(controller, queue: queue, entry: entry)
+    }
+
+    func testQuickOpenDirectoryStillBrowsesWhenArtifactsIsInstalled() async {
+        let (controller, _, queue, _) = fixture()
+        controller.onOpenInArtifacts = { _ in XCTFail("directory became an artifact") }
+
+        let dismiss = await controller.quickOpen("/fixture/folder")
+
+        XCTAssertTrue(dismiss)
+        XCTAssertEqual(controller.currentDirectory, "/fixture/folder")
+        XCTAssertTrue(queue.items.isEmpty)
+    }
+
+    func testTerminalDirectoryAndRevealStillBrowseWhenArtifactsIsInstalled() async throws {
+        for (path, intent, expectedDirectory) in [
+            ("/fixture/folder", FilesPanelController.TerminalPathIntent.openInArtifacts, "/fixture/folder"),
+            ("/fixture/report.txt", .reveal, "/fixture"),
+        ] {
+            let (controller, _, queue, _) = fixture()
+            defer { controller.close() }
+            controller.onOpenInArtifacts = { _ in XCTFail("reveal became an artifact") }
+
+            controller.openTerminalPath(path, cwd: nil, intent: intent) { XCTFail($0) }
+            try await waitFor { controller.currentDirectory == expectedDirectory }
+
+            XCTAssertTrue(controller.isOpen)
+            XCTAssertTrue(queue.items.isEmpty)
+        }
+    }
+
+    private func fixture() -> (FilesPanelController, MockFileBridge, RecordingTransferQueue, RemoteFileEntry) {
+        let entry = RemoteFileEntry(
+            name: "report.txt", path: "/fixture/report.txt", kind: .file,
+            size: 12, modified: nil, permissions: 0o644
+        )
+        let folder = RemoteFileEntry(
+            name: "folder", path: "/fixture/folder", kind: .directory,
+            size: nil, modified: nil, permissions: 0o755
+        )
+        let bridge = MockFileBridge(
+            key: FileBridgeKey(hostID: UUID(), user: "mock", address: "mock.local", port: 22),
+            tree: ["/fixture": [entry, folder], "/fixture/folder": [], "/home/mock": []]
+        )
+        let queue = RecordingTransferQueue()
+        let controller = FilesPanelController()
+        controller.attach(bridge: bridge)
+        controller.configureFileActions(transfers: queue, hostFolderName: "fixture")
+        return (controller, bridge, queue, entry)
+    }
+
+    private func assertStagedPreview(
+        _ controller: FilesPanelController, queue: RecordingTransferQueue, entry: RemoteFileEntry,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertEqual(queue.items.count, 1, file: file, line: line)
+        XCTAssertEqual(queue.items.first?.remotePath, entry.path, file: file, line: line)
+        XCTAssertEqual(controller.presentedPreview?.title, entry.name, file: file, line: line)
+        XCTAssertEqual(controller.presentedPreview?.localURL, queue.items.first?.localURL, file: file, line: line)
+    }
+
+    private func cleanUp(_ controller: FilesPanelController, queue: RecordingTransferQueue) {
+        controller.close()
+        for item in queue.items {
+            if let directory = item.localURL?.deletingLastPathComponent() {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+    }
+
+    private func waitFor(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                XCTFail("controller did not finish the open request")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
 }

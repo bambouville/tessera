@@ -120,8 +120,12 @@ void transformX86ShaNi(uint32_t* state, const uint8_t* blocks, size_t count, con
                 schedule[target] = _mm_sha256msg2_epu32(
                     _mm_add_epi32(schedule[target], aligned), schedule[index]);
             }
-            if (group <= 12)
-                schedule[index] = _mm_sha256msg1_epu32(schedule[index], schedule[(index + 1) & 3]);
+            // msg1 on the previous group's words follows this group's alignr,
+            // which still reads them unmodified.
+            if (group >= 1 && group <= 12) {
+                const auto previous = (index + 3) & 3;
+                schedule[previous] = _mm_sha256msg1_epu32(schedule[previous], schedule[index]);
+            }
         }
         abef = _mm_add_epi32(abef, savedAbef);
         cdgh = _mm_add_epi32(cdgh, savedCdgh);

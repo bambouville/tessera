@@ -195,23 +195,24 @@ class SharedAgentRuntime private constructor(
         eventSink.clear()
     }
 
-    private fun receiveCallback(bytes: ByteArray) = synchronized(callbackLock) {
-        if (nativeHandle.get() == 0L) return
-        val event = runCatching { SharedAgentEventDecoder.decode(bytes) }.getOrElse { failure ->
-            reportDropped(decodeFailureDiagnostics(bytes.size, failure))
-            return
-        }
-        while (true) {
-            val accepted = highestAcceptedGeneration.get()
-            if (event.runtimeGeneration <= accepted) return
-            if (highestAcceptedGeneration.compareAndSet(accepted, event.runtimeGeneration)) {
-                break
+    private fun receiveCallback(bytes: ByteArray) {
+        synchronized(callbackLock) {
+            if (nativeHandle.get() == 0L) return
+            val event = runCatching { SharedAgentEventDecoder.decode(bytes) }.getOrElse { failure ->
+                reportDropped(decodeFailureDiagnostics(bytes.size, failure))
+                return
             }
+            while (true) {
+                val accepted = highestAcceptedGeneration.get()
+                if (event.runtimeGeneration <= accepted) return
+                if (highestAcceptedGeneration.compareAndSet(accepted, event.runtimeGeneration)) {
+                    break
+                }
+            }
+            if (nativeHandle.get() == 0L) return
+            if (event is SharedAgentRuntimeEvent.Snapshot) mutableSnapshot.value = event.snapshot
+            queuedEvents.trySendBlocking(event)
         }
-        if (nativeHandle.get() == 0L) return
-        if (event is SharedAgentRuntimeEvent.Snapshot) mutableSnapshot.value = event.snapshot
-        queuedEvents.trySendBlocking(event)
-        Unit
     }
 
     private fun reportDropped(fields: Map<String, String>) {

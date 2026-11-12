@@ -169,6 +169,7 @@ class ForwardingChromePresentationTest {
     @Test
     fun theLabelNamesServingOnlyWhenSomethingServes() {
         assertEquals("Port forwarding", ForwardingChromePresentation(visible = true, activeCount = 0).accessibilityLabel)
+        assertEquals("1 active tunnel", ForwardingChromePresentation(visible = true, activeCount = 1).accessibilityLabel)
         assertEquals("2 active tunnels", ForwardingChromePresentation(visible = true, activeCount = 2).accessibilityLabel)
         assertEquals(
             "2 active tunnels, 1 serving",

@@ -66,6 +66,7 @@ import com.bambouville.tessera.core.bridge.SharedTmuxAuthorityClaimReason
 import com.bambouville.tessera.core.bridge.SharedTmuxAuthorityLifecycleClaim
 import com.bambouville.tessera.core.bridge.SharedTmuxAuthorityShowSource
 import com.bambouville.tessera.core.bridge.SharedTmuxGridSize
+import com.bambouville.tessera.core.bridge.SharedTmuxOwnedGeometryRecord
 import com.bambouville.tessera.core.bridge.SharedTmuxWindow
 import com.bambouville.tessera.core.bridge.SharedTmuxWindowSizeReplay
 import com.bambouville.tessera.core.bridge.SharedTmuxPaneKey
@@ -85,13 +86,17 @@ import com.bambouville.tessera.data.SessionRestoreRecord
 import com.bambouville.tessera.data.SessionRestoreRepository
 import com.bambouville.tessera.data.continuity.SessionRestorePolicy
 import com.bambouville.tessera.data.TmuxModes
+import com.bambouville.tessera.design.DisplayText
 import com.bambouville.tessera.networking.AndroidSshBackend
 import com.bambouville.tessera.networking.AuthenticatedForwardingSideChannel
+import com.bambouville.tessera.networking.SshRouteClosedException
 import com.bambouville.tessera.networking.SshRouteConstruction
 import com.bambouville.tessera.networking.SshAuthentication
 import com.bambouville.tessera.networking.SshEndpoint
 import com.bambouville.tessera.networking.SshHostKeyObservation
 import com.bambouville.tessera.networking.SshHostKeyPolicy
+import com.bambouville.tessera.networking.SshHostKeyApprovalRequired
+import com.bambouville.tessera.networking.SshHostKeyRejected
 import com.bambouville.tessera.networking.SshKeyAuthorizationProvider
 import com.bambouville.tessera.networking.SshPasswordProvider
 import com.bambouville.tessera.networking.SshRouteHop
@@ -108,8 +113,10 @@ import com.bambouville.tessera.networking.mosh.MoshConnectRequest
 import com.bambouville.tessera.networking.mosh.MoshConnectionState
 import com.bambouville.tessera.networking.mosh.MoshInputNotAdmittedException
 import com.bambouville.tessera.networking.mosh.MoshOutageTiming
+import com.bambouville.tessera.files.FilesRouteUnavailableException
 import com.bambouville.tessera.forwarding.PortForwardRule
 import com.bambouville.tessera.forwarding.PortForwardingManager
+import com.bambouville.tessera.forwarding.PortForwardingRuntime
 import com.bambouville.tessera.forwarding.PortForwardingState
 import com.bambouville.tessera.forwarding.PortForwardingStatus
 import com.bambouville.tessera.terminal.RemoteTmuxPane
@@ -129,6 +136,8 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -165,8 +174,26 @@ sealed interface SshSessionUiState {
     data object Connected : SshSessionUiState
     /** The remote shell/session ended normally; this is not a reconnectable network failure. */
     data object Terminated : SshSessionUiState
-    data class Failed(val message: String) : SshSessionUiState
+    /** [message] is resolved where it is shown, so it follows a language change. */
+    data class Failed(val message: DisplayText) : SshSessionUiState {
+        /** A host's or the system's own words, shown as they came. */
+        constructor(message: String) : this(DisplayText.Verbatim(message))
+    }
 }
+
+/**
+ * Why a transcript selection misses on a session whose transport is down.
+ * Agent Center keeps its notices in English and translates them as it shows
+ * them, so this equals the English of its `agent_center_notice_terminal_not_connected`.
+ */
+internal const val TERMINAL_SESSION_NOT_CONNECTED = "The terminal session is not connected"
+
+/** English failure details that diagnostics and the core keep; failureMessage() shows their translations. */
+private const val HOST_KEY_NOT_TRUSTED_DETAIL = "The server's host key was not trusted"
+private const val KEYSTORE_KEY_INVALIDATED_DETAIL =
+    "Android Keystore key was invalidated; generate and select a replacement key"
+private const val NATIVE_MOSH_TRANSPORT_FAILED_DETAIL = "native Mosh transport failed"
+private const val TMUX_CONTROL_WRITER_UNAVAILABLE_DETAIL = "tmux control writer is unavailable"
 
 /** UI-facing admission/result state for tmux window ordering mutations. */
 internal sealed interface TmuxWindowMutationState {
@@ -830,7 +857,8 @@ data class OwnerAuthorizationChallenge(
     val challengeId: UUID,
     val attemptId: UUID,
     val policyGeneration: Long,
-    val reason: String,
+    /** Resolved when the prompt shows, which waits until the session is presented. */
+    val reason: DisplayText,
 )
 
 data class CredentialChallenge(
@@ -871,12 +899,11 @@ internal class SshSessionController(
     /** Attempt-scoped target from a verified continuation descriptor, never a restore pane id. */
     private val tmuxSessionTargetOverride: String? = null,
     private val tmuxDeviceIdentity: TmuxDeviceIdentity,
+    /** Where the grids owned under our stamps outlive the process (§6.9); null keeps nothing. */
+    private val ownedGeometryStore: TmuxOwnedGeometryStore? = null,
     private val scrollbackLines: Int,
     private val sessionId: String = UUID.randomUUID().toString(),
     sessionRestorePolicy: Flow<SessionRestorePolicy> = flowOf(SessionRestorePolicy.ASK),
-    private val moshServerLostMessage: () -> String = {
-        "The mosh-server for this session is no longer running — the host may have restarted."
-    },
 ) {
     private val mutableState = MutableStateFlow<SshSessionUiState>(SshSessionUiState.Disconnected)
     val state: StateFlow<SshSessionUiState> = mutableState.asStateFlow()
@@ -988,8 +1015,14 @@ internal class SshSessionController(
         diagnostics = { code, values -> diagnostics.record(code, values + ("transport" to diagnosticTransport)) },
     )
     val forwardingStates: StateFlow<Map<UUID, PortForwardingState>> = forwardingManager.states
+    private val forwardingLock = Any()
     private var forwardingRules: List<PortForwardRule> = emptyList()
-    private var forwardingAttached = false
+    private var forwardingUpdateJob: Job? = null
+    private var forwardingAttachJob: Deferred<Unit>? = null
+    private var forwardingGeneration = 0L
+    // Admission follows a concrete primary transport, including same-intent
+    // Mosh fallback and tmux degradation. It does not mirror manager attachment.
+    private var forwardingCarrierRequestId: UUID? = null
     private var forwardingSideChannel: AuthenticatedForwardingSideChannel? = null
     private var moshTransport: AndroidMoshTransport? = null
     private var moshRepaintRequestCounter = 0L
@@ -1006,6 +1039,8 @@ internal class SshSessionController(
     @Volatile private var lastNaturalMoshDeliveryId = 0L
     private var moshPainterReceiptWatchdogJob: Job? = null
     private val queuedMoshLedgerRepaintFenceBatches = ArrayDeque<List<Long>>()
+    /** The compact canvas caught up with mosh during a painter handoff. Main only. */
+    private var moshCanvasCatchUpFramePending = false
     private var deferredAuthorityMoshRepaint: DeferredAuthorityMoshRepaint? = null
     private var pendingAuthorityMoshRepaintTarget: PendingAuthorityMoshRepaint? = null
     private var authorityMoshRepaintRequestId: Long? = null
@@ -1247,8 +1282,8 @@ internal class SshSessionController(
     private var tmuxControlEngaged = false
     /** The configured tmux launch degraded and the active renderer is now a plain SSH PTY. */
     @Volatile private var plainSshPainterActive = false
-    private val mutableTmuxDegradeNotice = MutableStateFlow<String?>(null)
-    val tmuxDegradeNotice: StateFlow<String?> = mutableTmuxDegradeNotice
+    private val mutableTmuxDegradeNotice = MutableStateFlow<DisplayText?>(null)
+    val tmuxDegradeNotice: StateFlow<DisplayText?> = mutableTmuxDegradeNotice
     @Volatile private var presentationActive = false
     @Volatile private var appForeground = true
     private var reconnectAttempt = 0
@@ -1316,6 +1351,7 @@ internal class SshSessionController(
     @Volatile private var lastWithheldTmuxClientSize: Pair<SharedTmuxGridSize, String>? = null
     private val moshResizeRequests = Channel<MoshResizeRequest>(Channel.CONFLATED)
     private val moshCanvasResizeMutex = Mutex()
+    private val hostKeyApprovals = Mutex()
     private val moshResizeWriterJob = scope.launch {
         for (request in moshResizeRequests) {
             moshCanvasResizeMutex.withLock {
@@ -1356,6 +1392,9 @@ internal class SshSessionController(
         var ownDone: Boolean = false,
     )
     private var tmuxAuthorityOwnerSessionName: String? = null
+    /** The session whose kept records this connection restored, and the record last kept and where, so neither repeats. */
+    private var restoredOwnedGeometryScope: Pair<String, Long>? = null
+    private var keptOwnedGeometry: Pair<SharedTmuxOwnedGeometryRecord, String>? = null
     private var authorityOwnerSessionId: Int? = null
     private var authorityScopeResolution: AuthorityScopeResolution? = null
     private var lastAuthorityScopeResolutionId = 0L
@@ -1497,23 +1536,141 @@ internal class SshSessionController(
             }
     }
 
-    fun updateForwardingRules(rules: List<PortForwardRule>) {
-        forwardingRules = rules
-        if (closed) return
-        scope.launch {
-            if (rules.isEmpty()) {
-                detachForwarding()
-            } else if (forwardingAttached) {
-                forwardingManager.reconcile(rules)
-            } else if (transportConnected) {
-                currentIntent?.let { attachForwardingIfNeeded(it, buildRoute()) }
+    // Artifacts page tabs lease a forward over this session's already-authenticated
+    // transport. Never attaches forwarding, so a mosh session never opens a side channel here.
+    internal val hasLiveArtifactFilesOwner: Boolean
+        get() = !closed && (mutableState.value == SshSessionUiState.Connected || mutableState.value == SshSessionUiState.Connecting)
+
+    internal val canOpenArtifactFilesChannel: Boolean
+        get() = !closed && mutableState.value == SshSessionUiState.Connected && transportConnected && routeOwner != null
+
+    private fun hasArtifactForwardingTransport(): Boolean = !closed &&
+        mutableState.value == SshSessionUiState.Connected && transportConnected &&
+        if (usesMoshPrimaryTransport()) synchronized(forwardingLock) { forwardingSideChannel?.isConnected == true }
+        else connection != null || tmuxConnection != null
+
+    private val artifactForwardingAcquirer =
+        com.bambouville.tessera.forwarding.ArtifactLiveForwardingRegistry.publishAcquirer(
+            sessionId = sessionId,
+            live = ::hasArtifactForwardingTransport,
+            acquire = ::acquireArtifactForwardingLease,
+        )
+
+    @OptIn(kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi::class)
+    private suspend fun acquireArtifactForwardingLease(
+        rule: com.bambouville.tessera.forwarding.PortForwardRule,
+    ): com.bambouville.tessera.forwarding.PortForwardingLease? {
+        var allocated: com.bambouville.tessera.forwarding.PortForwardingLease? = null
+        try {
+            return withContext(Dispatchers.IO) {
+                if (!hasArtifactForwardingTransport()) return@withContext null
+                var owned: com.bambouville.tessera.forwarding.PortForwardingRuntime? = null
+                try {
+                    val sideChannel = synchronized(forwardingLock) { forwardingSideChannel }
+                    val terminalCarrier = connection
+                    val tmuxCarrier = tmuxConnection
+                    val routeCarrier = routeOwner
+                    val mosh = usesMoshPrimaryTransport()
+                    val carrierLive: () -> Boolean
+                    val runtime = if (mosh) {
+                        if (sideChannel?.isConnected != true) return@withContext null
+                        carrierLive = { synchronized(forwardingLock) { forwardingSideChannel === sideChannel && sideChannel.isConnected } }
+                        sideChannel.runtime()
+                    } else {
+                        carrierLive = {
+                            (if (terminalCarrier != null) connection === terminalCarrier else tmuxConnection === tmuxCarrier && tmuxCarrier != null) &&
+                                (routeCarrier == null || routeOwner === routeCarrier && routeCarrier.isConnected)
+                        }
+                        (terminalCarrier?.createForwardingRuntime() ?: tmuxCarrier?.createForwardingRuntime())
+                            ?.also { owned = it }
+                    } ?: return@withContext null
+                    val lease = runtime.start(rule)
+                    var watch: Job? = null
+                    val result = object : com.bambouville.tessera.forwarding.PortForwardingLease by lease {
+                        private val retired = java.util.concurrent.atomic.AtomicBoolean(false)
+                        private val open = MutableStateFlow(true)
+                        override val isOpen = object : StateFlow<Boolean> by open {
+                            override val value: Boolean get() {
+                                if (!hasArtifactForwardingTransport() || usesMoshPrimaryTransport() != mosh || !carrierLive() || !lease.isOpen.value) close()
+                                return open.value
+                            }
+                            override val replayCache: List<Boolean> get() = listOf(value)
+                        }
+                        override fun close() {
+                            // Before the CAS: a caller that loses it to a
+                            // concurrent close must still read the lease closed.
+                            open.value = false
+                            if (!retired.compareAndSet(false, true)) return
+                            watch?.cancel()
+                            try { lease.close() } finally { owned?.close() }
+                        }
+                    }
+                    allocated = result
+                    if (!result.isOpen.value) {
+                        result.close()
+                        allocated = null
+                        null
+                    } else {
+                        watch = scope.launch(Dispatchers.IO) {
+                            try {
+                                while (result.isOpen.value) delay(1_000)
+                            } finally { result.close() }
+                        }
+                        result
+                    }
+                } catch (failure: Throwable) {
+                    owned?.close()
+                    throw failure
+                }
             }
+        } catch (failure: Throwable) {
+            // A cancelled withContext may discard a successfully allocated lease.
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { allocated?.close() }
+            throw failure
         }
     }
 
-    fun startForwardingRule(ruleId: UUID) { scope.launch { forwardingManager.start(ruleId) } }
+    fun updateForwardingRules(rules: List<PortForwardRule>) {
+        val update = synchronized(forwardingLock) {
+            if (closed || forwardingRules == rules) return
+            forwardingRules = rules.toList()
+            val previous = forwardingUpdateJob
+            val connectedEdit = transportConnected && forwardingCarrierRequestId == currentIntent?.requestId
+            scope.launch(start = CoroutineStart.LAZY) {
+                previous?.join()
+                if (closed) return@launch
+                // Empty edits stop listeners but keep the authenticated runtime.
+                // Read the latest rules after earlier edits finish their IO.
+                if (!forwardingManager.reconcileIfAttached(forwardingRulesSnapshot(), asConnectedEdit = connectedEdit)) {
+                    attachForwardingToConnectedTransport()
+                    if (!closed) forwardingManager.reconcileIfAttached(forwardingRulesSnapshot(), asConnectedEdit = connectedEdit)
+                }
+            }.also { forwardingUpdateJob = it }
+        }
+        update.invokeOnCompletion {
+            synchronized(forwardingLock) {
+                if (forwardingUpdateJob === update) forwardingUpdateJob = null
+            }
+        }
+        update.start()
+    }
 
-    fun stopForwardingRule(ruleId: UUID) { scope.launch { forwardingManager.stop(ruleId) } }
+    fun startForwardingRule(ruleId: UUID) {
+        if (closed) return
+        scope.launch {
+            synchronized(forwardingLock) { forwardingUpdateJob }?.join()
+            attachForwardingToConnectedTransport()
+            if (!closed) forwardingManager.startIfAttached(ruleId)
+        }
+    }
+
+    fun stopForwardingRule(ruleId: UUID) {
+        if (closed) return
+        scope.launch {
+            synchronized(forwardingLock) { forwardingUpdateJob }?.join()
+            if (!closed) forwardingManager.stop(ruleId)
+        }
+    }
 
     /**
      * Keeps forwarded services' liveness current until cancelled. The screen
@@ -1532,6 +1689,7 @@ internal class SshSessionController(
         if (terminalSurface !== surface) {
             terminalSurface?.let(::observeRenderDrops)
             terminalSurface?.onInput = null
+            terminalSurface?.inputAdmission = null
             terminalSurface?.onResize = null
         }
         terminalSurface = surface
@@ -1563,6 +1721,7 @@ internal class SshSessionController(
                 shared.sendInput(bytes)
             }
         }
+        surface.inputAdmission = { acceptsTerminalPageKeys() }
         // The IME's line mirror is the only place an autocorrect revision can
         // be seen; a device report has to carry its shape (never its text) or
         // "typed X, got Y" cannot be attributed to the mirror, the pty echo,
@@ -1570,14 +1729,71 @@ internal class SshSessionController(
         surface.imeTraceSink = { line ->
             diagnostics.record("ime", mapOf("detail" to line, "transport" to diagnosticTransport))
         }
-        surface.onResize = { columns, rows ->
-            // A compact tmux surface is measured at the authoritative pane
-            // grid, not at the physical phone viewport. Its outer
-            // GeometryNeutralTerminalViewport reports the latter explicitly.
-            if (columns >= 4 && rows >= 4 &&
-                (host.tmuxMode == TmuxModes.OFF ||
-                    tmuxGridPresentation == SharedTmuxGridPresentation.PANE_GRID)
-            ) requestResize(columns, rows, geometrySettled = true)
+        surface.onResize = { columns, rows -> handleTerminalSurfaceResize(columns, rows) }
+    }
+
+    /** Main only: the attached surface's measured grid changed. */
+    private fun handleTerminalSurfaceResize(columns: Int, rows: Int) {
+        // A compact tmux surface is measured at the authoritative pane
+        // grid, not at the physical phone viewport. Its outer
+        // GeometryNeutralTerminalViewport reports the latter explicitly.
+        if (columns >= 4 && rows >= 4 &&
+            (host.tmuxMode == TmuxModes.OFF ||
+                tmuxGridPresentation == SharedTmuxGridPresentation.PANE_GRID)
+        ) requestResize(columns, rows, geometrySettled = true)
+        // Under tmux the canvas push resizes mosh at once (wide layouts paint
+        // the whole window on the same canvas), but this surface is measured
+        // at the new grid a layout pass later. Frames in between (a window
+        // switch's own full frame included) land at the old width, and mosh
+        // never resends cells it thinks are shown: a quiet pane stays blank
+        // until it prints. One full frame at the matching grid
+        // resynchronizes it (iOS: MoshSessionView's compact onResize).
+        val canvas = mutableMoshCanvasSize.value
+        if (host.tmuxMode != TmuxModes.OFF && usesMoshPrimaryTransport() &&
+            canvas != null && canvas.columns == columns && canvas.rows == rows
+        ) {
+            requestMoshCanvasCatchUpFrame()
+        }
+    }
+
+    /**
+     * Main only. Like iOS's owned full frame, it never runs beside a painter
+     * handoff: the frame follows it from [drainQueuedMoshRepaints], or from
+     * the reset that ends it.
+     */
+    private fun requestMoshCanvasCatchUpFrame() {
+        if (moshPainterHandoff.isActive) {
+            moshCanvasCatchUpFramePending = true
+            return
+        }
+        moshCanvasCatchUpFramePending = false
+        val transport = moshTransport ?: return
+        val repaintRequestId = allocateMoshRepaintRequestId() ?: run {
+            diagnostics.record(
+                "render_transport_sequence_exhausted",
+                mapOf("transport" to diagnosticTransport),
+            )
+            return
+        }
+        scope.launch {
+            // The resize writer is asynchronous, and a surface that publishes
+            // the canvas itself measures it in this same call: apply the
+            // canvas under the writer's lock first, as the authority frame
+            // does, so this frame cannot be drawn at the old grid.
+            val resized = moshCanvasResizeMutex.withLock {
+                val canvas = mutableMoshCanvasSize.value ?: return@withLock null
+                if (closed || moshTransport !== transport) return@withLock null
+                transport.resize(canvas.columns, canvas.rows)
+                canvas
+            } ?: return@launch
+            diagnostics.record(
+                "render_painter_handoff",
+                mapOf(
+                    "detail" to "canvas-catch-up columns=${resized.columns} rows=${resized.rows}",
+                    "transport" to diagnosticTransport,
+                ),
+            )
+            transport.forceFullRepaint(repaintRequestId)
         }
     }
 
@@ -1585,6 +1801,7 @@ internal class SshSessionController(
         if (terminalSurface !== surface) return
         observeRenderDrops(surface)
         surface.onInput = null
+        surface.inputAdmission = null
         surface.onResize = null
         surface.imeTraceSink = null
         terminalSurface = null
@@ -1843,6 +2060,14 @@ internal class SshSessionController(
     fun acceptsTerminalInput(): Boolean = !tmuxAuthorityParticipates() || !tmuxInputGated
 
     /**
+     * Whether a TalkBack page key may go to a full-screen program: the typing
+     * gate, and a live session, as iOS refuses one under its launch overlay.
+     * A page the session would not take is no page, so TalkBack hears the
+     * edge instead of a success whose key went nowhere.
+     */
+    fun acceptsTerminalPageKeys(): Boolean = mutableState.value == SshSessionUiState.Connected && acceptsTerminalInput()
+
+    /**
      * Whether this connection takes part in tmux grid authority: a tmux host
      * whose launch did not degrade to a plain SSH shell. A degraded session
      * has no control channel to read or claim, so it never resumes, veils or
@@ -1945,6 +2170,7 @@ internal class SshSessionController(
                 sendTmuxInput(paneId, bytes)
             }
         }
+        surface.inputAdmission = { acceptsTerminalPageKeys() }
         surface.onResize = { _, _ -> Unit }
         surface.imeTraceSink = { line ->
             diagnostics.record(
@@ -1964,6 +2190,7 @@ internal class SshSessionController(
             clearTmuxInlineHistory("$TMUX_RENDER_PANE_SURFACE_PREFIX$paneId")
         }
         surface.onInput = null
+        surface.inputAdmission = null
         surface.onResize = null
         surface.imeTraceSink = null
         configurePainterFeedAdmission()
@@ -2226,6 +2453,13 @@ internal class SshSessionController(
 
     fun connect() {
         if (closed || currentIntent != null) return
+        // This attempt replaces a parked ladder attempt (the host was opened
+        // while one waited to be shown). Left armed, that attempt wakes on the
+        // same show, clears this intent and connects again: the core refuses
+        // the second connect, and this one's readers stop for an intent that
+        // is no longer current, leaving a connected session that reads nothing.
+        reconnectJob?.cancel()
+        reconnectJob = null
         val intent = SharedConnectionIntent(
             requestId = UUID.randomUUID(),
             hostId = UUID.fromString(host.id),
@@ -2366,8 +2600,18 @@ internal class SshSessionController(
     }
 
     suspend fun openLiveFileChannel(): SshFileConnection {
-        check(transportConnected) { "The terminal session is not connected" }
-        return checkNotNull(routeOwner) { "The authenticated SSH route is unavailable" }.openFiles()
+        // Typed, so the Files screen can show these in the reader's language.
+        if (!transportConnected) {
+            throw FilesRouteUnavailableException(FilesRouteUnavailableException.Reason.NotConnected)
+        }
+        val owner = routeOwner
+            ?: throw FilesRouteUnavailableException(FilesRouteUnavailableException.Reason.RouteUnavailable)
+        return try {
+            owner.openFiles()
+        } catch (_: SshRouteClosedException) {
+            // The route closed after it was read: a reconnect replacing it.
+            throw FilesRouteUnavailableException(FilesRouteUnavailableException.Reason.RouteUnavailable)
+        }
     }
 
     suspend fun filePassword(hop: SshRouteHop): CharArray = try {
@@ -2481,6 +2725,7 @@ internal class SshSessionController(
             // native handle after this method destroys it.
             closed = true
         }
+        artifactForwardingAcquirer.close()
         recordRenderDropSummary("session-close")
         renderDropSummaryJob?.cancel()
         renderDropSummaryJob = null
@@ -2500,6 +2745,7 @@ internal class SshSessionController(
         moshResizeWriterJob.cancel()
         forwardingManager.close()
         terminalSurface?.onInput = null
+        terminalSurface?.inputAdmission = null
         terminalSurface?.onResize = null
         terminalSurface = null
         onTmuxBell = null
@@ -2557,6 +2803,9 @@ internal class SshSessionController(
                 ) publishSessionState(SshSessionUiState.Connecting)
                 SharedSessionState.CONNECTED -> {
                     transportConnected = true
+                    // Rules can finish loading after the transport's initial
+                    // attachment check, before this connected event reaches UI.
+                    scope.launch { attachForwardingToConnectedTransport() }
                     hasConnectedTransport = true
                     recoveringUnexpectedDisconnect = false
                     reconnectAttempt = 0
@@ -2796,7 +3045,7 @@ internal class SshSessionController(
                     "session_protocol_failure",
                     mapOf("detail" to event.detail, "transport" to diagnosticTransport),
                 )
-                publishSessionState(SshSessionUiState.Failed(event.detail))
+                publishSessionState(SshSessionUiState.Failed(DisplayText.Verbatim(event.detail)))
             }
             is SharedSessionEvent.Unhandled -> diagnostics.record(
                 "session_unhandled_event",
@@ -3166,6 +3415,7 @@ internal class SshSessionController(
     }
 
     private suspend fun runPlainSshTransport(intent: SharedConnectionIntent, hops: List<SshRouteHop>, includeStartupSnippet: Boolean = true) {
+        val forwardingTransportGeneration = synchronized(forwardingLock) { forwardingGeneration }
         val geometry = withContext(Dispatchers.Main.immediate) {
             terminalSurface?.snapshotNonSecretState()
         }
@@ -3197,7 +3447,7 @@ internal class SshSessionController(
             rawWriter = established::write,
             routeMarker = established.routeMarker,
         )
-        attachForwardingIfNeeded(intent, hops)
+        bindForwardingTransport(intent, hops, forwardingTransportGeneration)
         val commands = Channel<TransportCommand>(Channel.UNLIMITED)
         commandChannel = commands
         commandWriterJob = scope.launch(Dispatchers.IO) {
@@ -3356,61 +3606,148 @@ internal class SshSessionController(
         }
     }
 
+    private suspend fun attachForwardingToConnectedTransport() {
+        if (closed || !transportConnected || forwardingRulesSnapshot().isEmpty()) return
+        val intent = currentIntent ?: return
+        val generation = forwardingGenerationFor(intent) ?: return
+        val hops = if (usesMoshPrimaryTransport()) buildRoute() else emptyList()
+        if (isCurrentForwarding(intent, generation)) attachForwardingIfNeeded(intent, hops, generation)
+    }
+
+    private suspend fun bindForwardingTransport(intent: SharedConnectionIntent, hops: List<SshRouteHop>, generation: Long) {
+        currentCoroutineContext().ensureActive()
+        synchronized(forwardingLock) {
+            if (closed || forwardingGeneration != generation || currentIntent?.requestId != intent.requestId) return
+            forwardingCarrierRequestId = intent.requestId
+        }
+        attachForwardingIfNeeded(intent, hops, generation)
+    }
+
     private suspend fun attachForwardingIfNeeded(
         intent: SharedConnectionIntent,
         hops: List<SshRouteHop>,
+        generation: Long,
     ) {
-        if (closed || currentIntent?.requestId != intent.requestId || forwardingRules.isEmpty()) return
-        runCatching {
-            detachForwarding()
-            val runtime = when {
+        if (!isCurrentForwarding(intent, generation)) return
+        if (forwardingManager.reconcileIfAttached(forwardingRulesSnapshot()) || forwardingRulesSnapshot().isEmpty()) return
+        // Rule edits, the connected event and Start may all ask at once.
+        // Share one attempt without holding a lock across credential UI.
+        val attachment = synchronized(forwardingLock) {
+            if (!isCurrentForwarding(intent, generation)) return
+            forwardingAttachJob ?: scope.async(start = CoroutineStart.LAZY) {
+                runForwardingAttachment(intent, hops, generation)
+            }.also { forwardingAttachJob = it }
+        }
+        try {
+            attachment.await()
+        } finally {
+            synchronized(forwardingLock) {
+                if (forwardingAttachJob === attachment && attachment.isCompleted) forwardingAttachJob = null
+            }
+        }
+        if (isCurrentForwarding(intent, generation)) forwardingManager.reconcileIfAttached(forwardingRulesSnapshot())
+    }
+
+    private suspend fun runForwardingAttachment(intent: SharedConnectionIntent, hops: List<SshRouteHop>, generation: Long) {
+        var sideChannel: AuthenticatedForwardingSideChannel? = null
+        var runtime: PortForwardingRuntime? = null
+        var attached = false
+        try {
+            if (!isCurrentForwarding(intent, generation) || forwardingRulesSnapshot().isEmpty()) return
+            runtime = when {
                 usesMoshPrimaryTransport() -> {
-                    val sideChannel = backend.openForwardingSideChannel(
+                    backend.openForwardingSideChannel(
                         request = SshRouteRequest(hops),
-                        passwordProvider = SshPasswordProvider { hop -> requestPassword(intent, hop) },
+                        passwordProvider = SshPasswordProvider { hop ->
+                            try { requestPassword(intent, hop) }
+                            finally { restoreConnectedUiAfterSideChannelChallenge() }
+                        },
                         hostKeyPolicy = SshHostKeyPolicy { observation -> verifyHostKey(intent, observation) },
-                        keyAuthorizationProvider = SshKeyAuthorizationProvider { hop -> authorizeKey(intent, hop) },
-                    )
-                    forwardingSideChannel = sideChannel
-                    sideChannel.runtime()
+                        keyAuthorizationProvider = SshKeyAuthorizationProvider { hop ->
+                            try { authorizeKey(intent, hop) }
+                            finally { restoreConnectedUiAfterSideChannelChallenge() }
+                        },
+                    ).also { sideChannel = it }.runtime()
                 }
                 connection != null -> checkNotNull(connection).createForwardingRuntime()
                 tmuxConnection != null -> checkNotNull(tmuxConnection).createForwardingRuntime()
                 else -> return
             }
-            forwardingManager.attach(runtime, forwardingRules)
-            forwardingAttached = true
-            diagnostics.record(
+            currentCoroutineContext().ensureActive()
+            if (!isCurrentForwarding(intent, generation)) return
+            forwardingManager.attach(runtime, forwardingRulesSnapshot())
+            synchronized(forwardingLock) {
+                // Teardown also takes this lock on IO: ownership cannot be
+                // published after it captured the side channel to retire.
+                if (isCurrentForwarding(intent, generation)) {
+                    forwardingSideChannel = sideChannel
+                    attached = true
+                }
+            }
+            if (attached) diagnostics.record(
                 "forwarding_attached",
-                mapOf("rules" to forwardingRules.size.toString(), "transport" to diagnosticTransport),
+                mapOf("rules" to forwardingRulesSnapshot().size.toString(), "transport" to diagnosticTransport),
             )
-        }.onFailure { failure ->
-            forwardingAttached = false
-            forwardingSideChannel?.close()
-            forwardingSideChannel = null
-            forwardingManager.reportTransportUnavailable(
-                forwardingRules,
-                "Forwarding side channel is unavailable: ${redactedFailure(failure)}",
-            )
-            diagnostics.record(
-                "forwarding_attach_failed",
-                mapOf("detail" to redactedFailure(failure), "transport" to diagnosticTransport),
-            )
+        } catch (failure: Throwable) {
+            // Declining an auxiliary credential challenge also uses this
+            // exception while the job is still active. Keep the terminal up;
+            // actual teardown cancellation must escape without publishing.
+            if (failure is CancellationException) currentCoroutineContext().ensureActive()
+            if (isCurrentForwarding(intent, generation)) {
+                forwardingManager.reportTransportUnavailable(
+                    forwardingRulesSnapshot(),
+                    "Forwarding side channel is unavailable: ${redactedFailure(failure)}",
+                    forwardingSideChannelUnavailable(failure),
+                )
+                diagnostics.record(
+                    "forwarding_attach_failed",
+                    mapOf("detail" to redactedFailure(failure), "transport" to diagnosticTransport),
+                )
+            }
+        } finally {
+            if (!attached) {
+                runCatching { runtime?.close() }
+                sideChannel?.close()
+            }
         }
     }
 
+    private fun forwardingRulesSnapshot(): List<PortForwardRule> = synchronized(forwardingLock) { forwardingRules }
+
+    private fun forwardingGenerationFor(intent: SharedConnectionIntent): Long? = synchronized(forwardingLock) {
+        forwardingGeneration.takeIf {
+            !closed && currentIntent?.requestId == intent.requestId && forwardingCarrierRequestId == intent.requestId
+        }
+    }
+
+    private fun isCurrentForwarding(intent: SharedConnectionIntent, generation: Long): Boolean =
+        forwardingGenerationFor(intent) == generation
+
     private suspend fun detachForwarding() {
+        val sideChannel = cancelForwardingAttachment()
         forwardingManager.detach()
-        forwardingAttached = false
-        forwardingSideChannel?.close()
-        forwardingSideChannel = null
+        sideChannel?.close()
     }
 
     private fun detachForwardingBlocking() {
+        val sideChannel = cancelForwardingAttachment()
         forwardingManager.detachBlocking()
-        forwardingAttached = false
-        forwardingSideChannel?.close()
-        forwardingSideChannel = null
+        sideChannel?.close()
+    }
+
+    private fun cancelForwardingAttachment(): AuthenticatedForwardingSideChannel? {
+        val retired = synchronized(forwardingLock) {
+            forwardingGeneration += 1
+            forwardingCarrierRequestId = null
+            Triple(forwardingUpdateJob, forwardingAttachJob, forwardingSideChannel).also {
+                forwardingUpdateJob = null
+                forwardingAttachJob = null
+                forwardingSideChannel = null
+            }
+        }
+        retired.first?.cancel()
+        retired.second?.cancel()
+        return retired.third
     }
 
     private suspend fun runTmuxTransport(
@@ -3419,6 +3756,7 @@ internal class SshSessionController(
         emitTransportLifecycle: Boolean = true,
         sideChannelRoute: SshRouteOwner? = null,
     ) {
+        val forwardingTransportGeneration = synchronized(forwardingLock) { forwardingGeneration }
         val target = tmuxSessionTargetOverride
             ?: if (host.tmuxMode == TmuxModes.PINNED) requireNotNull(host.tmuxTarget)
             else SharedAutomaticTmuxTarget.sessionName(host.username, host.hostname, host.port)
@@ -3467,7 +3805,7 @@ internal class SshSessionController(
             activeTmuxResponses = pendingTmuxResponses
             tmuxTransportGeneration
         }
-        if (emitTransportLifecycle) attachForwardingIfNeeded(intent, hops)
+        if (emitTransportLifecycle) bindForwardingTransport(intent, hops, forwardingTransportGeneration)
         val tmuxCommands = Channel<TmuxControlCommand>(Channel.UNLIMITED)
         synchronized(tmuxTransportLock) {
             if (transportGeneration != tmuxTransportGeneration || tmuxConnection !== tmux) {
@@ -3723,6 +4061,7 @@ internal class SshSessionController(
         intent: SharedConnectionIntent,
         hops: List<SshRouteHop>,
     ): MoshRunResult {
+        val forwardingTransportGeneration = synchronized(forwardingLock) { forwardingGeneration }
         val route = SshRouteRequest(hops)
         val passwordProvider = SshPasswordProvider { hop -> requestPassword(intent, hop) }
         val hostKeyPolicy = SshHostKeyPolicy { observation -> verifyHostKey(intent, observation) }
@@ -3950,7 +4289,7 @@ internal class SshSessionController(
                                 emitFailure(
                                     intent.requestId,
                                     "mosh_connection_failed",
-                                    mapOf("detail" to (connectivity.message ?: "native Mosh transport failed")),
+                                    mapOf("detail" to (connectivity.message ?: NATIVE_MOSH_TRANSPORT_FAILED_DETAIL)),
                                 )
                             }
                         }
@@ -3997,7 +4336,7 @@ internal class SshSessionController(
                 ),
             )
             if (!cleanupRouteTransferred.get()) authenticatedCleanupRoute.close()
-            attachForwardingIfNeeded(intent, hops)
+            bindForwardingTransport(intent, hops, forwardingTransportGeneration)
         } catch (failure: CancellationException) {
             if (!cleanupRouteTransferred.get()) authenticatedCleanupRoute.close()
             throw failure
@@ -4285,6 +4624,14 @@ internal class SshSessionController(
                 )
             } catch (failure: Throwable) {
                 if (failure is CancellationException) throw failure
+                if (failure is SshHostKeyRejected) {
+                    // Retrying would only show the same prompt again.
+                    diagnostics.record(
+                        "mosh_tmux_control_host_key_rejected",
+                        mapOf("retry" to retry.toString(), "transport" to diagnosticTransport),
+                    )
+                    return
+                }
                 diagnostics.record(
                     "mosh_tmux_control_retry",
                     mapOf(
@@ -4542,14 +4889,13 @@ internal class SshSessionController(
     private fun currentTmuxLaunchOutput(): String =
         synchronized(tmuxLaunchOutput) { tmuxLaunchOutput.toString() }
 
-    private fun degradeNotice(failure: SharedTmuxLaunchFailure): String = when (failure) {
-        SharedTmuxLaunchFailure.UNAVAILABLE ->
-            "tmux isn't on this host's PATH — opened a plain shell instead."
-        SharedTmuxLaunchFailure.NESTED ->
-            "This host is already inside tmux — opened a plain shell instead."
-        SharedTmuxLaunchFailure.START_FAILED ->
-            "tmux couldn't start a session — opened a plain shell instead."
-    }
+    private fun degradeNotice(failure: SharedTmuxLaunchFailure): DisplayText = DisplayText.Resource(
+        when (failure) {
+            SharedTmuxLaunchFailure.UNAVAILABLE -> R.string.session_tmux_degraded_unavailable
+            SharedTmuxLaunchFailure.NESTED -> R.string.session_tmux_degraded_nested
+            SharedTmuxLaunchFailure.START_FAILED -> R.string.session_tmux_degraded_start_failed
+        },
+    )
 
     /// The subset of the connection job's `finally` that has to run before a
     /// second transport opens on the same intent. Order matters: forwarding was
@@ -5336,7 +5682,6 @@ internal class SshSessionController(
                     if (proved) publishTmuxClientSize(recovery.requested, ordinaryProofToken = token)
                     return@synchronized
                 }
-                else -> return@synchronized
             }
             if (!sendTmuxControl(next.first, next.second)) finishOrdinaryTmuxWindowRecovery(token)
         }
@@ -5547,6 +5892,7 @@ internal class SshSessionController(
             val endingWireGeneration = pendingAuthorityRepaintGeneration
             val state = result.state
             lastTmuxAuthorityResult = state
+            keepTmuxOwnedGeometry(state.ownedGeometryRecord)
             mutableTmuxReclaimInFlight.value = state.claim?.presentationVisible == true
             result.trace?.let { diagnostics.record("tmux_authority_lifecycle",
                 mapOf("detail" to it, "transport" to diagnosticTransport)) }
@@ -5726,6 +6072,47 @@ internal class SshSessionController(
             applyTmuxAuthorityLifecycle(tmuxAuthorityLifecycle.submit(authorityNow()) { session, now -> call(session, now) })
         }
     }
+
+    /**
+     * The tmux session an authority stamp of ours lives on: a mosh view's
+     * group owner, else the session this client attached to (iOS's
+     * `gridAuthorityStampSessionName`). Caller holds the lock.
+     */
+    private fun tmuxAuthorityStampSessionName(): String? =
+        if (usesMoshPrimaryTransport()) tmuxAuthorityOwnerSessionName
+        else mutableTmuxSnapshot.value?.sessionName ?: tmuxAuthorityOwnerSessionName
+
+    /**
+     * Hands the session the records kept for its stamp's tmux session, once
+     * per connection and session, before that connection's read can answer.
+     * Caller holds the lock.
+     */
+    private fun restoreTmuxOwnedGeometry(transportGeneration: Long) {
+        val store = ownedGeometryStore ?: return
+        val session = tmuxAuthorityStampSessionName() ?: return
+        val scope = session to transportGeneration
+        if (restoredOwnedGeometryScope == scope) return
+        restoredOwnedGeometryScope = scope
+        // Even none: what an earlier scope's restore left pending is not
+        // this session's.
+        val records = store.records(ownedGeometryHostKey(), session)
+        reduceTmuxAuthority { authority, now -> authority.restoreOwnedGeometry(now, records) }
+    }
+
+    /** Caller holds the lock. */
+    private fun keepTmuxOwnedGeometry(record: SharedTmuxOwnedGeometryRecord?) {
+        if (record == null) return
+        val store = ownedGeometryStore ?: return
+        val session = tmuxAuthorityStampSessionName() ?: return
+        // A renamed tmux session keeps an unchanged record under its new name.
+        val kept = record to session
+        if (kept == keptOwnedGeometry) return
+        keptOwnedGeometry = kept
+        store.keep(ownedGeometryHostKey(), session, record)
+    }
+
+    private fun ownedGeometryHostKey(): String =
+        TmuxOwnedGeometryStore.hostKey(host.username, host.hostname, host.port)
 
     private fun beginTmuxAuthorityScopeResolution(ownerName: String, transportGeneration: Long) {
         authorityOwnerSessionId = null
@@ -7544,7 +7931,7 @@ internal class SshSessionController(
                     emitFailure(
                         it.requestId,
                         "tmux_command_failed",
-                        mapOf("detail" to "tmux control writer is unavailable"),
+                        mapOf("detail" to TMUX_CONTROL_WRITER_UNAVAILABLE_DETAIL),
                     )
                 }
             }
@@ -7757,6 +8144,7 @@ internal class SshSessionController(
             val initialWindowHydration = event.snapshot.isWindowListHydrated &&
                 mutableTmuxSnapshot.value?.isWindowListHydrated != true
             val priorSession = mutableTmuxSnapshot.value?.sessionId
+            val priorSessionName = mutableTmuxSnapshot.value?.sessionName
             // The runtime names every switch in a read it delivered. One whose
             // event was lost shows only in the next snapshot (a recovery):
             // two known sessions that differ switched all the same.
@@ -7780,6 +8168,15 @@ internal class SshSessionController(
                 reduceTmuxAuthority { session, now -> session.attached(now, tmuxDeviceIdentity.id) }
             } else if (priorSession != event.snapshot.sessionId) {
                 reduceTmuxAuthority { session, now -> session.controlSessionChanged(now, false) }
+            }
+            // An inline attach learns its session's name here; a switch
+            // dropped the old session's records. Either way the new read is
+            // still on the wire.
+            if (switched || priorSession != event.snapshot.sessionId) {
+                restoreTmuxOwnedGeometry(transportGeneration)
+            } else if (priorSessionName != null && priorSessionName != event.snapshot.sessionName) {
+                // Renamed: a relaunch looks the record up under the new name.
+                keepTmuxOwnedGeometry(lastTmuxAuthorityResult?.ownedGeometryRecord)
             }
             if (switched) finishTmuxAuthoritySessionSwitch()
             // A newer stamp invalidates a held own reply before window facts
@@ -7847,6 +8244,11 @@ internal class SshSessionController(
                 event.agentStates.forEach { state ->
                     endpoint?.noteTmuxAgentState(state.windowId, state.paneId, state.json)
                 }
+            }
+            // A killed pane or window sends no lifecycle frame of its own;
+            // its disappearance asks Agent Center for fresh occupancy proof.
+            if (event.snapshot.isWindowListHydrated) {
+                agentEndpoint?.noteTmuxPaneSet(event.snapshot.windows.flatMap { it.panes }.map { it.id }.toSet())
             }
             val selectedPane = event.snapshot.activePaneId
             agentEndpoint?.let { endpoint ->
@@ -8019,6 +8421,7 @@ internal class SshSessionController(
             tmuxAuthorityOwnerSessionName?.let { beginTmuxAuthorityScopeResolution(it, transportGeneration) }
             submitAuthorityGeometryFacts()
             submitAuthorityPaintability()
+            restoreTmuxOwnedGeometry(transportGeneration)
             reduceTmuxAuthority { session, now -> session.attached(now, tmuxDeviceIdentity.id) }
             lastAuthorityChannelLive = true
         }
@@ -9392,7 +9795,19 @@ internal class SshSessionController(
         }
         moshPainterHandoff.reset()
         queuedMoshLedgerRepaintFenceBatches.clear()
+        releaseMoshCanvasCatchUpFrame()
         failOutstandingAuthorityMoshRepaint("mosh painter handoff reset")
+    }
+
+    /**
+     * A handoff that ends without completing has nothing left to wait for:
+     * a canvas that caught up meanwhile still needs its frame, unless the
+     * surface it was for is gone.
+     */
+    private fun releaseMoshCanvasCatchUpFrame() {
+        if (!moshCanvasCatchUpFramePending) return
+        if (terminalSurface != null) requestMoshCanvasCatchUpFrame()
+        moshCanvasCatchUpFramePending = false
     }
 
     /** Called only on Main; the driver operation itself moves to IO. */
@@ -9414,7 +9829,6 @@ internal class SshSessionController(
         val reservedAuthority = deferredAuthorityMoshRepaint
         val authority = reservedAuthority?.takeIf {
             isLiveAuthorityClaim(it.claimGeneration) &&
-                it.requestId != null &&
                 it.owner == expectedOwner &&
                 authorityMoshRepaintOwner == expectedOwner
         }
@@ -9450,6 +9864,7 @@ internal class SshSessionController(
             moshRenderHistoryFence.discardPending()
             moshPainterHandoff.reset()
             configurePainterFeedAdmission()
+            releaseMoshCanvasCatchUpFrame()
             diagnostics.record(
                 "render_history_repaint_unavailable",
                 mapOf("detail" to "request=$requestId attach failed", "transport" to diagnosticTransport),
@@ -9647,6 +10062,7 @@ internal class SshSessionController(
     ) = moshRenderHistoryRepaintRetryExecutor.run(fenceIds, retryAttempt)
 
     private fun drainQueuedMoshRepaints() {
+        if (moshCanvasCatchUpFramePending) requestMoshCanvasCatchUpFrame()
         if (queuedMoshLedgerRepaintFenceBatches.isEmpty() && deferredAuthorityMoshRepaint == null) {
             return
         }
@@ -9821,6 +10237,17 @@ internal class SshSessionController(
                                 effect.surfaceId,
                                 preservingHistoryScroll = replacesHistory || replacesInlineHistory,
                             )
+                            // A new epoch of the same inline pane with no
+                            // gesture asking (a resize, a font change, a
+                            // repaint that could not refresh in place): the
+                            // bind empties the transcript the reader is in.
+                            // Their place returns once the rebuild's deep
+                            // capture settles; another pane opens on its tail.
+                            if (!usesMoshPrimaryTransport() && surface.boundOwner != null && !inlineIdentityChanged) {
+                                surface.view.holdScrollForRebuild(owner)
+                            } else {
+                                surface.view.dropRebuildScroll()
+                            }
                             // A window/pane move resets the ledger's own
                             // inline state, so the platform's exhaustion
                             // belief goes with it; an epoch-only rebind (the
@@ -10020,11 +10447,15 @@ internal class SshSessionController(
                     // tail while keeping the gesture latched. Releasing it
                     // here places the reader at the distance from the bottom
                     // they had dragged to, now measured in the deeper
-                    // transcript. A settle with no latched gesture only
-                    // updates the record.
-                    renderSurfaceForId(effect.surfaceId)?.view?.let { view ->
+                    // transcript. With no gesture latched, a rebuild of the
+                    // reader's own pane returns them to the place its bind
+                    // held; otherwise the settle only updates the record.
+                    renderSurfaceForId(effect.surfaceId)?.let { surface ->
+                        val owner = renderSurfaceOwner(effect.owner, transportGeneration)
                         scope.launch(Dispatchers.Main.immediate) {
+                            val view = surface.view
                             if (view.isHistoryScrollPending) view.completeHistoryScroll(view.topRow)
+                            else if (owner != null && surface.boundOwner == owner) view.completeRebuildScroll(owner)
                         }
                     }
                     diagnostics.record(
@@ -10286,7 +10717,7 @@ internal class SshSessionController(
                 challengeId = UUID.randomUUID(),
                 attemptId = intent.requestId,
                 policyGeneration = intent.policyGeneration,
-                reason = "Use ${hop.username}@${hop.endpoint.host} key",
+                reason = DisplayText.Resource(R.string.session_unlock_key_reason, listOf(hop.username, hop.endpoint.host)),
             )
             val pending = PendingOwnerAuthorization(challenge)
             pendingOwnerAuthorization = pending
@@ -10303,7 +10734,56 @@ internal class SshSessionController(
     private suspend fun verifyHostKey(
         intent: SharedConnectionIntent,
         observation: SshHostKeyObservation,
+    ): Boolean = SessionHostKeyPolicy(knownHosts, hostKeyApprovals) { untrusted ->
+        try {
+            approveHostKey(intent, untrusted)
+        } finally {
+            restoreConnectedUiAfterSideChannelChallenge()
+        }
+    }.verify(observation)
+
+    internal class SessionHostKeyPolicy(
+        private val knownHosts: KnownHostsRepository,
+        /**
+         * One prompt at a time: the screen shows a single host-key challenge
+         * and answers whichever is pending. A route that waited here for the
+         * same key is trusted by the answer before it and does not ask again.
+         */
+        private val approvals: Mutex = Mutex(),
+        private val decide: suspend (SshHostKeyObservation) -> Boolean,
+    ) : SshHostKeyPolicy {
+        override suspend fun verify(observation: SshHostKeyObservation): Boolean {
+            if (isTrusted(observation)) return true
+            throw SshHostKeyApprovalRequired(observation) {
+                approvals.withLock {
+                    if (isTrusted(observation)) return@withLock true
+                    decide(observation).also { accepted ->
+                        if (accepted) {
+                            knownHosts.trust(
+                                observation.host,
+                                observation.port,
+                                observation.algorithm,
+                                observation.canonicalKeyBlob,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        private suspend fun isTrusted(observation: SshHostKeyObservation) = knownHosts.evaluate(
+            observation.host,
+            observation.port,
+            observation.algorithm,
+            observation.canonicalKeyBlob,
+        ) == HostTrustEvaluation.Trusted
+    }
+
+    private suspend fun approveHostKey(
+        intent: SharedConnectionIntent,
+        observation: SshHostKeyObservation,
     ): Boolean {
+        if (currentIntent?.requestId != intent.requestId) throw CancellationException("SSH attempt retired")
         val evaluation = knownHosts.evaluate(
             observation.host,
             observation.port,
@@ -10329,18 +10809,12 @@ internal class SshSessionController(
         )
         val pending = PendingHostKey(challenge)
         pendingHostKey = pending
-        emitHostKeyChallenge(challenge, challenge.challengeId)
-        val accepted = pending.decision.await()
-        pendingHostKey = null
-        if (accepted) {
-            knownHosts.trust(
-                observation.host,
-                observation.port,
-                observation.algorithm,
-                observation.canonicalKeyBlob,
-            )
+        return try {
+            emitHostKeyChallenge(challenge, challenge.challengeId)
+            pending.decision.await()
+        } finally {
+            if (pendingHostKey === pending) pendingHostKey = null
         }
-        return accepted
     }
 
     private fun emitCredentialChallenge(challenge: CredentialChallenge, id: UUID): CoreCallResult =
@@ -10412,7 +10886,9 @@ internal class SshSessionController(
     }
 
     private suspend fun restoreConnectedUiAfterSideChannelChallenge() {
-        withContext(Dispatchers.Main.immediate) {
+        // Runs in `finally` after a challenge, often one cancelled by its
+        // timeout: a cancellable switch would leave its prompt on screen.
+        withContext(NonCancellable + Dispatchers.Main.immediate) {
             if (transportConnected && currentIntent != null) {
                 publishSessionState(SshSessionUiState.Connected)
             }
@@ -10690,7 +11166,7 @@ internal class SshSessionController(
             diagnostics = { code, values -> diagnostics.record(code, values) },
             attachmentUpload = { uploadRoute, uri ->
                 agentAttachmentUpload?.invoke(uploadRoute, uri)
-                    ?: com.bambouville.tessera.agent.platform.AgentEndpointResult.Unavailable("File uploads are unavailable")
+                    ?: com.bambouville.tessera.agent.platform.AgentEndpointResult.Unavailable(com.bambouville.tessera.agent.platform.AgentEndpointUnavailableReason.Uploads.reason)
             },
             hostAsset = { name -> checkNotNull(agentHostAsset) { "Bundled host artifacts unavailable" }(name) },
             renewAuxiliaryRoute = renewAuxiliaryRoute,
@@ -10766,7 +11242,7 @@ internal class SshSessionController(
         if (explicitDisconnect) return
         val challengeResponseRejected = commandCode == "submit_challenge_response"
         if (!code.startsWith("challenge_") && !challengeResponseRejected) {
-            publishSessionState(SshSessionUiState.Failed("Session command rejected: $code"))
+            publishSessionState(SshSessionUiState.Failed(commandRejected(code)))
             return
         }
         clearPendingChallenges()
@@ -10778,8 +11254,11 @@ internal class SshSessionController(
         teardownTransport()
         currentIntent = null
         if (attemptId != null) runCatching { shared.cancelConnect(attemptId) }
-        publishSessionState(SshSessionUiState.Failed("Session command rejected: $code"))
+        publishSessionState(SshSessionUiState.Failed(commandRejected(code)))
     }
+
+    private fun commandRejected(code: String): DisplayText =
+        DisplayText.Resource(R.string.session_command_rejected, listOf(code))
 
     private inline fun emitSharedIfOpen(action: SharedSessionRuntime.() -> Unit) {
         if (!closed) runCatching { shared.action() }
@@ -10793,8 +11272,12 @@ internal class SshSessionController(
      */
     private fun fingerprint(bytes: ByteArray): String = KnownHostKeys.fingerprint(bytes)
 
-    private fun failureMessage(code: String, arguments: Map<String, String>): String = when {
-        code == "mosh_server_lost" -> moshServerLostMessage()
+    /** The app's own words are a resource; a host's or the system's detail stays as it came. */
+    private fun failureMessage(code: String, arguments: Map<String, String>): DisplayText = when {
+        code == "mosh_server_lost" -> DisplayText.Resource(R.string.mosh_server_lost)
+        code == "mosh_preconnect_output_overflow" -> DisplayText.Resource(R.string.session_mosh_preconnect_overflow)
+        code == "mosh_connection_ended_before_ready" -> DisplayText.Resource(R.string.session_mosh_ended_before_ready)
+        code == "mosh_jump_fallback_cleanup_failed" -> DisplayText.Resource(R.string.session_mosh_cleanup_unverified)
         code == "ssh_connection_failed" && SharedSessionPolicy.shouldRetry(
             explicitDisconnect = false,
             hadConnectedTransport = true,
@@ -10802,8 +11285,15 @@ internal class SshSessionController(
             code = code,
             arguments = arguments,
         ) ->
-            "Connection interrupted. Check the network and retry."
-        else -> arguments["detail"]?.takeIf(String::isNotBlank) ?: code.replace('_', ' ')
+            DisplayText.Resource(R.string.session_connection_interrupted)
+        else -> when (val detail = arguments["detail"]?.takeIf(String::isNotBlank) ?: code.replace('_', ' ')) {
+            HOST_KEY_NOT_TRUSTED_DETAIL -> DisplayText.Resource(R.string.session_host_key_not_trusted)
+            KEYSTORE_KEY_INVALIDATED_DETAIL -> DisplayText.Resource(R.string.session_keystore_key_invalidated)
+            NATIVE_MOSH_TRANSPORT_FAILED_DETAIL -> DisplayText.Resource(R.string.session_mosh_transport_failed)
+            TMUX_CONTROL_WRITER_UNAVAILABLE_DETAIL ->
+                DisplayText.Resource(R.string.session_tmux_control_writer_unavailable)
+            else -> DisplayText.Verbatim(detail)
+        }
     }
 
     private fun scheduleReconnect(reason: String) {
@@ -10811,7 +11301,7 @@ internal class SshSessionController(
         if (reconnectAttempt >= SharedSessionPolicy.retryMaxAttempts()) {
             recoveringUnexpectedDisconnect = false
             publishSessionState(SshSessionUiState.Failed(
-                "Connection interrupted. Check the network and retry.",
+                DisplayText.Resource(R.string.session_connection_interrupted),
             ))
             diagnostics.record(
                 "session_reconnect_exhausted",
@@ -10897,9 +11387,26 @@ internal class SshSessionController(
         connect()
     }
 
+    /**
+     * What the forwarding panel shows for a side channel that failed to
+     * attach. The sentences people act on are translated whole, since a
+     * resource's arguments are shown as they are; any other failure keeps
+     * its [redactedFailure] detail.
+     */
+    private fun forwardingSideChannelUnavailable(failure: Throwable): DisplayText = when (failure) {
+        is SshHostKeyRejected -> DisplayText.Resource(R.string.session_forwarding_side_channel_host_key_not_trusted)
+        is KeyPermanentlyInvalidatedException ->
+            DisplayText.Resource(R.string.session_forwarding_side_channel_keystore_key_invalidated)
+        else -> DisplayText.Resource(
+            R.string.session_forwarding_side_channel_unavailable,
+            listOf(redactedFailure(failure)),
+        )
+    }
+
     private fun redactedFailure(failure: Throwable): String = when (failure) {
         is CancellationException -> "cancelled"
-        is KeyPermanentlyInvalidatedException -> "Android Keystore key was invalidated; generate and select a replacement key"
+        is SshHostKeyRejected -> HOST_KEY_NOT_TRUSTED_DETAIL
+        is KeyPermanentlyInvalidatedException -> KEYSTORE_KEY_INVALIDATED_DETAIL
         else -> buildString {
             append(failure::class.java.simpleName)
             failure.message?.let { message ->

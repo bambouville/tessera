@@ -1,4 +1,5 @@
 @_exported import TesseraAgentCore
+@_exported import TesseraArtifactsCore
 @_exported import TesseraContinuityCore
 @_exported import TesseraCoreABI
 @_exported import TesseraCrossDeviceCore

@@ -600,6 +600,120 @@ final class RenderLedgerTests: XCTestCase {
         XCTAssertEqual(ledger.owner(for: surface), owner)
     }
 
+    /// The screen changed modes while the app was away: the terminal still
+    /// on the alternate screen, tmux's pane back on the primary. The refresh
+    /// asked for in place rebuilds after all, under a fresh owner, so the
+    /// platform empties its scrollback before the deep capture replays the
+    /// history rather than keeping it under the replay (Duo, a Settings tab
+    /// round trip: 110 rows of history became 224). Output that arrived
+    /// while away is not replayed first: rows it scrolled into the emptied
+    /// scrollback would sit under the deep capture's copy of them.
+    func test_foregroundThatCannotRefreshInPlaceRebuildsUnderAFreshOwner() throws {
+        var ledger = TmuxRenderLedger()
+        let state = snapshot()
+        _ = finishInitialInline(&ledger, snapshot: state, captureLines: ["initial"])
+        let painted = try XCTUnwrap(ledger.owner(for: surface))
+
+        _ = ledger.reduce(.appBackground, snapshot: state)
+        XCTAssertEqual(
+            reduceMessage(&ledger, .output(paneId: PaneId(1), data: Array("build line\r\n".utf8)), snapshot: state),
+            [],
+            "output while away waits for the foreground"
+        )
+        _ = ledger.reduce(.appForeground, snapshot: state)
+        XCTAssertEqual(
+            reply(&ledger, snapshot: state, lines: [metadata(pane: 1)]),
+            [.sendCommand(RenderCommands.viewport(target: WindowId(1)))]
+        )
+        let waiting = reply(&ledger, snapshot: state, lines: ["primary again"])
+        let request = try XCTUnwrap(resolveRequest(waiting))
+        let effects = ledger.reduce(
+            .surfaceState(surface, request: request, altScreen: true, mouseMode: .off, columns: 80, rows: 24),
+            snapshot: state
+        )
+
+        let bound = effects.compactMap { effect -> RenderOwner? in
+            guard case .bindSurface(_, let owner) = effect else { return nil }
+            return owner
+        }
+        let rebuilt = try XCTUnwrap(bound.first)
+        XCTAssertEqual(bound.count, 1)
+        XCTAssertNotEqual(rebuilt, painted, "bound under the painted owner, the platform keeps its scrollback")
+        XCTAssertEqual(rebuilt.windowID, painted.windowID)
+        XCTAssertEqual(rebuilt.paneID, painted.paneID)
+        let fedOwners = effects.compactMap { effect -> RenderOwner? in
+            guard case .feed(_, let owner, _, _) = effect else { return nil }
+            return owner
+        }
+        XCTAssertEqual(fedOwners, [rebuilt])
+        XCTAssertEqual(feeds(in: effects).map(\.source), [.viewportRefresh], "no replay ahead of the deep capture")
+        XCTAssertEqual(ledger.owner(for: surface), rebuilt)
+        XCTAssertTrue(
+            containsCommand(effects, RenderCommands.renderedPaneMetadata(target: WindowId(1))),
+            "the deep capture follows the rebuild"
+        )
+
+        // The deep capture lands on the rebuild's emptied scrollback, under
+        // the same owner: nothing left to clear.
+        XCTAssertEqual(
+            reply(&ledger, snapshot: state, lines: [metadata(pane: 1, historySize: 99)]),
+            [.sendCommand(RenderCommands.deepPrimary(target: WindowId(1), depth: 2_000))]
+        )
+        let deepWaiting = reply(&ledger, snapshot: state, lines: ["history", "primary again"])
+        let deepRequest = try XCTUnwrap(resolveRequest(deepWaiting))
+        let deep = ledger.reduce(
+            .surfaceState(surface, request: deepRequest, altScreen: false, mouseMode: .off, columns: 80, rows: 24),
+            snapshot: state
+        )
+        let deepBound = deep.compactMap { effect -> RenderOwner? in
+            guard case .bindSurface(_, let owner) = effect else { return nil }
+            return owner
+        }
+        XCTAssertEqual(deepBound, [rebuilt])
+        XCTAssertEqual(feeds(in: deep).map(\.source), [.deepRepaint])
+    }
+
+    /// The pane changed screens since it was painted (Vim exited while the
+    /// app was away, or started): the foreground's in-place refresh becomes
+    /// a rebuild when its metadata arrives, and binds a fresh owner so the
+    /// deep capture that follows lands on an emptied scrollback (Settings
+    /// and back after Vim exited: 130 rows of history became 244).
+    func test_foregroundAcrossAScreenChangeRebuildsUnderAFreshOwner() throws {
+        var ledger = TmuxRenderLedger()
+        let state = snapshot()
+        _ = finishInitialInline(&ledger, snapshot: state, captureLines: ["initial"])
+        let painted = try XCTUnwrap(ledger.owner(for: surface))
+
+        _ = ledger.reduce(.appBackground, snapshot: state)
+        _ = ledger.reduce(.appForeground, snapshot: state)
+        XCTAssertEqual(
+            reply(&ledger, snapshot: state, lines: [metadata(pane: 1, alt: true, historySize: 99)]),
+            [.sendCommand(RenderCommands.viewport(target: WindowId(1)))]
+        )
+        let waiting = reply(&ledger, snapshot: state, lines: ["vim"])
+        let request = try XCTUnwrap(resolveRequest(waiting))
+        let effects = ledger.reduce(
+            .surfaceState(surface, request: request, altScreen: true, mouseMode: .off, columns: 80, rows: 24),
+            snapshot: state
+        )
+
+        let bound = effects.compactMap { effect -> RenderOwner? in
+            guard case .bindSurface(_, let owner) = effect else { return nil }
+            return owner
+        }
+        XCTAssertEqual(bound.count, 1)
+        let rebuilt = try XCTUnwrap(bound.first)
+        XCTAssertNotEqual(rebuilt, painted, "bound under the painted owner, the platform keeps its scrollback")
+        XCTAssertEqual(rebuilt.windowID, painted.windowID)
+        XCTAssertEqual(rebuilt.paneID, painted.paneID)
+        XCTAssertEqual(feeds(in: effects).map(\.source), [.viewportRepaint])
+        XCTAssertEqual(ledger.owner(for: surface), rebuilt)
+        XCTAssertTrue(
+            containsCommand(effects, RenderCommands.renderedPaneMetadata(target: WindowId(1))),
+            "the deep capture follows the rebuild"
+        )
+    }
+
     func test_foregroundIdentityChangeFallsBackToRebuildAndBind() throws {
         var ledger = TmuxRenderLedger()
         let first = snapshot(window: 1, pane: 1)

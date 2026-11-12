@@ -219,10 +219,7 @@ internal fun SharedTmuxSnapshot.switcherWindows(
     agentProvider: (paneId: Int) -> String? = { null },
 ): List<SessionSwitcherWindow> =
     windows.mapIndexed { ordinal, window ->
-        val activePaneId = window.activePaneId ?: window.panes.firstOrNull { it.active }?.id
-        val title = window.activePaneTitle?.trim()?.takeIf {
-            !window.activePaneTitleIsDefault && it.isNotEmpty()
-        } ?: activePaneId?.let(agentProvider) ?: window.displayName
+        val title = window.agentDisplayName(agentProvider)
         SessionSwitcherWindow(
             id = window.id,
             index = window.index,

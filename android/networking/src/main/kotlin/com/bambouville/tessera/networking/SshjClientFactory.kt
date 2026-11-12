@@ -38,6 +38,7 @@ class SshjClientFactory(
     private val preferredHostKeyAlgorithms: List<String>? = null,
     /** Where direct connections get their socket; SSHJ's default when null. */
     private val socketFactory: SocketFactory? = null,
+    /** Fast trust check supplied by the attempt loop; never waits for approval. */
     private val hostKeyPolicy: (SshHostKeyObservation) -> Boolean,
 ) {
     fun create(): SSHClient {
@@ -85,7 +86,7 @@ class SshjClientFactory(
 
         init {
             // AndroidKeyStore keys must be signed by their owning JCA provider.
-            // SSHJ 0.40 does not require Bouncy Castle, so keep provider routing
+            // SSHJ does not require Bouncy Castle, so keep provider routing
             // deterministic and avoid BC intercepting the Keystore private key.
             SecurityUtils.setRegisterBouncyCastle(false)
         }

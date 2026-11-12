@@ -10,6 +10,53 @@ import PortForwarding
 @MainActor
 final class ForwardedServiceStateTests: XCTestCase {
 
+    func testArtifactOpenUsesSavedHostAndRemoteLoopbackPort() {
+        let hostID = UUID()
+        let sessionID = UUID()
+        for host in ["localhost", "LOCALHOST", "127.0.0.1", "127.0.0.2", "127.255.255.255", "::1"] {
+            let rule = PortForwardRule.localForward(
+                localPort: 18_080, remoteHost: host, remotePort: 3_000
+            )
+            XCTAssertEqual(
+                forwardingArtifactRequest(for: rule, hostID: hostID, sessionID: sessionID),
+                ArtifactOpenRequest(
+                    hostID: hostID, target: .page(scheme: "http", port: 3_000, path: "/"),
+                    origin: .forwarding, sessionID: sessionID
+                ),
+                host
+            )
+        }
+    }
+
+    func testArtifactOpenKeepsNonLoopbackTargetsInTheExistingBrowser() {
+        for host in [
+            "other-machine", "localhost.example.com", "127.example.com", "127.0.0.1.example.com",
+            "127.0.0.999", "127..0.1", "128.0.0.1", "0.0.0.0", "::", "::ffff:127.0.0.1",
+        ] {
+            let rule = PortForwardRule.localForward(
+                localPort: 18_080, remoteHost: host, remotePort: 3_000
+            )
+            XCTAssertNil(forwardingArtifactRequest(for: rule, hostID: UUID()), host)
+        }
+    }
+
+    func testArtifactOpenPreservesHTTPSAndRejectsNonWebRules() {
+        var rule = PortForwardRule.localForward(localPort: 18_443, remotePort: 8_443)
+        XCTAssertEqual(
+            forwardingArtifactRequest(for: rule, hostID: UUID())?.target,
+            .page(scheme: "https", port: 8_443, path: "/")
+        )
+        rule.direction = .remote
+        XCTAssertNil(forwardingArtifactRequest(for: rule, hostID: UUID()))
+        rule.direction = .dynamic
+        XCTAssertNil(forwardingArtifactRequest(for: rule, hostID: UUID()))
+        rule.direction = .local
+        rule.target = nil
+        XCTAssertNil(forwardingArtifactRequest(for: rule, hostID: UUID()))
+        rule.target = PortForwardEndpoint(host: "localhost", port: 5_432)
+        XCTAssertNil(forwardingArtifactRequest(for: rule, hostID: UUID()))
+    }
+
     // MARK: - Classification
 
     func testConnectFailedMeansNothingIsServing() {

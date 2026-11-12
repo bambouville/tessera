@@ -114,15 +114,15 @@ object ShareUploadPolicy {
      */
     fun canPastePath(target: ShareUploadTarget?): Boolean = target != null
 
-    /** Right-hand status text on a host row. */
-    fun status(target: ShareUploadTarget, textMode: ShareTextMode? = null): String = when {
-        target.isActiveSession -> "connected · active session"
-        target.isConnected -> "connected"
-        target.isConnecting -> "connecting…"
-        target.isFailed -> "reconnect failed"
+    /** Right-hand status text on a host row, as a string resource. */
+    fun status(target: ShareUploadTarget, textMode: ShareTextMode? = null): Int = when {
+        target.isActiveSession -> R.string.files_share_status_active_session
+        target.isConnected -> R.string.files_share_status_connected
+        target.isConnecting -> R.string.files_connecting
+        target.isFailed -> R.string.files_share_status_reconnect_failed
         // Name the gesture the button is about to perform, not a generic one.
-        textMode == ShareTextMode.PasteIntoSession -> "connect on paste…"
-        else -> "connect on upload…"
+        textMode == ShareTextMode.PasteIntoSession -> R.string.files_share_status_connect_on_paste
+        else -> R.string.files_share_status_connect_on_upload
     }
 
     /**
@@ -130,16 +130,17 @@ object ShareUploadPolicy {
      * this app has to open first, and opening it is the user's gesture. Text
      * pasted into a cold host is the same bargain as a cold upload — the
      * routed share waits for the session and lands when it connects.
+     * Returns a string resource.
      */
-    fun ctaTitle(target: ShareUploadTarget?, textMode: ShareTextMode? = null): String {
+    fun ctaTitle(target: ShareUploadTarget?, textMode: ShareTextMode? = null): Int {
         val pasting = textMode == ShareTextMode.PasteIntoSession
-        if (target == null) return if (pasting) "Paste" else "Upload"
+        if (target == null) return if (pasting) R.string.files_share_paste else R.string.files_upload
         val live = hasLiveSession(target)
         return when {
-            pasting && live -> "Paste"
-            pasting -> "Connect & paste"
-            live -> "Upload"
-            else -> "Connect & upload"
+            pasting && live -> R.string.files_share_paste
+            pasting -> R.string.files_share_connect_and_paste
+            live -> R.string.files_upload
+            else -> R.string.files_share_connect_and_upload
         }
     }
 

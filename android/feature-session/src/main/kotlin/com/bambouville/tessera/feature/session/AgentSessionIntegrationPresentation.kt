@@ -1,5 +1,8 @@
 package com.bambouville.tessera.feature.session
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.bambouville.tessera.agent.platform.AgentEndpointUnavailableReason
 import com.bambouville.tessera.agent.platform.AgentSessionIntegrationAction
 import com.bambouville.tessera.agent.platform.AgentSessionIntegrationForeground
 import com.bambouville.tessera.agent.platform.AgentSessionIntegrationKind
@@ -20,125 +23,187 @@ internal data class AgentSessionIntegrationPresentation(
     val secondaryAction: AgentSessionIntegrationAction? = null,
 )
 
-internal fun AgentSessionIntegrationStatus.presentation(): AgentSessionIntegrationPresentation = when (kind) {
-    AgentSessionIntegrationKind.Checking -> AgentSessionIntegrationPresentation(
-        title = "Checking agent integration",
-        message = "Reading the integration state for this terminal.",
+/**
+ * The string resource ids behind an [AgentSessionIntegrationPresentation].
+ * [detail] is the reason for an unavailable check; when present it is shown in
+ * place of [message], translated when the coordinator or the endpoint named
+ * its reason and verbatim when it is a host's own words.
+ */
+internal data class AgentSessionIntegrationCopy(
+    val title: Int,
+    val message: Int,
+    val detail: String? = null,
+    val actionLabel: Int? = null,
+    val action: AgentSessionIntegrationAction? = null,
+    val secondaryActionLabel: Int? = null,
+    val secondaryAction: AgentSessionIntegrationAction? = null,
+)
+
+@Composable
+internal fun AgentSessionIntegrationStatus.presentation(): AgentSessionIntegrationPresentation {
+    val copy = integrationCopy()
+    return AgentSessionIntegrationPresentation(
+        title = stringResource(copy.title),
+        message = copy.detail?.let { detailText() ?: endpointReasonText(it) } ?: stringResource(copy.message),
+        actionLabel = copy.actionLabel?.let { stringResource(it) },
+        action = copy.action,
+        secondaryActionLabel = copy.secondaryActionLabel?.let { stringResource(it) },
+        secondaryAction = copy.secondaryAction,
     )
-    AgentSessionIntegrationKind.Ready -> AgentSessionIntegrationPresentation(
-        title = "Agent integration ready",
-        message = "Lifecycle status is available for this terminal.",
+}
+
+/** [AgentSessionIntegrationStatus.detail] in the reader's language when the coordinator gave its reason; null for a host's own words. */
+@Composable
+private fun AgentSessionIntegrationStatus.detailText(): String? {
+    val reason = detailReason ?: return null
+    val argument = detailArgument?.let { endpointReasonText(it) }
+    return if (argument == null) stringResource(reason.text) else stringResource(reason.text, argument)
+}
+
+/** An endpoint's [AgentEndpointUnavailableReason] in the reader's language; a code or a host's words as they came. */
+@Composable
+private fun endpointReasonText(reason: String): String =
+    AgentEndpointUnavailableReason.textFor(reason)?.let { stringResource(it) } ?: reason
+
+internal fun AgentSessionIntegrationStatus.integrationCopy(): AgentSessionIntegrationCopy = when (kind) {
+    AgentSessionIntegrationKind.Checking -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_checking_title,
+        message = R.string.session_integration_checking_message,
     )
-    AgentSessionIntegrationKind.Missing -> AgentSessionIntegrationPresentation(
-        title = "Agent integration not installed",
+    AgentSessionIntegrationKind.Ready -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_ready_title,
+        message = R.string.session_integration_ready_message,
+    )
+    AgentSessionIntegrationKind.Missing -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_missing_title,
         message = when {
+            !agentLifecycleDeliverable ->
+                R.string.session_integration_install_message_plain_mosh
             foreground == AgentSessionIntegrationForeground.Agent && agentRequiresLifecycleHook != false ->
-                "Installs Tessera's helpers now. If this agent has not loaded the lifecycle hooks, relaunch it to enable status reporting."
+                R.string.session_integration_install_message_agent_relaunch
             foreground == AgentSessionIntegrationForeground.Agent ->
-                "Installs Tessera's Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes."
+                R.string.session_integration_install_message_agent_center
             primaryAction == AgentSessionIntegrationAction.InstallAndApply ->
-                "Installs Tessera's local hook files and PATH shims, then loads them here so future agents report accurate status."
+                R.string.session_integration_install_message_apply
             else ->
-                "Installs Tessera's local hook files. Return to a bash or zsh prompt afterward to enable this terminal."
+                R.string.session_integration_install_message_return_to_shell
         },
-        actionLabel = if (primaryAction == AgentSessionIntegrationAction.InstallAndApply) "Install and enable" else "Install integration",
+        actionLabel = if (primaryAction == AgentSessionIntegrationAction.InstallAndApply) {
+            R.string.session_integration_install_and_enable
+        } else {
+            R.string.session_integration_install
+        },
         action = primaryAction,
     )
-    AgentSessionIntegrationKind.Outdated -> AgentSessionIntegrationPresentation(
-        title = "Agent integration needs an update",
+    AgentSessionIntegrationKind.Outdated -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_outdated_title,
         message = when {
+            !agentLifecycleDeliverable ->
+                R.string.session_integration_update_message_plain_mosh
             foreground == AgentSessionIntegrationForeground.Agent && agentRequiresLifecycleHook != false ->
-                "Updates Tessera's helpers immediately without interrupting this agent. Existing hooks use the new scripts on their next event. If lifecycle status remains unavailable, relaunch the agent to load its hooks."
+                R.string.session_integration_update_message_agent_relaunch
             foreground == AgentSessionIntegrationForeground.Agent ->
-                "Updates Tessera's Agent Center helpers. OpenCode or Pi inventory refreshes automatically when installation completes."
+                R.string.session_integration_update_message_agent_center
             primaryAction == AgentSessionIntegrationAction.InstallAndApply ->
-                "Updates Tessera's local hook files and PATH shims, then loads them here so future agents report accurate status."
+                R.string.session_integration_update_message_apply
             else ->
-                "Updates Tessera's local hook files. Return to a bash or zsh prompt afterward to enable this terminal."
+                R.string.session_integration_update_message_return_to_shell
         },
-        actionLabel = if (primaryAction == AgentSessionIntegrationAction.InstallAndApply) "Update and enable" else "Update integration",
+        actionLabel = if (primaryAction == AgentSessionIntegrationAction.InstallAndApply) {
+            R.string.session_integration_update_and_enable
+        } else {
+            R.string.session_integration_update
+        },
         action = primaryAction,
     )
-    AgentSessionIntegrationKind.InactiveShell -> AgentSessionIntegrationPresentation(
-        title = "Agent integration inactive here",
-        message = "Loads Tessera's shell marker here. Enable automatically also saves the guarded activation line in this shell's startup file for future windows.",
-        actionLabel = "Enable in this shell",
+    AgentSessionIntegrationKind.InactiveShell -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_inactive_title,
+        message = R.string.session_integration_inactive_message,
+        actionLabel = R.string.session_integration_enable_in_shell,
         action = primaryAction,
-        secondaryActionLabel = "Enable automatically",
+        secondaryActionLabel = R.string.session_integration_enable_automatically,
         secondaryAction = this.secondaryAction,
     )
-    AgentSessionIntegrationKind.InsideAgent -> AgentSessionIntegrationPresentation(
-        title = "Agent lifecycle not yet confirmed",
-        message = "The helpers are installed, but no trusted lifecycle event has arrived from this agent yet. Tessera rechecks as you use it. If status remains unavailable, relaunch the agent to load its hooks.",
+    AgentSessionIntegrationKind.InsideAgent -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_inside_agent_title,
+        message = R.string.session_integration_inside_agent_message,
     )
-    AgentSessionIntegrationKind.AwayFromShell -> AgentSessionIntegrationPresentation(
-        title = "Return to this terminal to enable integration",
-        message = "Tessera will recheck this exact session when its shell is visible again.",
+    AgentSessionIntegrationKind.AwayFromShell -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_away_title,
+        message = R.string.session_integration_away_message,
     )
-    AgentSessionIntegrationKind.UnsupportedShell -> AgentSessionIntegrationPresentation(
-        title = "Open bash or zsh to enable integration",
-        message = "Tessera preserves other shell configurations and only sources its provider shims into bash or zsh.",
+    AgentSessionIntegrationKind.UnsupportedShell -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_unsupported_shell_title,
+        message = R.string.session_integration_unsupported_shell_message,
     )
-    AgentSessionIntegrationKind.BusyProgram -> AgentSessionIntegrationPresentation(
-        title = "Integration check paused",
-        message = "Tessera will recheck when the foreground program returns to its shell.",
+    AgentSessionIntegrationKind.BusyProgram -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_busy_title,
+        message = R.string.session_integration_busy_message,
     )
-    AgentSessionIntegrationKind.ManualCheckRequired -> AgentSessionIntegrationPresentation(
-        title = "Check agent integration",
-        message = "This transport needs a secondary read-only check before Tessera can verify the shell integration.",
-        actionLabel = "Check now",
+    AgentSessionIntegrationKind.ManualCheckRequired -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_manual_check_title,
+        message = R.string.session_integration_manual_check_message,
+        actionLabel = R.string.session_integration_check_now,
         action = primaryAction,
     )
-    AgentSessionIntegrationKind.Repairing -> AgentSessionIntegrationPresentation(
-        title = "Fixing agent integration",
-        message = "This keeps future agent status accurate in Agent Center.",
+    AgentSessionIntegrationKind.Repairing -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_repairing_title,
+        message = R.string.session_integration_repairing_message,
     )
-    AgentSessionIntegrationKind.Unavailable -> AgentSessionIntegrationPresentation(
-        title = "Could not verify agent integration",
-        message = detail ?: "The terminal-specific check failed. Tessera will retry after the next command.",
-        actionLabel = "Retry",
+    AgentSessionIntegrationKind.Unavailable -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_unavailable_title,
+        message = R.string.session_integration_unavailable_message,
+        detail = detail,
+        actionLabel = R.string.session_integration_retry,
         action = primaryAction,
     )
     // Deliberately action-free: installing would downgrade another device's
     // newer integration, and only an app update can make this host usable.
-    AgentSessionIntegrationKind.AppUpdateRequired -> AgentSessionIntegrationPresentation(
-        title = "Update Tessera for this host",
-        message = "This host's Agent Center integration comes from a newer Tessera. " +
-            "Update this app to keep agent status accurate.",
+    AgentSessionIntegrationKind.AppUpdateRequired -> AgentSessionIntegrationCopy(
+        title = R.string.session_integration_app_update_title,
+        message = R.string.session_integration_app_update_message,
     )
 }
 
-internal fun AgentSessionIntegrationAction.confirmationTitle(): String = when (this) {
-    AgentSessionIntegrationAction.InstallAndApply -> "Install or update and enable integration?"
-    AgentSessionIntegrationAction.InstallOnly -> "Install or update integration?"
-    AgentSessionIntegrationAction.Apply -> "Enable integration here?"
-    AgentSessionIntegrationAction.PersistAndApply -> "Enable integration automatically?"
-    AgentSessionIntegrationAction.Check -> "Check agent integration?"
-    AgentSessionIntegrationAction.Retry -> "Retry integration check?"
-}
+internal val AgentSessionIntegrationAction.confirmationTitleRes: Int
+    get() = when (this) {
+        AgentSessionIntegrationAction.InstallAndApply -> R.string.session_integration_confirm_install_and_apply_title
+        AgentSessionIntegrationAction.InstallOnly -> R.string.session_integration_confirm_install_only_title
+        AgentSessionIntegrationAction.Apply -> R.string.session_integration_confirm_apply_title
+        AgentSessionIntegrationAction.PersistAndApply -> R.string.session_integration_confirm_persist_title
+        AgentSessionIntegrationAction.Check -> R.string.session_integration_confirm_check_title
+        AgentSessionIntegrationAction.Retry -> R.string.session_integration_confirm_retry_title
+    }
 
-internal fun AgentSessionIntegrationAction.confirmationMessage(): String = when (this) {
-    AgentSessionIntegrationAction.InstallAndApply ->
-        "Writes Tessera hook files and provider shims, then loads them when this exact terminal is at an empty bash or zsh prompt. It never types into a running agent or another program."
-    AgentSessionIntegrationAction.InstallOnly ->
-        "Writes Tessera hook files and provider shims without typing into the running foreground program. Helper updates take effect immediately. Relaunch is only needed if the agent has not loaded its lifecycle hooks."
-    AgentSessionIntegrationAction.Apply ->
-        "Types one guarded source command so agents launched here report precise status. Continue only at an empty bash or zsh prompt."
-    AgentSessionIntegrationAction.PersistAndApply ->
-        "Adds one guarded activation line to this exact shell's startup file, then loads it here. Continue only at an empty bash or zsh prompt."
-    AgentSessionIntegrationAction.Check,
-    AgentSessionIntegrationAction.Retry ->
-        "Runs a read-only host check to verify the integration state for this terminal."
-}
+internal val AgentSessionIntegrationAction.confirmationMessageRes: Int
+    get() = when (this) {
+        AgentSessionIntegrationAction.InstallAndApply -> R.string.session_integration_confirm_install_and_apply_message
+        AgentSessionIntegrationAction.InstallOnly -> R.string.session_integration_confirm_install_only_message
+        AgentSessionIntegrationAction.Apply -> R.string.session_integration_confirm_apply_message
+        AgentSessionIntegrationAction.PersistAndApply -> R.string.session_integration_confirm_persist_message
+        AgentSessionIntegrationAction.Check,
+        AgentSessionIntegrationAction.Retry,
+        -> R.string.session_integration_confirm_check_message
+    }
 
-internal fun AgentSessionIntegrationAction.confirmationLabel(): String = when (this) {
-    AgentSessionIntegrationAction.InstallAndApply -> "Install and enable"
-    AgentSessionIntegrationAction.InstallOnly -> "Install integration"
-    AgentSessionIntegrationAction.Apply -> "Enable here"
-    AgentSessionIntegrationAction.PersistAndApply -> "Enable automatically"
-    AgentSessionIntegrationAction.Check -> "Check"
-    AgentSessionIntegrationAction.Retry -> "Retry"
-}
+internal val AgentSessionIntegrationAction.confirmationLabelRes: Int
+    get() = when (this) {
+        AgentSessionIntegrationAction.InstallAndApply -> R.string.session_integration_install_and_enable
+        AgentSessionIntegrationAction.InstallOnly -> R.string.session_integration_install
+        AgentSessionIntegrationAction.Apply -> R.string.session_integration_enable_here
+        AgentSessionIntegrationAction.PersistAndApply -> R.string.session_integration_enable_automatically
+        AgentSessionIntegrationAction.Check -> R.string.session_integration_check
+        AgentSessionIntegrationAction.Retry -> R.string.session_integration_retry
+    }
+
+@Composable
+internal fun AgentSessionIntegrationAction.confirmationTitle(): String = stringResource(confirmationTitleRes)
+
+@Composable
+internal fun AgentSessionIntegrationAction.confirmationMessage(): String = stringResource(confirmationMessageRes)
+
+@Composable
+internal fun AgentSessionIntegrationAction.confirmationLabel(): String = stringResource(confirmationLabelRes)
 
 /** Mirrors Core's `warningPresentationDelayMilliseconds` for previews and
  * tests where the shared policy ABI is not loaded. */

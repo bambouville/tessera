@@ -1,0 +1,210 @@
+{
+  "choose context": {
+    "de": "Kontext wählen",
+    "es": "elegir contexto",
+    "fr": "choisir le contexte",
+    "ja": "コンテキストを選択",
+    "zh-Hans": "选择上下文",
+    "zh-Hant": "選擇上下文"
+  },
+  "context": {
+    "de": "Kontext",
+    "es": "contexto",
+    "fr": "contexte",
+    "ja": "コンテキスト",
+    "zh-Hans": "上下文",
+    "zh-Hant": "上下文"
+  },
+  "could not read dropped item": {
+    "de": "abgelegtes Objekt konnte nicht gelesen werden",
+    "es": "no se pudo leer el elemento soltado",
+    "fr": "impossible de lire l'élément déposé",
+    "ja": "ドロップした項目を読み取れませんでした",
+    "zh-Hans": "无法读取拖入的项目",
+    "zh-Hant": "無法讀取拖入的項目"
+  },
+  "disconnect": {
+    "de": "trennen",
+    "es": "desconectar",
+    "fr": "déconnecter",
+    "ja": "切断",
+    "zh-Hans": "断开连接",
+    "zh-Hant": "中斷連線"
+  },
+  "drop to paste": {
+    "de": "zum Einfügen ablegen",
+    "es": "suelta para pegar",
+    "fr": "déposez pour coller",
+    "ja": "ドロップしてペースト",
+    "zh-Hans": "松开以粘贴",
+    "zh-Hant": "放開以貼上"
+  },
+  "edited": {
+    "de": "bearbeitet",
+    "es": "editado",
+    "fr": "modifié",
+    "ja": "編集済み",
+    "zh-Hans": "已编辑",
+    "zh-Hant": "已編輯"
+  },
+  "empty directory": {
+    "de": "leeres Verzeichnis",
+    "es": "directorio vacío",
+    "fr": "répertoire vide",
+    "ja": "空のディレクトリ",
+    "zh-Hans": "空目录",
+    "zh-Hant": "空目錄"
+  },
+  "exit full screen": {
+    "de": "Vollbild beenden",
+    "es": "salir de pantalla completa",
+    "fr": "quitter le plein écran",
+    "ja": "フルスクリーンを解除",
+    "zh-Hans": "退出全屏",
+    "zh-Hant": "結束全螢幕"
+  },
+  "files offline": {
+    "de": "Dateien offline",
+    "es": "archivos sin conexión",
+    "fr": "fichiers hors ligne",
+    "ja": "ファイルはオフライン",
+    "zh-Hans": "文件已离线",
+    "zh-Hant": "檔案已離線"
+  },
+  "find": {
+    "de": "suchen",
+    "es": "buscar",
+    "fr": "rechercher",
+    "ja": "検索",
+    "zh-Hans": "查找",
+    "zh-Hant": "尋找"
+  },
+  "full screen": {
+    "de": "Vollbild",
+    "es": "pantalla completa",
+    "fr": "plein écran",
+    "ja": "フルスクリーン",
+    "zh-Hans": "全屏",
+    "zh-Hant": "全螢幕"
+  },
+  "no context yet": {
+    "de": "noch kein Kontext",
+    "es": "aún sin contexto",
+    "fr": "pas encore de contexte",
+    "ja": "コンテキストなし",
+    "zh-Hans": "暂无上下文",
+    "zh-Hant": "尚無上下文"
+  },
+  "open…": {
+    "de": "öffnen…",
+    "es": "abrir…",
+    "fr": "ouvrir…",
+    "ja": "開く…",
+    "zh-Hans": "打开…",
+    "zh-Hant": "開啟…"
+  },
+  "port forwards": {
+    "de": "Portweiterleitungen",
+    "es": "reenvíos de puertos",
+    "fr": "redirections de ports",
+    "ja": "ポート転送",
+    "zh-Hans": "端口转发",
+    "zh-Hant": "連接埠轉發"
+  },
+  "select a host": {
+    "de": "Host auswählen",
+    "es": "selecciona un host",
+    "fr": "sélectionnez un hôte",
+    "ja": "ホストを選択",
+    "zh-Hans": "选择主机",
+    "zh-Hant": "選擇主機"
+  },
+  "showing the first %lld entries": {
+    "de": "die ersten %lld Einträge werden angezeigt",
+    "es": "se muestran las primeras %lld entradas",
+    "fr": "affichage des %lld premières entrées",
+    "ja": "先頭の %lld 件を表示中",
+    "zh-Hans": "显示前 %lld 项",
+    "zh-Hant": "顯示前 %lld 個項目"
+  },
+  "swap": {
+    "de": "tauschen",
+    "es": "intercambiar",
+    "fr": "permuter",
+    "ja": "入れ替え",
+    "zh-Hans": "交换",
+    "zh-Hant": "交換"
+  },
+  "switcher": {
+    "de": "Umschalter",
+    "es": "selector",
+    "fr": "sélecteur",
+    "ja": "スイッチャー",
+    "zh-Hans": "切换器",
+    "zh-Hant": "切換器"
+  },
+  "the pane changed; drop again": {
+    "de": "der Bereich hat gewechselt; erneut ablegen",
+    "es": "el panel cambió; vuelve a soltar",
+    "fr": "le volet a changé ; déposez à nouveau",
+    "ja": "ペインが変わりました。もう一度ドロップしてください",
+    "zh-Hans": "窗格已改变，请重新拖放",
+    "zh-Hant": "窗格已變更，請重新拖放"
+  },
+  "up": {
+    "de": "nach oben",
+    "es": "subir",
+    "fr": "remonter",
+    "ja": "上の階層",
+    "zh-Hans": "上一级",
+    "zh-Hant": "上一層"
+  },
+  "follows light and dark mode": {
+    "de": "folgt dem hellen und dunklen Modus",
+    "es": "sigue el modo claro y oscuro",
+    "fr": "suit le mode clair et sombre",
+    "ja": "ライト/ダークモードに合わせる",
+    "zh-Hans": "跟随浅色和深色模式",
+    "zh-Hant": "跟隨淺色和深色模式"
+  },
+  "open files": {
+    "de": "Dateien öffnen",
+    "es": "abrir archivos",
+    "fr": "ouvrir les fichiers",
+    "ja": "ファイルを開く",
+    "zh-Hans": "打开文件",
+    "zh-Hant": "開啟檔案"
+  },
+  "Open accessory bar": {
+    "de": "Zubehörleiste öffnen",
+    "es": "Abrir la barra accesoria",
+    "fr": "Ouvrir la barre d'accessoires",
+    "ja": "アクセサリバーを開く",
+    "zh-Hans": "打开辅助栏",
+    "zh-Hant": "開啟輔助列"
+  },
+  "Fold accessory bar": {
+    "de": "Zubehörleiste einklappen",
+    "es": "Plegar la barra accesoria",
+    "fr": "Replier la barre d'accessoires",
+    "ja": "アクセサリバーをたたむ",
+    "zh-Hans": "收起辅助栏",
+    "zh-Hant": "收合輔助列"
+  },
+  "agent waiting": {
+    "de": "Agent wartet",
+    "es": "agente en espera",
+    "fr": "agent en attente",
+    "ja": "エージェントが待機中",
+    "zh-Hans": "智能体正在等待",
+    "zh-Hant": "智慧體正在等待"
+  },
+  "needs you": {
+    "de": "braucht dich",
+    "es": "te necesita",
+    "fr": "a besoin de vous",
+    "ja": "対応が必要",
+    "zh-Hans": "需要你处理",
+    "zh-Hant": "需要你處理"
+  }
+}

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_hostname_required">hostname is required</string>
+    <string name="data_hostname_whitespace">hostname cannot contain whitespace</string>
+    <string name="data_hostname_control_characters">hostname cannot contain control characters</string>
+    <string name="data_username_required">username is required</string>
+    <string name="data_username_whitespace">username cannot contain whitespace</string>
+    <string name="data_username_control_characters">username cannot contain control characters</string>
+    <string name="data_name_control_characters">name cannot contain control characters</string>
+    <string name="data_port_range">port must be between 1 and 65535</string>
+    <string name="data_host_text_too_long">host text exceeds 64 KiB or contains a NUL character</string>
+    <string name="data_invalid_tmux_mode">invalid tmux mode</string>
+    <string name="data_invalid_transport_kind">invalid transport kind</string>
+    <string name="data_tmux_target_required">a pinned tmux target is required</string>
+    <string name="data_tmux_target_too_long">tmux target is too long</string>
+    <string name="data_tmux_target_characters">tmux target must use letters, digits, underscore, dash, or dot</string>
+    <string name="data_host_jump_through_itself">a host cannot jump through itself</string>
+    <string name="data_jump_route_cycle">jump route contains a cycle</string>
+    <string name="data_route_host_unavailable">route host is unavailable</string>
+    <string name="data_jump_host_unavailable">jump host is unavailable</string>
+    <string name="data_identity_name_required">identity name is required</string>
+    <string name="data_identity_name_control_characters">identity name cannot contain control characters</string>
+    <plurals name="data_jump_route_too_long">
+        <item quantity="one">jump route exceeds %1$d host</item>
+        <item quantity="other">jump route exceeds %1$d hosts</item>
+    </plurals>
+</resources>

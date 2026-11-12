@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.bambouville.tessera.feature.session"
-    sourceSets { getByName("main") { assets.srcDir("../../SharedAssets/agent-host") } }
+    sourceSets { getByName("main") { assets.directories += "../../SharedAssets/agent-host" } }
 
     defaultConfig { testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
 

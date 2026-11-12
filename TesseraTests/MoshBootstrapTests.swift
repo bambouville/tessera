@@ -1,4 +1,5 @@
 import XCTest
+import os
 import TesseraCore
 import TesseraSessionCore
 import TmuxControlCore
@@ -141,14 +142,14 @@ final class MoshBootstrapTests: XCTestCase {
     func test_agentReadHandleRejectsFrameCompletingAfterCarrierReplacement() async throws {
         let started = expectation(description: "waiting for frame")
         let gate = MoshAgentCarrierTestGate(started: started)
-        var current = true
+        let current = OSAllocatedUnfairLock(initialState: true)
         let handle = MoshAgentReadExecHandle(
             base: MoshAgentCarrierTestExecHandle(gate: gate),
-            isCurrent: { current }, failed: { _ in }
+            isCurrent: { current.withLock { $0 } }, failed: { _ in }
         )
         let read = Task { try await handle.nextFrame() }
         await fulfillment(of: [started], timeout: 2)
-        current = false
+        current.withLock { $0 = false }
         await gate.release(1)
         do { _ = try await read.value; XCTFail("stale frame accepted") }
         catch { XCTAssertEqual(error as? AppleAgentPlatformError, .staleBinding) }
@@ -173,6 +174,39 @@ final class MoshBootstrapTests: XCTestCase {
         XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
         edited = original; edited.jumpChainBrokenReason = "deleted"
         XCTAssertFalse(MoshSession.isSameAgentReadRoute(original, edited))
+    }
+
+    @MainActor
+    func test_launchKeepsTheSessionsModeWhenTheStoredHostWasEditedToOrFromTmux() {
+        // A plain mosh tab restored after its host was edited to a named tmux
+        // session: the stored host may not turn it into raw tmux.
+        let session = Host(address: "host.test", user: "alice", launchMode: .customCommand)
+        var stored = session
+        stored.launchMode = .pinnedTmux
+        stored.tmuxSessionName = "matrix"
+        stored.storedKeyID = UUID()
+        stored.envVars = "EDITOR=vi"
+        let plain = MoshSession.launchHost(stored, keepingLaunchOf: session)
+        XCTAssertEqual(plain.launchMode, .customCommand)
+        XCTAssertNil(plain.tmuxSessionName)
+        XCTAssertEqual(plain.storedKeyID, stored.storedKeyID)
+        XCTAssertEqual(plain.envVars, "EDITOR=vi")
+        let plainCommand = MoshBootstrap.bootstrapCommand(for: plain) { _ in "tessera-auto1234" }
+        XCTAssertFalse(plainCommand.contains("tmux"), plainCommand)
+        XCTAssertTrue(plainCommand.contains("EDITOR=vi"), plainCommand)
+
+        // And the reverse: a named tmux tab whose host became plain still
+        // attaches its own session.
+        let tmuxSession = Host(address: "host.test", user: "alice", launchMode: .pinnedTmux, tmuxSessionName: "shared")
+        var plainStored = tmuxSession
+        plainStored.launchMode = .customCommand
+        plainStored.tmuxSessionName = nil
+        plainStored.launchCommand = "exec zsh -l"
+        let tmux = MoshSession.launchHost(plainStored, keepingLaunchOf: tmuxSession)
+        XCTAssertEqual(tmux.launchMode, .pinnedTmux)
+        XCTAssertEqual(tmux.tmuxSessionName, "shared")
+        XCTAssertNil(tmux.launchCommand)
+        XCTAssertTrue(MoshBootstrap.bootstrapCommand(for: tmux) { _ in "tessera-auto1234" }.contains("shared"))
     }
 
     @MainActor

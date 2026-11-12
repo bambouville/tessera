@@ -58,7 +58,7 @@ final class SyncClassificationTests: XCTestCase {
             "requireFaceIDToUnlock", "autoLockMinutes", "lockWhenBackgrounded",
             "hideContentInAppSwitcher",
             "requireBiometricForKeyUse", "terminalBackgroundImageID",
-            "sessionRestorePolicy", "hasSeenWelcome"
+            "sessionRestorePolicy", "hasSeenWelcome", "shortcutCheatSheetEnabled"
         ] {
             XCTAssertEqual(Self.appearancePreferences[field], .neverSyncs)
         }

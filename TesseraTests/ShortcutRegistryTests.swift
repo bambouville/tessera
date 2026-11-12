@@ -24,6 +24,7 @@ final class ShortcutRegistryTests: XCTestCase {
         .openSettings:        (",", [.command], false),
         .refreshTerminal:     ("r", [.command], true),
         .toggleAgentCenter:   ("a", [.command, .shift], true),
+        .toggleArtifacts:     ("b", [.command, .shift], true),
         .toggleFilesPanel:    ("e", [.command, .shift], true),
         .tmuxNewWindow:       ("t", [.command], false),
         .tmuxCloseWindow:     ("w", [.command, .shift], false),
@@ -39,6 +40,21 @@ final class ShortcutRegistryTests: XCTestCase {
         // editor, but their chords must survive the move too.
         .newHost:             ("n", [.command], false),
         .connect:             ("\r", [.command], false),
+        // The artifacts browser's, live only while it holds the keyboard.
+        // A terminal relays them with priority beside a focused Duo pane.
+        .browserNewTab:       ("t", [.command], true),
+        .browserEditAddress:  ("l", [.command], true),
+        .browserReload:       ("r", [.command], true),
+        .browserBack:         ("[", [.command], true),
+        .browserForward:      ("]", [.command], true),
+        .browserCloseTab:     ("w", [.command, .shift], true),
+        .browserReopenTab:    ("t", [.command, .shift], true),
+        .browserPreviousTab:  ("[", [.command, .shift], true),
+        .browserNextTab:      ("]", [.command, .shift], true),
+        .browserSelectTab:    ("1", [.command], true),
+        .browserTabOverview:  ("\\", [.command, .shift], true),
+        .browserFind:         ("f", [.command], true),
+        .browserShareFile:    ("s", [.command, .shift], true),
     ]
 
     func testEveryActionHasAShippedExpectation() {
@@ -67,12 +83,14 @@ final class ShortcutRegistryTests: XCTestCase {
         }
     }
 
-    /// Two actions sharing a chord means one of them silently never fires. The
-    /// shipped set must be conflict-free; ⌘1–9 is excluded because it is nine
-    /// commands generated from one binding.
+    /// Two actions sharing a chord where both can be live means one of them
+    /// silently never fires. The shipped set must be conflict-free; ⌘1–9 is
+    /// excluded because it is nine commands generated from one binding. The
+    /// browser's chords are Safari's and repeat the terminal's on purpose:
+    /// they are never live together (`ShortcutSurface`).
     func testShippedDefaultsAreConflictFree() {
         var seen: [KeyBinding: ShortcutAction] = [:]
-        for action in ShortcutAction.allCases where !action.isDigitBlock {
+        for action in ShortcutAction.allCases where !action.isDigitBlock && action.surface != .browser {
             guard let binding = action.defaultBinding else { continue }
             if let other = seen[binding] {
                 // ⌘↩ is deliberately shared: connect lives on the host editor,
@@ -86,11 +104,19 @@ final class ShortcutRegistryTests: XCTestCase {
             }
             seen[binding] = action
         }
+        var browser: [KeyBinding: ShortcutAction] = [:]
+        for action in ShortcutAction.browserActions where !action.isDigitBlock {
+            guard let binding = action.defaultBinding else { continue }
+            XCTAssertNil(browser[binding], "\(action.rawValue) collides with \(browser[binding]?.rawValue ?? "")")
+            browser[binding] = action
+            XCTAssertFalse(seen[binding].map { $0.surface.overlaps(.browser) } ?? false,
+                           "\(action.rawValue) collides with an app-wide chord")
+        }
     }
 
     // MARK: - Hidden-button chords (SwiftUI `.keyboardShortcut`)
 
-    /// Five actions do not ride `UIKeyCommand`: ⌘N, ⌘K, ⌘⇧A and ⌘, live on
+    /// Six actions also use SwiftUI: ⌘N, ⌘K, ⌘⇧A, ⌘⇧B and ⌘, live on
     /// hidden buttons in `ContentView` (they must work when no terminal holds
     /// first responder) and ⌘↩ lives on the host editor's connect button. Two of
     /// them — `newHost` and `connect` — have *no* selector on the terminal
@@ -101,7 +127,7 @@ final class ShortcutRegistryTests: XCTestCase {
     /// below is what routes them through the store; if it stops answering for
     /// one of these chords, that row silently goes inert again.
     private static let hiddenButtonActions: [ShortcutAction] = [
-        .newHost, .quickSwitchPalette, .toggleAgentCenter, .openSettings, .connect,
+        .newHost, .quickSwitchPalette, .toggleAgentCenter, .toggleArtifacts, .openSettings, .connect,
     ]
 
     func testHiddenButtonChordsBridgeToSwiftUIKeyEquivalents() {
@@ -110,6 +136,7 @@ final class ShortcutRegistryTests: XCTestCase {
             .newHost:            ("n", [.command]),
             .quickSwitchPalette: ("k", [.command]),
             .toggleAgentCenter:  ("a", [.command, .shift]),
+            .toggleArtifacts:    ("b", [.command, .shift]),
             .openSettings:       (",", [.command]),
             .connect:            ("\r", [.command]),
         ]
@@ -124,6 +151,30 @@ final class ShortcutRegistryTests: XCTestCase {
             XCTAssertEqual(bridge?.character, want.0, "\(action.rawValue) character")
             XCTAssertEqual(bridge?.modifiers, want.1, "\(action.rawValue) modifiers")
         }
+    }
+
+    func testArtifactsDefaultIsGlobalUniqueAndNotReservedBySystem() throws {
+        let action = ShortcutAction.toggleArtifacts
+        let binding = try XCTUnwrap(action.defaultBinding)
+        XCTAssertEqual(binding, .cmdShift("b"))
+        XCTAssertEqual(action.group, .global)
+        XCTAssertEqual(action.availability, .always)
+        XCTAssertTrue(action.wantsPriorityOverSystemBehavior)
+        XCTAssertTrue(ShortcutAction.terminalActions.contains(action))
+        XCTAssertNil(KeyBinding.reservedBySystem[binding])
+        XCTAssertEqual(ShortcutAction.allCases.filter { $0.defaultBinding == binding }, [action])
+        let global = ShortcutAction.actions(in: .global)
+        let agentsIndex = try XCTUnwrap(global.firstIndex(of: .toggleAgentCenter))
+        XCTAssertEqual(global[agentsIndex + 1], .toggleArtifacts)
+    }
+
+    @MainActor
+    func testArtifactsSelectorHasAConcreteTerminalHandler() throws {
+        let selector = try XCTUnwrap(TesseraTerminalContainer.shortcutSelector(for: .toggleArtifacts))
+        XCTAssertEqual(selector, #selector(TesseraTerminalContainer.openArtifacts))
+        let container = TesseraTerminalContainer(frame: .zero)
+        XCTAssertTrue(container.responds(to: selector))
+        XCTAssertTrue(container.canPerformAction(selector, withSender: nil))
     }
 
     /// A rebind has to reach the hidden buttons, and an unbind has to *release*

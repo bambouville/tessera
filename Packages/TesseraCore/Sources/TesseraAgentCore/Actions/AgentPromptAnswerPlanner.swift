@@ -42,6 +42,7 @@ public struct AgentPromptAnswerGoal: Equatable, Codable, Sendable {
 public struct AgentPromptAnswerAnchor: Equatable, Codable, Sendable {
     public let signature: String
     public let identity: String
+    public let placement: String?
     public let kind: AgentPromptKind
     public let selectedOptionID: String?
     public let freeformOptionID: String?
@@ -50,6 +51,7 @@ public struct AgentPromptAnswerAnchor: Equatable, Codable, Sendable {
     public init(_ observation: AgentPromptObservationResult) {
         signature = observation.signature
         identity = observation.identity
+        placement = observation.placement
         kind = observation.kind
         selectedOptionID = observation.selectedOptionID
         freeformOptionID = observation.freeformOption?.id
@@ -236,7 +238,7 @@ public enum AgentPromptAnswerPlanner {
         let waits = history.reversed().prefix { $0 == .wait }.count
         func settle() -> AgentPromptAnswerStep { waits < maximumWaits ? .wait : .refuse(.verificationFailed) }
         let last = acted.last!
-        guard let observation, observation.identity == anchor.identity else {
+        guard let observation, observation.isSameQuestion(identity: anchor.identity, placement: anchor.placement) else {
             // The question left the screen: answered, advanced or dismissed.
             // Keys that only focus or navigate never do that themselves.
             switch last {
@@ -308,7 +310,11 @@ public enum AgentPromptAnswerPlanner {
         if entry.text.isEmpty {
             return acted.contains(.type) ? settle() : .send(text, .type)
         }
-        if shows(entry.text, text) {
+        // A field that held text before anything was typed answers only if it
+        // holds the answer whole, its runs of spaces aside: the allowances of
+        // `shows` are for reading back what was typed.
+        if acted.contains(.type) ? shows(entry.text, text)
+            : AgentPromptScreens.collapse(entry.text) == AgentPromptScreens.collapse(text) {
             return acted.contains(.submit) ? settle() : .send("\r", .submit)
         }
         // A partial repaint of what was typed, or someone else's text.
@@ -316,13 +322,46 @@ public enum AgentPromptAnswerPlanner {
     }
 
     /// The field shows the typed text, allowing for a TUI that truncates or
-    /// scrolls a long value within its row.
+    /// scrolls a long value within its field, or wraps it onto rows of its
+    /// own. Codex breaks a word wider than its row after a slash or a hyphen,
+    /// or inside it, so the rows read back joined by a space the text does not
+    /// hold. Row breaks only add spaces: the field shows the text, its head or
+    /// its tail, with every space the text holds there and perhaps more. An
+    /// ellipsis at either end is where the TUI cut the field short, unless
+    /// the text holds it there itself.
     static func shows(_ shown: String, _ text: String) -> Bool {
-        let visible = AgentPromptScreens.collapse(shown).trimmingCharacters(in: CharacterSet(charactersIn: "…"))
-        let wanted = AgentPromptScreens.collapse(text)
-        if visible == wanted { return true }
-        guard !visible.isEmpty, visible.count >= min(wanted.count, 12) else { return false }
-        return wanted.hasPrefix(visible) || wanted.hasSuffix(visible)
+        let field = shown.trimmingCharacters(in: .whitespacesAndNewlines)
+        return reads(field, text) || reads(field.trimmingCharacters(in: CharacterSet(charactersIn: "…").union(.whitespaces)), text)
+    }
+
+    private static func reads(_ shown: String, _ text: String) -> Bool {
+        let visible = spaced(shown)
+        let wanted = spaced(text)
+        func spacesKept(from start: Int) -> Bool {
+            wanted.breaks.allSatisfy { $0 <= start || $0 >= start + visible.text.count || visible.breaks.contains($0 - start) }
+        }
+        if visible.text == wanted.text { return spacesKept(from: 0) }
+        guard !visible.text.isEmpty, visible.text.count >= min(wanted.text.count, 12) else { return false }
+        return wanted.text.starts(with: visible.text) && spacesKept(from: 0)
+            || wanted.text.suffix(visible.text.count).elementsEqual(visible.text)
+                && spacesKept(from: wanted.text.count - visible.text.count)
+    }
+
+    /// The text's characters without whitespace, and where whitespace parted
+    /// them: the offsets of the characters a space came before. Kept as
+    /// characters, which joining them back into a string could merge.
+    private static func spaced(_ value: String) -> (text: [Character], breaks: Set<Int>) {
+        var text: [Character] = [], breaks = Set<Int>(), parted = false
+        for character in value {
+            if character.isWhitespace {
+                parted = !text.isEmpty
+            } else {
+                if parted { breaks.insert(text.count) }
+                parted = false
+                text.append(character)
+            }
+        }
+        return (text, breaks)
     }
 
     private static func navigate(toward target: String, observation: AgentPromptObservationResult) -> AgentPromptAnswerStep {

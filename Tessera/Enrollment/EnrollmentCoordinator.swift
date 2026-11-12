@@ -483,41 +483,54 @@ final class EnrollmentCoordinator {
                 let streamAttempt = self.requesterStreamAttempt
                 self.pendingRequesterStreamAttempt = streamAttempt
 
-                // Apple peer binding is the authorization boundary for this transport.
-                // No endpoint, device name, or descriptor field substitutes for it.
-                activity.getContinuationStreams { [weak self] input, output, error in
-                    Task { @MainActor in
-                        guard let self,
-                              self.pendingRequesterStreamAttempt == streamAttempt,
-                              self.role == .requester,
-                              let host = self.requesterHost else {
-                            input?.close()
-                            output?.close()
-                            return
-                        }
-                        // Consume before constructing a transport. Even if a malformed
-                        // activity invokes its completion twice, only the first callback
-                        // can affect this coordinator.
-                        self.pendingRequesterStreamAttempt = nil
-                        guard let input, let output else {
-                            self.fail(CoordinatorError.continuationStreamsUnavailable(
-                                error?.localizedDescription ?? String(localized: "The peer did not provide streams.")
-                            ))
-                            return
-                        }
-                        self.beginRequester(
-                            input: input,
-                            output: output,
-                            host: host,
-                            publicKey: publicKey
-                        )
-                    }
-                }
+                self.requestContinuationStreams(
+                    through: activity,
+                    publicKey: publicKey,
+                    streamAttempt: streamAttempt
+                )
             } catch is CancellationError {
                 return
             } catch {
                 guard self.role == .requester else { return }
                 self.fail(error)
+            }
+        }
+    }
+
+    private func requestContinuationStreams(
+        through activity: NSUserActivity,
+        publicKey: EnrollmentPublicKey,
+        streamAttempt: UInt64
+    ) {
+        // Keep the callback weak so late streams can close after coordinator teardown.
+        // Apple peer binding is the authorization boundary for this transport.
+        // No endpoint, device name, or descriptor field substitutes for it.
+        activity.getContinuationStreams { [weak self] input, output, error in
+            Task { @MainActor in
+                guard let self,
+                      self.pendingRequesterStreamAttempt == streamAttempt,
+                      self.role == .requester,
+                      let host = self.requesterHost else {
+                    input?.close()
+                    output?.close()
+                    return
+                }
+                // Consume before constructing a transport. Even if a malformed
+                // activity invokes its completion twice, only the first callback
+                // can affect this coordinator.
+                self.pendingRequesterStreamAttempt = nil
+                guard let input, let output else {
+                    self.fail(CoordinatorError.continuationStreamsUnavailable(
+                        error?.localizedDescription ?? String(localized: "The peer did not provide streams.")
+                    ))
+                    return
+                }
+                self.beginRequester(
+                    input: input,
+                    output: output,
+                    host: host,
+                    publicKey: publicKey
+                )
             }
         }
     }

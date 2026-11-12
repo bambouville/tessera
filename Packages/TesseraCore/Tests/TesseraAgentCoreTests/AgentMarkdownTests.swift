@@ -79,6 +79,23 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertEqual(image.children.first?.text, "diagram")
     }
 
+    func testADocumentKeepsEveryLinkAsWrittenForItsViewer() {
+        let source = "[a](../README.md) [b](http://localhost:3000/x) [c](javascript:alert(1)) [d](#top) ![i](https://example.com/i.png)"
+        let links = (AgentMarkdownDocument.parseDocument(source).blocks.first?.children ?? []).filter { $0.kind == .link }
+        XCTAssertEqual(links.map(\.destination), ["../README.md", "http://localhost:3000/x", "javascript:alert(1)", "#top"])
+        // Agent output still keeps only web and mail links, cached or not.
+        let agent = (AgentMarkdownDocument.parse(source).blocks.first?.children ?? []).filter { $0.kind == .link }
+        XCTAssertEqual(agent.map(\.destination), [nil, "http://localhost:3000/x", nil, nil])
+        let image = AgentMarkdownDocument.parseDocument(source).blocks.first?.children.first { $0.kind == .image }
+        XCTAssertNil(image?.destination)
+        // A cached document tree never reaches agent output, nor the reverse.
+        let fresh = "[e](notes.md) " + UUID().uuidString
+        XCTAssertEqual(AgentMarkdownDocument.parseDocument(fresh).blocks.first?.children.first?.destination, "notes.md")
+        XCTAssertFalse(AgentMarkdownDocument.cachedForTesting(fresh))
+        XCTAssertNil(AgentMarkdownDocument.parse(fresh).blocks.first?.children.first?.destination)
+        XCTAssertEqual(AgentMarkdownDocument.parseDocument(fresh).blocks.first?.children.first?.destination, "notes.md")
+    }
+
     func testRawHTMLIsLiteralText() {
         let document = AgentMarkdownDocument.parse("<script>alert('x')</script>\n\nhello <b>world</b>")
         let rendered = allText(in: document.blocks).joined()

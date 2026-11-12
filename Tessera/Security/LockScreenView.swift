@@ -9,6 +9,7 @@ struct LockScreenView: View {
     @Environment(AppLockController.self) private var controller
     @State private var isUnlocking = false
     @State private var didAutoPrompt = false
+    @State private var laptop = LaptopCardLayout()
 
     private var activeTheme: TerminalTheme {
         TerminalTheme.find(id: appearance.terminalThemeID)
@@ -94,7 +95,11 @@ struct LockScreenView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
+            // Laptop pose: the unlock button above the fold, never on the
+            // hinge. The background still covers the whole window.
+            .laptopCardPlacement(laptop, scrolls: true)
         }
+        .readsLaptopCardLayout($laptop)
         .environment(\.designTokens, tokens)
         .ignoresSafeArea()
         .onAppear {
@@ -137,5 +142,150 @@ struct LockScreenView: View {
             from: nil,
             for: nil
         )
+    }
+}
+
+// MARK: - Laptop pose
+
+/// Laptop pose: a card centred on its window would sit on the hinge, which
+/// cannot be touched. It centres on the screen above the fold instead. The
+/// lock screen, the onboarding overlay and the continuation overlay share it.
+struct LaptopCardLayout: Equatable {
+    /// In the coordinates of the layer the card is centred in.
+    var fold: DuoFold?
+    /// The window's top safe area. SwiftUI reports none inside a layer laid
+    /// out ignoring it, so `readsLaptopCardLayout` asks the window.
+    var windowTopInset: CGFloat = 0
+    /// The layer's top, global.
+    var layerMinY: CGFloat = 0
+
+    /// The layer's own top safe area.
+    var topInset: CGFloat {
+        max(0, windowTopInset - layerMinY)
+    }
+
+    /// From the top safe area to just above the hinge. Nil off laptop pose,
+    /// where the card stays centred on its window.
+    var screen: ClosedRange<CGFloat>? {
+        guard let fold, !fold.splitsSideBySide else { return nil }
+        let bottom = fold.frame.minY - LaptopPaletteLayout.foldClearance
+        return bottom > topInset ? topInset...bottom : nil
+    }
+
+    /// A callout at `y` that would cross the hinge moves past it, to the side
+    /// away from its target, so neither covers the other.
+    func calloutY(
+        _ y: CGFloat,
+        height: CGFloat,
+        target: CGRect,
+        containerHeight: CGFloat,
+        margin: CGFloat = 12
+    ) -> CGFloat {
+        guard let fold, !fold.splitsSideBySide else { return y }
+        let hinge = fold.frame
+        let above = hinge.minY - LaptopPaletteLayout.foldClearance - height
+        let below = hinge.maxY + LaptopPaletteLayout.foldClearance
+        guard y > above, y < below else { return y }
+        let past = target.midY < hinge.midY ? below : above
+        return max(margin, min(past, containerHeight - height - margin))
+    }
+}
+
+extension View {
+    /// On the layer a card is centred in: its fold, against the
+    /// keyboard-free frame, and its top safe area. Inert off a Duo.
+    func readsLaptopCardLayout(_ layout: Binding<LaptopCardLayout>) -> some View {
+        background {
+            Color.clear
+                .ignoresSafeArea(.keyboard)
+                .onDuoFoldChange { fold in
+                    if layout.wrappedValue.fold != fold { layout.wrappedValue.fold = fold }
+                }
+                .background {
+                    // Only a Duo reports a fold.
+                    if layout.wrappedValue.fold != nil {
+                        LaptopTopSafeAreaProbe { inset in
+                            if layout.wrappedValue.windowTopInset != inset { layout.wrappedValue.windowTopInset = inset }
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { minY in
+                            if layout.wrappedValue.layerMinY != minY { layout.wrappedValue.layerMinY = minY }
+                        }
+                    }
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// Centres this card on the screen above the fold, at most its height.
+    /// `scrolls` lets a card that does not scroll itself scroll there when
+    /// taller. Off laptop pose the card is left as it was. The card must fill
+    /// the layer that read `layout`.
+    @ViewBuilder
+    func laptopCardPlacement(_ layout: LaptopCardLayout, scrolls: Bool = false) -> some View {
+        if let screen = layout.screen {
+            // The card's value appears twice below; one box keeps its nested
+            // type off the main thread's stack.
+            let card = stackBoundary()
+            Group {
+                if scrolls {
+                    ViewThatFits(in: .vertical) {
+                        card
+                        ScrollView(.vertical) { card }
+                            .scrollIndicators(.hidden)
+                    }
+                } else {
+                    card
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: screen.upperBound - screen.lowerBound)
+            .padding(.top, screen.lowerBound)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        } else {
+            self
+        }
+    }
+}
+
+/// Its window's top safe area, a run-loop turn after UIKit lays it out. A
+/// body must not read the window's insets itself (see `WindowBottomSafeArea`).
+private struct LaptopTopSafeAreaProbe: UIViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        return view
+    }
+
+    func updateUIView(_ view: ProbeView, context: Context) {
+        view.onChange = onChange
+    }
+
+    final class ProbeView: UIView {
+        var onChange: ((CGFloat) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            refresh()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            refresh()
+        }
+
+        override func safeAreaInsetsDidChange() {
+            super.safeAreaInsetsDidChange()
+            refresh()
+        }
+
+        private func refresh() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window else { return }
+                self.onChange?(window.safeAreaInsets.top)
+            }
+        }
     }
 }

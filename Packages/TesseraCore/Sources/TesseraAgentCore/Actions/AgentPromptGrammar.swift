@@ -85,12 +85,15 @@ public struct AgentPromptMacroOption: Equatable, Codable, Sendable {
     /// Typed text can answer through this row.
     public let acceptsText: Bool
 
+    /// The characters of a detail an option keeps.
+    static let detailBound = 1_024
+
     public init?(id: String, label: String, responseMacro: String, isDefault: Bool, detail: String? = nil,
                  role: AgentPromptOptionRole = .choice, isChecked: Bool? = nil, acceptsText: Bool = false) {
         guard !id.isEmpty, id.utf8.count <= 64, !label.isEmpty, label.utf8.count <= 512,
               !responseMacro.isEmpty, responseMacro.utf8.count <= 64 else { return nil }
         self.id = id; self.label = label; self.responseMacro = responseMacro; self.isDefault = isDefault
-        self.detail = detail.map { String($0.prefix(1_024)) }.flatMap { $0.isEmpty ? nil : $0 }
+        self.detail = detail.map { String($0.prefix(Self.detailBound)) }.flatMap { $0.isEmpty ? nil : $0 }
         self.role = role; self.isChecked = isChecked; self.acceptsText = acceptsText
     }
 
@@ -129,6 +132,10 @@ public struct AgentPromptObservationResult: Equatable, Codable, Sendable {
     /// The question across its own answer steps: unchanged by the selection
     /// marker, check boxes and the text being typed into it.
     public let identity: String
+    /// What tells this question from one with the same words beside it, as
+    /// `key=value` parts: its tab, its chip, "Question n/m". A part whose row
+    /// is off screen is left out, which says nothing either way.
+    public let placement: String?
     /// The agent is stopped until this prompt is answered.
     public let isBlocking: Bool
     public let title: String?
@@ -141,15 +148,20 @@ public struct AgentPromptObservationResult: Equatable, Codable, Sendable {
     public let textFocus: AgentPromptTextFocus?
     /// Codex's collapsed async summary: how many questions wait.
     public let pendingCount: Int?
+    /// The screen shows the dialog's options without its question, which
+    /// scrolled off a pane shorter than the dialog.
+    public let isCropped: Bool
 
     public init?(signature: String, options: [AgentPromptMacroOption], kind: AgentPromptKind = .permission,
                  identity: String? = nil, isBlocking: Bool = true, title: String? = nil, question: String? = nil,
                  detail: String? = nil, progress: String? = nil, controls: [AgentPromptControl] = [],
-                 entry: AgentPromptEntry? = nil, textFocus: AgentPromptTextFocus? = nil, pendingCount: Int? = nil) {
+                 entry: AgentPromptEntry? = nil, textFocus: AgentPromptTextFocus? = nil, pendingCount: Int? = nil,
+                 isCropped: Bool = false, placement: String? = nil) {
         guard !signature.isEmpty, signature.utf8.count <= 1_024, options.count <= 9,
               !options.isEmpty || kind == .textEntry || kind == .deferred else { return nil }
         self.signature = signature; self.options = options; self.kind = kind
         self.identity = String((identity ?? signature).prefix(1_024))
+        self.placement = Self.placement(Self.placementParts(placement))
         self.isBlocking = isBlocking
         func bounded(_ value: String?, _ limit: Int) -> String? {
             value.map { String($0.prefix(limit)) }.flatMap { $0.isEmpty ? nil : $0 }
@@ -157,10 +169,12 @@ public struct AgentPromptObservationResult: Equatable, Codable, Sendable {
         self.title = bounded(title, 512); self.question = bounded(question, 2_048)
         self.detail = bounded(detail, 8_192); self.progress = bounded(progress, 256)
         self.controls = controls; self.entry = entry; self.textFocus = textFocus; self.pendingCount = pendingCount
+        self.isCropped = isCropped
     }
 
     private enum CodingKeys: String, CodingKey {
         case signature, options, kind, identity, isBlocking, title, question, detail, progress, controls, entry, textFocus, pendingCount
+        case isCropped, placement
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -177,9 +191,42 @@ public struct AgentPromptObservationResult: Equatable, Codable, Sendable {
             controls: try values.decodeIfPresent([AgentPromptControl].self, forKey: .controls) ?? [],
             entry: try values.decodeIfPresent(AgentPromptEntry.self, forKey: .entry),
             textFocus: try values.decodeIfPresent(AgentPromptTextFocus.self, forKey: .textFocus),
-            pendingCount: try values.decodeIfPresent(Int.self, forKey: .pendingCount)
+            pendingCount: try values.decodeIfPresent(Int.self, forKey: .pendingCount),
+            isCropped: try values.decodeIfPresent(Bool.self, forKey: .isCropped) ?? false,
+            placement: try values.decodeIfPresent(String.self, forKey: .placement)
         ) else { throw DecodingError.dataCorruptedError(forKey: .signature, in: values, debugDescription: "invalid prompt") }
         self = result
+    }
+
+    /// The same question as one shown with `identity` at `placement`: only
+    /// the parts both screens show are compared.
+    public func isSameQuestion(identity: String, placement: String?) -> Bool {
+        guard self.identity == identity else { return false }
+        let other = Self.placementParts(placement)
+        return Self.placementParts(self.placement).allSatisfy { key, value in other[key].map { $0 == value } ?? true }
+    }
+
+    /// `placement` with the parts `newer` shows replaced: what the screen
+    /// last showed of each.
+    public static func placement(_ older: String?, updatedBy newer: String?) -> String? {
+        placement(placementParts(older).merging(placementParts(newer)) { $1 })
+    }
+
+    /// Each part is bounded on its own, so a long one keeps the others whole.
+    static func placement(_ parts: [String: String]) -> String? {
+        let bounded = parts.keys.sorted().prefix(16).map { key in
+            "\(AgentPromptScreens.compact([key], limit: 64))=\(AgentPromptScreens.compact([parts[key]!], limit: 128))"
+        }
+        return bounded.isEmpty ? nil : bounded.joined(separator: "\u{1f}")
+    }
+
+    static func placementParts(_ placement: String?) -> [String: String] {
+        var parts: [String: String] = [:]
+        for part in placement?.split(separator: "\u{1f}") ?? [] {
+            guard let equals = part.firstIndex(of: "=") else { continue }
+            parts[String(part[..<equals])] = String(part[part.index(after: equals)...])
+        }
+        return parts
     }
 
     public var selectedOptionID: String? { options.first(where: \.isDefault)?.id }
@@ -203,10 +250,19 @@ public enum AgentPromptGrammar {
     /// output sits above a composer or status line and is never actionable.
     /// Cursor-owned numbered menus remain a fallback for approval screens the
     /// structural parsers do not know.
-    public static func observe(_ request: AgentPromptObservationRequest) -> AgentPromptObservationResult? {
+    ///
+    /// `allowingCroppedTop` also reads a Claude question whose options start
+    /// the screen, its question scrolled off a short pane (`isCropped`). Such
+    /// a screen never raises a prompt by itself; it continues one already
+    /// known (`AgentCenterRuntime.observeLivePrompt`), and its own signature
+    /// lets an answer to that prompt verify the screen it writes to.
+    public static func observe(_ request: AgentPromptObservationRequest,
+                               allowingCroppedTop: Bool = false) -> AgentPromptObservationResult? {
         let rows = screenRows(request.visibleText)
         switch request.providerID {
-        case .claude: return AgentPromptScreens.claude(rows) ?? legacyObserve(request)
+        case .claude:
+            return AgentPromptScreens.claude(rows, styled: request.visibleText, allowsCroppedTop: allowingCroppedTop)
+                ?? legacyObserve(request)
         case .codex:
             return AgentPromptScreens.codexRequestUserInput(rows)
                 ?? AgentPromptScreens.codexAsyncPanel(rows)
@@ -218,14 +274,16 @@ public enum AgentPromptGrammar {
     }
 
     /// A pane capture as an observation request carries it: no escape
-    /// sequences, and the bottom whole rows within `limit` UTF-8 bytes.
-    /// Both platforms capture tmux panes with `capture-pane -e` (composer
-    /// evidence reads DIM), so SGR and OSC 8 links arrive in the text, and
-    /// they can outweigh the cells they style; bound the rows after removing them.
+    /// sequences but the cells' backgrounds, and the bottom whole rows within
+    /// `limit` UTF-8 bytes. Both platforms capture tmux panes with
+    /// `capture-pane -e` (composer evidence reads DIM), so SGR and OSC 8 links
+    /// arrive in the text, and they can outweigh the cells they style; bound
+    /// the rows after removing them. Claude marks its current question tab
+    /// only by its background (`withoutEscapes(_:keepingBackgrounds:)`).
     public static func promptText(fromCapture capture: String, limit: Int = 16_384) -> String {
         var kept: [Substring] = []
         var bytes = 0
-        for row in withoutEscapes(capture).split(separator: "\n", omittingEmptySubsequences: false).reversed() {
+        for row in withoutEscapes(capture, keepingBackgrounds: true).split(separator: "\n", omittingEmptySubsequences: false).reversed() {
             let cost = row.utf8.count + (kept.isEmpty ? 0 : 1)
             guard bytes + cost <= limit else { break }
             kept.append(row)
@@ -237,44 +295,142 @@ public enum AgentPromptGrammar {
     /// Removes CSI, OSC/DCS strings and two-byte escapes; their bytes occupy
     /// no cells, and ESC alone would leave their parameters behind as text. A
     /// sequence broken by a newline ends there, keeping the row structure.
-    static func withoutEscapes(_ value: String) -> String {
+    /// `keepingBackgrounds` keeps one style, each cell's background and
+    /// reverse video, as `ESC[0;…m` where it changes and `ESC[0m` before a
+    /// row ends in one: every row then reads alone, as bounding keeps only
+    /// the bottom ones.
+    static func withoutEscapes(_ value: String, keepingBackgrounds: Bool = false) -> String {
         guard value.unicodeScalars.contains("\u{1b}") else { return value }
-        let scalars = Array(value.unicodeScalars)
         var result = String.UnicodeScalarView()
-        var index = 0
-        while index < scalars.count {
+        var written: String?
+        func write(_ background: String?) {
+            guard background != written else { return }
+            result.append(contentsOf: "\u{1b}[0\(background.map { ";" + $0 } ?? "")m".unicodeScalars)
+            written = background
+        }
+        cells(value, readingBackgrounds: keepingBackgrounds) { scalar, background in
+            if keepingBackgrounds { write(scalar == "\n" ? nil : background) }
+            result.append(scalar)
+            return true
+        }
+        if keepingBackgrounds { write(nil) }
+        return String(result)
+    }
+
+    /// The text of one row in runs of one background, as `cells` reads them.
+    static func backgroundRuns(_ value: String, row: Int) -> [(text: String, background: String?)] {
+        var runs: [(text: String, background: String?)] = []
+        var current = 0
+        cells(value) { scalar, background in
+            if scalar == "\n" { current += 1; return current <= row }
+            guard current == row else { return true }
+            if let last = runs.last, last.background == background {
+                runs[runs.count - 1].text.unicodeScalars.append(scalar)
+            } else {
+                runs.append((String(scalar), background))
+            }
+            return true
+        }
+        return runs
+    }
+
+    /// Each scalar a capture shows, escapes skipped, with its background:
+    /// nil for the terminal's own, else its SGR parameters ("48;5;153",
+    /// "7;44"). A background lasts past a newline, as tmux captures it.
+    /// Reading stops when `visit` returns false.
+    static func cells(_ value: String, readingBackgrounds: Bool = true, _ visit: (Unicode.Scalar, String?) -> Bool) {
+        let scalars = value.unicodeScalars
+        let end = scalars.endIndex
+        var color: String?
+        var reverse = false
+        var background: String?
+        var index = scalars.startIndex
+        while index < end {
             let scalar = scalars[index]
-            index += 1
-            guard scalar == "\u{1b}" else { result.append(scalar); continue }
-            guard index < scalars.count else { break }
+            scalars.formIndex(after: &index)
+            guard scalar == "\u{1b}" else {
+                guard visit(scalar, background) else { return }
+                continue
+            }
+            guard index < end else { break }
             let kind = scalars[index]
-            index += 1
+            scalars.formIndex(after: &index)
             switch kind {
             case "[":
-                while index < scalars.count, (0x20...0x3f).contains(scalars[index].value) { index += 1 }
-                if index < scalars.count, (0x40...0x7e).contains(scalars[index].value) { index += 1 }
+                let start = index
+                while index < end, (0x20...0x3f).contains(scalars[index].value) { scalars.formIndex(after: &index) }
+                if index < end, (0x40...0x7e).contains(scalars[index].value) {
+                    if readingBackgrounds, scalars[index] == "m" {
+                        selectGraphicRendition(String(scalars[start..<index]), color: &color, reverse: &reverse)
+                        background = reverse ? ["7", color].compactMap { $0 }.joined(separator: ";") : color
+                    }
+                    scalars.formIndex(after: &index)
+                }
             case "]", "P", "X", "^", "_":
                 // Ends at BEL or ST (`ESC \`); another ESC starts a new sequence.
-                while index < scalars.count, scalars[index] != "\n" {
-                    if scalars[index] == "\u{7}" { index += 1; break }
+                while index < end, scalars[index] != "\n" {
+                    if scalars[index] == "\u{7}" { scalars.formIndex(after: &index); break }
                     if scalars[index] == "\u{1b}" {
-                        if index + 1 < scalars.count, scalars[index + 1] == "\\" { index += 2 }
+                        let next = scalars.index(after: index)
+                        if next < end, scalars[next] == "\\" { index = scalars.index(after: next) }
                         break
                     }
-                    index += 1
+                    scalars.formIndex(after: &index)
                 }
             default:
                 // `ESC ( B` designates a character set; `ESC 7` and `ESC =` stand alone.
                 if (0x20...0x2f).contains(kind.value) {
-                    while index < scalars.count, (0x20...0x2f).contains(scalars[index].value) { index += 1 }
-                    if index < scalars.count, (0x30...0x7e).contains(scalars[index].value) { index += 1 }
+                    while index < end, (0x20...0x2f).contains(scalars[index].value) { scalars.formIndex(after: &index) }
+                    if index < end, (0x30...0x7e).contains(scalars[index].value) { scalars.formIndex(after: &index) }
                 } else if !(0x30...0x7e).contains(kind.value) {
                     // Not an escape: keep the newline, glyph or ESC that follows.
-                    index -= 1
+                    scalars.formIndex(before: &index)
                 }
             }
         }
-        return String(result)
+    }
+
+    /// The background and reverse video an SGR sequence leaves; every other
+    /// style is skipped, extended colours with their arguments.
+    private static func selectGraphicRendition(_ parameters: String, color: inout String?, reverse: inout Bool) {
+        guard parameters.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ";" || $0 == ":") }) else { return }
+        func extended(_ values: ArraySlice<Substring>) -> String? {
+            let numbers = values.compactMap { Int($0) }
+            switch values.first {
+            case "5": return values.count >= 2 && numbers.count >= 2 && (0...255).contains(numbers[1]) ? "48;5;\(numbers[1])" : nil
+            case "2":
+                let rgb = values.suffix(3).compactMap { Int($0) }
+                return values.count >= 4 && rgb.count == 3 && rgb.allSatisfy({ (0...255).contains($0) })
+                    ? "48;2;" + rgb.map(String.init).joined(separator: ";") : nil
+            default: return nil
+            }
+        }
+        let parts = parameters.split(separator: ";", omittingEmptySubsequences: false)
+        var index = 0
+        while index < parts.count {
+            let part = parts[index]
+            index += 1
+            if part.contains(":") {
+                // `48:5:n`, `48:2::r:g:b`: one parameter with its arguments.
+                let values = part.split(separator: ":", omittingEmptySubsequences: false)
+                if values.first == "48", let value = extended(values.dropFirst()) { color = value }
+                continue
+            }
+            guard let code = part.isEmpty ? 0 : Int(part) else { continue }
+            switch code {
+            case 0: color = nil; reverse = false
+            case 7: reverse = true
+            case 27: reverse = false
+            case 40...47, 100...107: color = "\(code)"
+            case 49: color = nil
+            case 38, 48, 58:
+                let count = parts.dropFirst(index).first == "5" ? 2 : parts.dropFirst(index).first == "2" ? 4 : 0
+                let values = parts[index..<min(parts.count, index + count)]
+                if code == 48, let value = extended(values) { color = value }
+                index += values.count
+            default: continue
+            }
+        }
     }
 
     /// Visible rows with escape sequences and control characters removed and
@@ -299,7 +455,7 @@ public enum AgentPromptGrammar {
     /// produce a response macro.
     private static func legacyObserve(_ request: AgentPromptObservationRequest) -> AgentPromptObservationResult? {
         guard request.providerID == .claude || request.providerID == .codex,
-              let cursor = request.currentCursorLine.map(withoutEscapes)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let cursor = request.currentCursorLine.map({ withoutEscapes($0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
               !cursor.isEmpty,
               cursorOwnsPrompt(cursor, provider: request.providerID)
         else { return nil }

@@ -231,22 +231,6 @@
     "zh-Hans": "向 %@ 提问…",
     "zh-Hant": "向 %@ 提問…"
   },
-  "queue": {
-    "de": "einreihen",
-    "es": "poner en cola",
-    "fr": "mettre en file",
-    "ja": "キューに追加",
-    "zh-Hans": "加入队列",
-    "zh-Hant": "加入佇列"
-  },
-  "answer": {
-    "de": "antworten",
-    "es": "responder",
-    "fr": "répondre",
-    "ja": "回答",
-    "zh-Hans": "回答",
-    "zh-Hant": "回答"
-  },
   "warnings": {
     "de": "Warnungen",
     "es": "avisos",
@@ -278,5 +262,45 @@
     "ja": "上で回答するか、入力して指示を変更",
     "zh-Hans": "在上方回答，或输入新指示",
     "zh-Hant": "在上方回答，或輸入新指示"
+  },
+  "answer above": {
+    "de": "oben antworten",
+    "es": "responde arriba",
+    "fr": "répondez ci-dessus",
+    "ja": "上で回答",
+    "zh-Hans": "在上方回答",
+    "zh-Hant": "在上方回答"
+  },
+  "answer beside": {
+    "de": "daneben antworten",
+    "es": "responde al lado",
+    "fr": "répondez à côté",
+    "ja": "横で回答",
+    "zh-Hans": "在旁边回答",
+    "zh-Hant": "在旁邊回答"
+  },
+  "fold answers": {
+    "de": "Antworten einklappen",
+    "es": "plegar respuestas",
+    "fr": "replier les réponses",
+    "ja": "回答を折りたたむ",
+    "zh-Hans": "折叠回答",
+    "zh-Hant": "摺疊回答"
+  },
+  "show answers": {
+    "de": "Antworten zeigen",
+    "es": "mostrar respuestas",
+    "fr": "afficher les réponses",
+    "ja": "回答を表示",
+    "zh-Hans": "显示回答",
+    "zh-Hant": "顯示回答"
+  },
+  "search agent threads": {
+    "de": "Agent-Threads durchsuchen",
+    "es": "buscar en los hilos de agentes",
+    "fr": "rechercher dans les fils des agents",
+    "ja": "エージェントのスレッドを検索",
+    "zh-Hans": "搜索智能体对话",
+    "zh-Hant": "搜尋智慧體對話"
   }
 }

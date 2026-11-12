@@ -143,22 +143,6 @@
     "zh-Hans": "窗口顺序已改变。请重试。",
     "zh-Hant": "視窗順序已變更。請重試。"
   },
-  "Window ordering timed out.": {
-    "de": "Zeitüberschreitung beim Ordnen der Fenster.",
-    "es": "Se agotó el tiempo para ordenar ventanas.",
-    "fr": "Le déplacement des fenêtres a expiré.",
-    "ja": "ウインドウの並べ替えがタイムアウトしました。",
-    "zh-Hans": "窗口排序超时。",
-    "zh-Hant": "視窗排序逾時。"
-  },
-  "Window ordering is not available yet.": {
-    "de": "Fenster können noch nicht geordnet werden.",
-    "es": "Aún no se pueden ordenar las ventanas.",
-    "fr": "Le déplacement des fenêtres n’est pas encore disponible.",
-    "ja": "ウインドウはまだ並べ替えできません。",
-    "zh-Hans": "暂时无法排列窗口。",
-    "zh-Hant": "暫時無法排列視窗。"
-  },
   "move window left": {
     "de": "Nach links verschieben",
     "es": "Mover a la izquierda",

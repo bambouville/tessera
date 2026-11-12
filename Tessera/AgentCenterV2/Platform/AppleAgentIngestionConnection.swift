@@ -84,12 +84,15 @@ final class AppleAgentIngestionConnection {
         var object: [String: AgentJSONValue]
         var page: AgentProjectionPage?
         var inventory: [[String: AgentJSONValue]] = []
+        /// A `search` response's frames, `search.begin` through `search.end`.
+        var search: [[String: AgentJSONValue]] = []
     }
     struct WindowCommit { let snapshot: AgentIngestionWindowSnapshot; let accepted: Bool }
     private struct Waiting {
         let continuation: CheckedContinuation<Reply, Error>
         var timeout: Task<Void, Never>?
         let inventoryRequest: Bool
+        var searchRequest: Bool { fields["kind"]?.stringValue == "search" }
         let controlThread: String?
         let fields: [String: AgentJSONValue]
         let idleDeadline: Duration
@@ -102,6 +105,7 @@ final class AppleAgentIngestionConnection {
         var sendStarted = false
         var inventoryBegan = false
         var inventory: [[String: AgentJSONValue]] = []
+        var search: [[String: AgentJSONValue]] = []
         var bytes = 0
     }
     private let handle: any AppleAgentStreamingExecHandle
@@ -122,6 +126,10 @@ final class AppleAgentIngestionConnection {
     private(set) var supportsOpenCodeSessions = false
     private(set) var supportsKimiSessions = false
     private(set) var supportsReadProgress = false
+    /// The host scans transcripts for a query itself (`search.v1`).
+    private(set) var supportsSearch = false
+    /// The host reads a window page around a search match (`window.seek.v1`).
+    private(set) var supportsWindowSeek = false
     /// Largest viewport the host accepts in `window.ack`.
     private(set) var maxWindowSegments = AgentIngestionWindowCapacity.legacy.segments
     var isClosed: Bool { failure != nil }
@@ -217,6 +225,8 @@ final class AppleAgentIngestionConnection {
             connection.supportsOpenCodeSessions = reply.object["capabilities"]?.arrayValue?.contains(.string(AgentOpenCodeSQLiteAdapter.wireCapability)) == true
             connection.supportsKimiSessions = reply.object["capabilities"]?.arrayValue?.contains(.string(AgentKimiWireAdapter.wireCapability)) == true
             connection.supportsReadProgress = reply.object["capabilities"]?.arrayValue?.contains(.string("read.progress.v1")) == true
+            connection.supportsSearch = reply.object["capabilities"]?.arrayValue?.contains(.string("search.v1")) == true
+            connection.supportsWindowSeek = reply.object["capabilities"]?.arrayValue?.contains(.string("window.seek.v1")) == true
             connection.maxWindowSegments = helloMaxWindowSegments(reply.object)
             guard (contextPID == nil && contextScope == nil) || connection.contextScope != nil else {
                 throw AgentIngestionError.remote("contextScopeUnavailable")
@@ -541,6 +551,8 @@ final class AppleAgentIngestionConnection {
         }
         if let id = object["id"]?.stringValue, waiting[id]?.inventoryRequest == true,
            !kind.hasPrefix("inventory."), kind != "error" { throw AgentIngestionError.malformedFrame }
+        if let id = object["id"]?.stringValue, waiting[id]?.searchRequest == true,
+           !kind.hasPrefix("search."), kind != "error" { throw AgentIngestionError.malformedFrame }
         if kind == "hookPreview" {
             if let thread = object["thread"]?.stringValue,
                let hook = try? AgentIngestionHook.decode(data, epoch: receivedEpoch, thread: thread) {
@@ -636,10 +648,19 @@ final class AppleAgentIngestionConnection {
         if kind == "window.cancelled", let transaction = object["transaction"]?.stringValue { abandoned.remove(transaction) }
         guard let id = object["id"]?.stringValue else { return }
         if abandoned.contains(id) {
-            if kind != "inventory.begin" && kind != "inventory.thread" { abandoned.remove(id) }
+            // A multi-frame reply stays abandoned through its last frame.
+            if !["inventory.begin", "inventory.thread", "search.begin", "search.record", "search.skipped"].contains(kind) { abandoned.remove(id) }
             return
         }
         guard var request = waiting[id] else { return }
+        if kind.hasPrefix("search.") {
+            guard request.searchRequest else { throw AgentIngestionError.malformedFrame }
+            guard request.bytes + data.count + 4 <= AgentHostSearchReply.maximumBytes,
+                  request.search.count < AgentHostSearchReply.maximumFrames else { throw AgentIngestionError.capacityExceeded }
+            request.bytes += data.count + 4
+            request.search.append(object)
+            if kind != "search.end" { waiting[id] = request; return }
+        }
         if kind.hasPrefix("inventory.") {
             guard request.inventoryRequest else { throw AgentIngestionError.malformedFrame }
             guard request.bytes + data.count + 4 <= 262_144 else { throw AgentIngestionError.capacityExceeded }
@@ -683,6 +704,6 @@ final class AppleAgentIngestionConnection {
                 request.continuation.resume(throwing: AgentIngestionError.remote(object["code"]?.stringValue ?? "unknown"))
             }
         }
-        else { request.continuation.resume(returning: Reply(object: object, inventory: request.inventory)) }
+        else { request.continuation.resume(returning: Reply(object: object, inventory: request.inventory, search: request.search)) }
     }
 }

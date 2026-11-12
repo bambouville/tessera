@@ -457,14 +457,17 @@ final class AppShortcutResolutionTests: XCTestCase {
     /// two actions that look like they might collide (⌘↩ connect, ⇧⌘↩ zoom
     /// pane) differ only by ⇧.
     func testShippedDefaultsShareNoChord() {
-        var seen: [KeyBinding: ShortcutAction] = [:]
+        // Only where both can be live: the browser's ⌘T and tmux's ⌘T never
+        // are (`ShortcutSurface`).
+        var seen: [KeyBinding: [ShortcutAction]] = [:]
         for action in ShortcutAction.allCases where !action.isDigitBlock {
             guard let binding = action.defaultBinding else { continue }
+            let clash = seen[binding, default: []].first { $0.surface.overlaps(action.surface) }
             XCTAssertNil(
-                seen[binding],
-                "\(action.rawValue) collides with \(seen[binding]?.rawValue ?? "") on \(binding.rendered(.glyph))"
+                clash,
+                "\(action.rawValue) collides with \(clash?.rawValue ?? "") on \(binding.rendered(.glyph))"
             )
-            seen[binding] = action
+            seen[binding, default: []].append(action)
         }
         XCTAssertNotEqual(
             ShortcutAction.connect.defaultBinding,

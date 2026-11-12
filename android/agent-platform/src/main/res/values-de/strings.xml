@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_platform_integration_check_failed">Die Prüfung der Host-Integration ist fehlgeschlagen.</string>
+    <string name="agent_platform_integration_shared_unavailable">Die gemeinsame Agent-Integration ist nicht verfügbar.</string>
+    <string name="agent_platform_integration_probe_failed">Die Abfrage der Host-Integration ist fehlgeschlagen.</string>
+    <string name="agent_platform_integration_process_state_unverified">Der Prozessstatus des Terminals konnte nicht überprüft werden.</string>
+    <string name="agent_platform_integration_provider_settings_unreadable">Die Anbietereinstellungen konnten nicht sicher gelesen werden.</string>
+    <string name="agent_platform_integration_provider_settings_too_large">Die Anbietereinstellungen überschreiten die sichere Installationsgrenze.</string>
+    <string name="agent_platform_integration_install_unconfirmed">Die Agent-Center-Integration konnte nicht geprüft werden.</string>
+    <string name="agent_platform_integration_install_unconfirmed_code">Die Agent-Center-Integration konnte nicht geprüft werden: %1$s</string>
+    <string name="agent_platform_integration_installed_shell_changed">Die Integration wurde installiert, aber die Shell im Vordergrund hat sich vor der Aktivierung geändert.</string>
+    <string name="agent_platform_integration_installed_not_enabled">Die Integration wurde installiert, konnte hier aber nicht aktiviert werden: %1$s</string>
+    <string name="agent_platform_integration_provider_settings_changing">Die Anbietereinstellungen haben sich während der Installation geändert. Versuche es erneut, wenn sie sich nicht mehr ändern.</string>
+    <string name="agent_platform_integration_shell_unverified">Die aktuelle Shell konnte nicht überprüft werden.</string>
+    <string name="agent_platform_integration_shell_changed">Die Shell im Vordergrund hat sich vor der Aktivierung geändert.</string>
+    <string name="agent_platform_integration_install_not_verified">Der Host hat nicht bestätigt, dass die Agent-Integration installiert wurde.</string>
+    <string name="agent_platform_integration_install_not_current">Die Agent-Integration wurde geschrieben, aber der Host meldet sie weiterhin als veraltet.</string>
+    <string name="agent_platform_integration_newer_installed">Dieser Host hat eine neuere Agent-Center-Integration von einer neueren Tessera-Version. Aktualisiere stattdessen diese App.</string>
+    <string name="agent_platform_endpoint_agent_runtime_unavailable">Agenten-Laufzeit nicht verfügbar</string>
+    <string name="agent_platform_endpoint_terminal_uploads_unavailable">Datei-Uploads sind für dieses Terminal nicht verfügbar</string>
+    <string name="agent_platform_endpoint_uploads_unavailable">Datei-Uploads sind nicht verfügbar</string>
+    <string name="agent_platform_endpoint_process_occupancy_unavailable">Die Prozessbelegung ist für dieses Terminal nicht verfügbar</string>
+    <string name="agent_platform_endpoint_process_root_unavailable">Der Stammprozess ist nicht verfügbar</string>
+    <string name="agent_platform_endpoint_mosh_process_root_unavailable">Der mosh-Stammprozess ist nicht verfügbar</string>
+    <string name="agent_platform_endpoint_foreground_shell_proof_unavailable">Der Nachweis der Vordergrund-Shell ist nicht verfügbar</string>
+    <string name="agent_platform_endpoint_fresh_terminal_evidence_unavailable">Aktuelle Terminaldaten sind nicht verfügbar</string>
+    <string name="agent_platform_endpoint_terminal_capture_unavailable">Die Terminalerfassung ist nicht verfügbar</string>
+    <string name="agent_platform_endpoint_launch_directory_unproven">Zum Starten ist ein nachgewiesenes Verzeichnis eines SSH+tmux-Bereichs nötig</string>
+    <string name="agent_platform_endpoint_raw_transport_one_focus">Ohne tmux gibt es nur ein fokussiertes Terminal</string>
+    <string name="agent_platform_endpoint_raw_prompt_capture_unavailable">Ohne tmux lässt sich die Eingabeaufforderung noch nicht verlässlich erfassen</string>
+    <string name="agent_platform_endpoint_raw_terminal_route_unavailable">Direkter Terminalweg nicht verfügbar</string>
+    <string name="agent_platform_endpoint_route_proof_rejected">Der entfernte Server hat die Routennachweis-Markierung nicht angenommen</string>
+    <string name="agent_platform_endpoint_spawn_requires_tmux">Starten und Abzweigen erfordern tmux</string>
+    <string name="agent_platform_endpoint_tmux_control_unavailable">Die tmux-Steuerung ist nicht verfügbar</string>
+    <string name="agent_platform_endpoint_tmux_control_route_unavailable">tmux-Steuerweg nicht verfügbar</string>
+    <string name="agent_platform_endpoint_remote_data_unavailable">Entfernte Daten nicht verfügbar</string>
+    <string name="agent_platform_endpoint_session_closed">Sitzung beendet</string>
+</resources>

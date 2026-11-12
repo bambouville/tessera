@@ -14,7 +14,10 @@ enum AgentPromptScreens {
 
     /// AskUserQuestion (single, multi-select, review) and permission dialogs.
     /// The panel starts under a full-width rule; its selection marker is ❯.
-    static func claude(_ rows: [String]) -> AgentPromptObservationResult? {
+    /// `allowsCroppedTop` also reads a question whose options start the
+    /// screen over its key hints, the question itself scrolled off. `styled`,
+    /// the text `rows` came from, shows which tab is current.
+    static func claude(_ rows: [String], styled: String? = nil, allowsCroppedTop: Bool = false) -> AgentPromptObservationResult? {
         guard let last = rows.lastIndex(where: { !isBlank($0) }) else { return nil }
         var footer: String?
         var end = last
@@ -72,8 +75,14 @@ enum AgentPromptScreens {
             let row = trimmed($0)
             return row.hasPrefix("⏺") || row.hasPrefix("⎿")
         }
+        var cropped = false
         if !anchoredByRule, header.isEmpty || transcript {
-            return nil
+            // A pane shorter than the dialog scrolls its question off too.
+            // Its options at the screen's top over its live key hints are
+            // some question's, but not which one's: only a caller that knows
+            // the question takes them (see `AgentPromptGrammar.observe`).
+            guard allowsCroppedTop, header.isEmpty, !transcript, footer != nil else { return nil }
+            cropped = true
         }
         let lower = header.map { $0.lowercased() }
         let tabBar = header.first(where: isClaudeTabBar)
@@ -139,12 +148,43 @@ enum AgentPromptScreens {
         }
 
         let optionRows = options.map { "\($0.id). \(checkMark($0.isChecked))\($0.label) \($0.detail ?? "")" }
-        let signature = compact(["claude", kind.rawValue] + header + optionRows + (next != nil ? ["Next"] : []) + [typed(entry)])
-        let identity = compact(["claude", kind == .multiSelect ? "question" : kind.rawValue, question ?? title ?? "", detail ?? ""]
-            + options.filter { $0.role != .freeform }.map(\.label))
+        let signature = compact(["claude", kind.rawValue] + (cropped ? ["cropped"] : []) + header + optionRows
+            + (next != nil ? ["Next"] : []) + [typed(entry)])
+        let identity = compact(["claude", kind == .multiSelect ? "question" : kind.rawValue,
+                                unwrapped(question ?? title ?? ""), unwrapped(detail ?? "")] + identityOptions(options))
+        // Questions of one call can read alike; the tab bar tells them apart:
+        // its highlighted tab, and the tabs answered elsewhere. This
+        // question's own mark follows its check boxes, and so moves with the
+        // answer's own toggles.
+        var placement: [String: String] = [:]
+        if kind == .question || kind == .multiSelect {
+            if let tabBar {
+                let checked = kind == .multiSelect && options.contains { $0.isChecked == true }
+                placement["answered"] = "\(tabBar.filter { $0 == "☒" }.count - (checked ? 1 : 0))"
+            }
+            let tabBarRow = ((top + 1)..<firstOption).first { isClaudeTabBar(trimmed(withoutQuoteRail(rows[$0]))) }
+            if let tab = claudeCurrentTab(styled, row: tabBarRow) { placement["tab"] = tab }
+            if let title { placement["chip"] = title }
+        }
         return .init(signature: signature, options: options, kind: kind, identity: identity, title: title,
                      question: question, detail: detail, progress: progress, controls: controls, entry: entry,
-                     textFocus: kind == .question && freeform != nil ? .optionKey : nil)
+                     textFocus: kind == .question && freeform != nil ? .optionKey : nil, isCropped: cropped,
+                     placement: AgentPromptObservationResult.placement(placement))
+    }
+
+    /// The tab Claude highlights, which plain text loses: "1" for the first
+    /// question, "submit" for the review. The arrows either side keep the
+    /// bar's own background.
+    private static func claudeCurrentTab(_ styled: String?, row: Int?) -> String? {
+        guard let styled, let row, styled.unicodeScalars.contains("\u{1b}") else { return nil }
+        let runs = AgentPromptGrammar.backgroundRuns(styled, row: row).filter { !$0.text.allSatisfy(\.isWhitespace) }
+        guard let bar = runs.first, trimmed(bar.text).hasPrefix("←"),
+              let current = runs.firstIndex(where: { $0.background != bar.background }) else { return nil }
+        let tab = runs[current].text
+        if tab.contains("☐") || tab.contains("☒") {
+            return "\(runs[..<current].map(\.text).joined().filter { $0 == "☐" || $0 == "☒" }.count + 1)"
+        }
+        return tab.contains("Submit") ? "submit" : nil
     }
 
     private static func claudeOption(_ row: String) -> (selected: Bool, number: Int, label: String, checked: Bool?)? {
@@ -220,8 +260,21 @@ enum AgentPromptScreens {
         var index = previousNonBlank(rows, before: hints.first)
         var notes: String?
         if footer.contains("clear notes") {
-            guard let row = index, let match = groups(#"^\s*›\s?(.*)$"#, rows[row]) else { return nil }
-            let text = trimmed(match[1] ?? "")
+            // The field starts at the footer's indent; a note wider than it
+            // wraps onto rows indented further, and one taller than the field
+            // scrolls, its marker on the first row shown.
+            guard var row = index else { return nil }
+            let field = indent(rows[hints.first])
+            var wrapped: [String] = []
+            while indent(rows[row]) > field, row > 0, !isBlank(rows[row - 1]) {
+                wrapped.insert(trimmed(rows[row]), at: 0)
+                row -= 1
+            }
+            guard indent(rows[row]) == field, let match = groups(#"^\s*›\s?(.*)$"#, rows[row]) else { return nil }
+            // Codex draws a blank row above the field, so a row reading as an
+            // option with none above it is the option block's selected one.
+            if row > 0, !isBlank(rows[row - 1]), groups(#"^\s*›\s*\d+\.(\s|$)"#, rows[row]) != nil { return nil }
+            let text = ([trimmed(match[1] ?? "")] + wrapped).joined(separator: " ")
             notes = text == "Add notes" ? "" : text
             index = previousNonBlank(rows, before: row)
         }
@@ -248,9 +301,13 @@ enum AgentPromptScreens {
         let entry = notes.map { AgentPromptEntry(optionID: options.first(where: \.isDefault)?.id, text: $0) }
         let signature = compact(["codex-request-user-input", progress, question]
             + options.map { "\($0.id). \($0.label) \($0.detail ?? "")" } + [typed(entry)])
-        let identity = compact(["codex-request-user-input", question] + options.map(\.label))
+        let identity = compact(["codex-request-user-input", unwrapped(question)] + identityOptions(options))
+        // The position, not its unanswered count: a question asked next with
+        // the same words is another prompt.
+        let position = progress.range(of: #"^Question \d+/\d+"#, options: .regularExpression).map { String(progress[$0]) }
         return .init(signature: signature, options: options, kind: .question, identity: identity, question: question,
-                     progress: progress, entry: entry, textFocus: freeform != nil ? .selectThenTab : nil)
+                     progress: progress, entry: entry, textFocus: freeform != nil ? .selectThenTab : nil,
+                     placement: AgentPromptObservationResult.placement(["position": position ?? progress]))
     }
 
     /// The expanded `request_user_input_async` panel. The turn keeps working
@@ -272,29 +329,51 @@ enum AgentPromptScreens {
             questionBottom = previousNonBlank(rows, before: top)
         }
         guard let questionBottom else { return nil }
+        let panel = indent(rows[last])
         var questionRows: [String] = []
         var cursor = questionBottom
-        while cursor >= 0, !isBlank(rows[cursor]), questionRows.count < 8 {
-            let row = trimmed(rows[cursor])
-            if row.hasPrefix("•") || row.hasPrefix("↳") { break }
-            questionRows.insert(row, at: 0)
+        // The panel indents its rows, a bulleted paragraph's too; a
+        // transcript's items start further out, or with ↳.
+        while cursor >= 0, !isBlank(rows[cursor]), !isCodexTranscriptRow(rows[cursor], panel: panel) {
+            questionRows.insert(trimmed(rows[cursor]), at: 0)
             cursor -= 1
         }
         var progress: String?
-        if let first = questionRows.first, first.range(of: #"^\d+ of \d+$"#, options: .regularExpression) != nil {
+        if let first = questionRows.first, isCodexCounter(first) {
             progress = first; questionRows.removeFirst()
+        } else if cursor >= 0, isBlank(rows[cursor]), let earlier = codexEarlierParagraphs(rows, above: cursor, indent: panel) {
+            progress = earlier.progress
+            questionRows = earlier.rows + questionRows
         }
+        // Codex draws the counter, and the hint to the next question, only
+        // while another question waits. The footer shows however the
+        // screen's top cuts the panel; the counter, however the footer is
+        // drawn.
+        let others = footer.contains("next question")
+            || progress.flatMap { Int($0.split(separator: " ").last ?? "") }.map { $0 > 1 } == true
+        // The question's tail is the same at every width, and while enough
+        // of it shows, however much of its top the screen cuts.
+        let asked = String(unwrapped(questionRows.joined()).suffix(256))
+        questionRows = Array(questionRows.suffix(8))
         guard !questionRows.isEmpty else { return nil }
         let question = questionRows.joined(separator: " ")
-        let controls = footer.contains("ctrl+] skip") ? [AgentPromptControl(kind: .skip, label: "Skip")] : []
+        let controls = footer.contains("ctrl+] skip") || footer.contains("⌃] skip") ? [AgentPromptControl(kind: .skip, label: "Skip")] : []
+        // The counter heads the question's own rows, however long, or sits
+        // alone a blank row above its first paragraph. One the screen's top
+        // cut says nothing of the position, while the others waiting still
+        // tell the question from the one left alone.
+        var parts = ["others": others ? "1" : "0"]
+        if let position = progress ?? (others ? nil : "1 of 1") { parts["position"] = position }
+        let placement = AgentPromptObservationResult.placement(parts)
 
         guard let block else {
             let text = rows[top...bottom].map(trimmed).joined(separator: " ")
             let entry = AgentPromptEntry(optionID: nil, text: text == "Type your answer" ? "" : text)
             let signature = compact(["codex-async", progress ?? "", question, typed(entry)])
             return .init(signature: signature, options: [], kind: .textEntry,
-                         identity: compact(["codex-async", "text", question]), isBlocking: false,
-                         question: question, progress: progress, controls: controls, entry: entry, textFocus: .focused)
+                         identity: compact(["codex-async", "text", asked]), isBlocking: false,
+                         question: question, progress: progress, controls: controls, entry: entry, textFocus: .focused,
+                         placement: placement)
         }
         let freeform = block.options.count - 1
         let options: [AgentPromptMacroOption] = block.options.enumerated().compactMap { offset, option in
@@ -310,9 +389,49 @@ enum AgentPromptScreens {
             entry = .init(optionID: options[freeform].id, text: isCodexOtherPlaceholder(text) ? "" : text)
         }
         let signature = compact(["codex-async", progress ?? "", question] + options.map { "\($0.id). \($0.label)" } + [typed(entry)])
-        let identity = compact(["codex-async", question] + options.dropLast().map(\.label))
+        let identity = compact(["codex-async", asked] + options.dropLast().map { unwrapped($0.label) })
         return .init(signature: signature, options: options, kind: .question, identity: identity, isBlocking: false,
-                     question: question, progress: progress, controls: controls, entry: entry, textFocus: .optionKey)
+                     question: question, progress: progress, controls: controls, entry: entry, textFocus: .optionKey,
+                     placement: placement)
+    }
+
+    private static func isCodexCounter(_ row: String) -> Bool {
+        row.range(of: #"^\d+ of \d+$"#, options: .regularExpression) != nil
+    }
+    /// A transcript row above the panel: its items start further out, and
+    /// Codex marks queued inputs and replies with ↳.
+    private static func isCodexTranscriptRow(_ row: String, panel: Int) -> Bool {
+        indent(row) < panel || trimmed(row).hasPrefix("↳")
+    }
+
+    /// The paragraphs of an async question above its last, blank rows apart,
+    /// up to its counter, alone above the first. Codex draws two blank rows
+    /// between the transcript and the panel; past them nothing tells the
+    /// question's rows from the transcript's, so the walk stops at the first
+    /// two, at a transcript paragraph (its items each have a row less
+    /// indented than the panel, their continuation rows may be indented as
+    /// far, or marked ↳), and at the screen's top, which may have cut the
+    /// counter off. Each stop reads what lies below it, so the rows read are
+    /// the same wherever the pane's top cuts the screen above them. Nil when
+    /// none is read, and the last paragraph is read alone.
+    private static func codexEarlierParagraphs(_ rows: [String], above blank: Int, indent panel: Int)
+        -> (rows: [String], progress: String?)? {
+        guard panel > 0 else { return nil }
+        var earlier: [String] = []
+        var gap = blank
+        while gap >= 0 {
+            var above = gap
+            while above > 0, isBlank(rows[above - 1]) { above -= 1 }
+            guard above > 0, above == gap else { break }
+            var top = above - 1
+            while top > 0, !isBlank(rows[top - 1]) { top -= 1 }
+            if rows[top..<above].contains(where: { isCodexTranscriptRow($0, panel: panel) }) { break }
+            let paragraph = rows[top..<above].map(trimmed)
+            if isCodexCounter(paragraph[0]) { return (Array(paragraph.dropFirst()) + earlier, paragraph[0]) }
+            earlier = paragraph + earlier
+            gap = top - 1
+        }
+        return earlier.isEmpty ? nil : (earlier, nil)
     }
 
     /// Codex's collapsed async summary above its composer: "? 2 questions /
@@ -351,15 +470,18 @@ enum AgentPromptScreens {
         }
         return (collapse(rows[first...last].map(trimmed).joined(separator: " ")), first)
     }
-    /// Hints only, "tab to add notes | enter to submit answer" or
-    /// "enter submit   ctrl+] skip": a key, then a few words.
+    /// Hints only, "tab to add notes | enter to submit answer", "tab or esc
+    /// to clear notes" or "enter submit   ctrl+] skip" ("⌃] skip" since Codex
+    /// 0.166): a key, or two, then a few words.
     private static func isCodexHintRow(_ row: String) -> Bool {
         let hints = trimmed(row).components(separatedBy: " | ")
             .flatMap { $0.components(separatedBy: "  ") }.map(trimmed).filter { !$0.isEmpty }
-        return !hints.isEmpty && hints.allSatisfy {
-            groups(#"^(?i:tab|enter|esc|space|ctrl\+\S+|shift\+\S+|alt\+\S+|\S*[←→↑↓]\S*)(?: to)? \S+(?: \S+){0,3}$"#, $0) != nil
-        }
+        return !hints.isEmpty && hints.allSatisfy { groups(codexHintPattern, $0) != nil }
     }
+    private static let codexHintPattern: String = {
+        let key = #"(?i:tab|enter|esc|space|ctrl\+\S+|shift\+\S+|alt\+\S+|[⌃⌥⇧⌘]\S+|\S*[←→↑↓]\S*)"#
+        return "^\(key)(?: or \(key))?(?: to)? \\S+(?: \\S+){0,3}$"
+    }()
 
     private struct CodexOption { var number: Int; var label: String; var selected: Bool; var detail: String? }
     /// Consecutive numbered rows ending at `bottom`; deeper-indented rows
@@ -496,7 +618,7 @@ enum AgentPromptScreens {
         if kind == .multiSelect, footer.contains("tab switch") || elided { controls.append(.init(kind: .next, label: "Next")) }
         if kind != .permission, footer.contains("esc cancel") || elided { controls.append(.init(kind: .cancel, label: "Cancel")) }
 
-        let tabBar = header.first { $0.hasSuffix("Submit") && !$0.hasPrefix("?") }
+        let tabBar = kimiTabBar(header)
         let context = header.filter { $0 != "question" && $0 != tabBar && !$0.hasPrefix("Type your answer") }
         var title: String?
         var question: String?
@@ -515,11 +637,48 @@ enum AgentPromptScreens {
         let signature = compact(["kimi", kind.rawValue] + context
             + options.map { "\($0.id). \(checkMark($0.isChecked))\($0.label) \($0.detail ?? "")" }
             + [typed(entry)])
-        let identity = compact(["kimi", kind == .multiSelect ? "question" : kind.rawValue, question ?? "", detail ?? ""]
-            + options.filter { $0.role != .freeform }.map(\.label))
+        let identity = compact(["kimi", kind == .multiSelect ? "question" : kind.rawValue,
+                                unwrapped(question ?? ""), unwrapped(detail ?? "")] + identityOptions(options))
+        // The tab bar marks every question but the current one, so a
+        // question asked next with the same words differs there.
+        let batch = kind == .question || kind == .multiSelect
         return .init(signature: signature, options: options, kind: kind, identity: identity, title: title,
                      question: question, detail: detail, progress: tabBar.map(collapse), controls: controls,
-                     entry: entry, textFocus: freeform != nil ? .optionKey : nil)
+                     entry: entry, textFocus: freeform != nil ? .optionKey : nil,
+                     placement: batch ? tabBar.flatMap { AgentPromptObservationResult.placement(kimiTabMarks($0)) } : nil)
+    }
+
+    /// The row under the panel's "question" label. A pane too short for the
+    /// label keeps the bar's own cues: its Submit, or a mark before the cut.
+    private static func kimiTabBar(_ header: [String]) -> String? {
+        if let label = header.firstIndex(of: "question"), header.indices.contains(label + 1),
+           !header[label + 1].hasPrefix("?") {
+            return header[label + 1]
+        }
+        return header.first { row in
+            !row.hasPrefix("?") && (row.hasSuffix("Submit")
+                || (row.contains("(✓)") || row.contains("(○)")) && (row.hasSuffix("...") || row.hasSuffix("…")))
+        }
+    }
+
+    /// Each tab's mark by its place: "(✓)", "(○)", or none for the current
+    /// question and Submit. A narrow pane elides the bar's tail; the cut
+    /// tab counts only while its mark, or its lack of one, shows.
+    private static func kimiTabMarks(_ bar: String) -> [String: String] {
+        var cells = bar.components(separatedBy: "  ").map(trimmed).filter { !$0.isEmpty }
+        if let last = cells.last, last.hasSuffix("...") || last.hasSuffix("…") {
+            let cut = trimmed(String(last.reversed().drop { $0 == "." || $0 == "…" }.reversed()))
+            if cut.isEmpty || cut.hasPrefix("(") && !cut.hasPrefix("(✓)") && !cut.hasPrefix("(○)") {
+                cells.removeLast()
+            } else {
+                cells[cells.count - 1] = cut
+            }
+        }
+        var marks: [String: String] = [:]
+        for (offset, cell) in cells.enumerated() {
+            marks["tab\(offset + 1)"] = cell.hasPrefix("(✓)") ? "✓" : cell.hasPrefix("(○)") ? "○" : "-"
+        }
+        return marks
     }
 
     private static func kimiOption(_ row: String) -> (number: Int?, label: String, selected: Bool, checked: Bool?)? {
@@ -573,18 +732,31 @@ enum AgentPromptScreens {
         entry.map { $0.text.isEmpty ? "" : "entry:\($0.text)" } ?? ""
     }
 
+    /// Each option's label and description as one text, without the row
+    /// breaks a width puts in them: alike questions can differ only in a
+    /// description, which does not scroll off apart from its option, and a
+    /// label wider than the pane wraps into the rows below it. The option's
+    /// bound cuts a long description where the width put the cut, so only
+    /// the head every width shows counts.
+    private static func identityOptions(_ options: [AgentPromptMacroOption]) -> [String] {
+        options.filter { $0.role != .freeform }.map { String(unwrapped($0.label + ($0.detail ?? "")).prefix(512)) }
+    }
+
+    /// Text without the row breaks and indents a width puts in it.
+    private static func unwrapped(_ text: String) -> String { text.filter { !$0.isWhitespace } }
+
     /// Joins identity parts, keeping the result within the 1 KiB signature
     /// bound without losing distinctness: an over-long value keeps its head
     /// and a hash of the whole.
-    static func compact(_ parts: [String]) -> String {
+    static func compact(_ parts: [String], limit: Int = 1_024) -> String {
         let joined = parts.map(trimmed).filter { !$0.isEmpty }.joined(separator: "\u{1f}")
-        guard joined.utf8.count > 1_024 else { return joined }
+        guard joined.utf8.count > limit else { return joined }
         let hash = joined.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
         var head = ""
         var bytes = 0
         for character in joined {
             let size = String(character).utf8.count
-            if bytes + size > 1_000 { break }
+            if bytes + size > limit - 24 { break }
             head.append(character); bytes += size
         }
         return head + "#" + String(hash, radix: 16)

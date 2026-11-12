@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="design_font_note_jetbrains_mono">grande hauteur d\'x, ligatures de code</string>
+    <string name="design_font_note_fira_code">le jeu de ligatures le plus complet</string>
+    <string name="design_font_note_hack">large, sobre, conçue pour les petites tailles</string>
+    <string name="design_font_note_cascadia_mono">la police de Windows Terminal, sans ligatures</string>
+    <string name="design_font_note_source_code_pro">le classique d\'Adobe, formes humanistes</string>
+    <string name="design_font_note_ibm_plex_mono">chaleureuse et un peu étroite</string>
+    <string name="design_font_note_geist_mono">géométrique, contrepoinçons très ouverts</string>
+    <string name="design_font_note_ubuntu_mono">étroite — le plus de colonnes</string>
+    <string name="design_font_note_inconsolata">légère et compacte</string>
+    <string name="design_font_note_dejavu_sans_mono">la plus large couverture Unicode</string>
+    <string name="design_font_note_system">celle fournie par le système</string>
+</resources>

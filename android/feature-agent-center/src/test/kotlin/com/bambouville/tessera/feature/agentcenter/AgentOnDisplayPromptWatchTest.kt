@@ -89,8 +89,17 @@ class AgentOnDisplayPromptWatchTest {
     @Test fun displayedOnlyWatchUsesExistingFastThenSlowCadence() = runBlocking {
         val rig = Rig().apply { lifecycleNanos = 0 }
         rig.run(untilMillis = 4_000)
-        assertEquals(List(8) { 250L } + listOf(1_000L, 1_000L), rig.pauses)
+        assertEquals(List(16) { 250L }, rig.pauses)
         assertEquals(listOf(2_000L, 3_000L), rig.forwarded.takeLast(2).map { it.first })
+    }
+
+    @Test fun aFrameDuringTheSlowPhaseRestartsTheFastCadenceAtOnce() = runBlocking {
+        val rig = Rig().apply {
+            lifecycleNanos = 0
+            onPause = { if (nowMillis == 2_250L) lifecycleNanos = 2_250L * 1_000_000 }
+        }
+        rig.run(untilMillis = 3_000)
+        assertEquals(listOf(2_000L, 2_250L, 2_500L, 2_750L), rig.forwarded.map { it.first }.filter { it >= 2_000 })
     }
 
     @Test fun selectionAwayOrSurfaceHiddenEndsDisplayedOnlyWatch() = runBlocking {
@@ -154,9 +163,13 @@ class AgentOnDisplayPromptWatchTest {
     @Test fun lifecycleFencePrecedesCaptureAndReplacesGeneration() = runBlocking {
         val rig = Rig().apply { sequence = 7; onInspect = { sequence = 8; generation = 43 } }
         rig.run(untilMillis = 1_000)
-        val command = rig.forwarded.single().second
+        val command = rig.forwarded.first().second
         assertEquals(7L, command.getLong("observedLifecycleSequence"))
         assertFalse(command.has("observedGeneration"))
+        // The frame that landed during the capture restarts the watch at its
+        // next tick, under its own fence.
+        assertEquals(listOf(0L, 250L), rig.forwarded.map { it.first })
+        assertEquals(8L, rig.forwarded[1].second.getLong("observedLifecycleSequence"))
     }
 
     @Test fun missingFenceSkipsCaptureAndForwarding() = runBlocking {
@@ -190,6 +203,18 @@ class AgentOnDisplayPromptWatchTest {
         rig.run(untilMillis = 1_000)
         val capture = rig.forwarded.single().second.getJSONObject("promptObservation")
         assertEquals(rows.joinToString("\n"), capture.getString("visibleText"))
+    }
+
+    @Test fun aLocalGridForwardsItsCellsBackgrounds() = runBlocking {
+        // Claude marks its current tab only by its background, which a raw
+        // grid's text loses; the grid's prompt text keeps it.
+        val plain = "←  ☐ Run plan  ☐ Report  ✔ Submit  →\nWhich plan?"
+        val styled = "← \u001b[0;48;5;153m ☐ Run plan \u001b[0m ☐ Report  ✔ Submit  →\nWhich plan?"
+        val rig = Rig().apply {
+            observation = observation!!.copy(visibleTail = plain.encodeToByteArray(), promptText = styled)
+        }
+        rig.run(untilMillis = 1_000)
+        assertEquals(styled, rig.forwarded.single().second.getJSONObject("promptObservation").getString("visibleText"))
     }
 
     @Test fun cancelledCaptureCannotForwardEvenIfInspectionFinishes() = runBlocking {

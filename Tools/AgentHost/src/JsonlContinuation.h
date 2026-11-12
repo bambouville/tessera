@@ -2,9 +2,11 @@
 #include "BoundedJson.h"
 #include "Normalize.h"
 #include <chrono>
+#include <iterator>
 #include <list>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace tessera {
 // Owned by one worker lane, never process-global. Holds no file descriptors or
@@ -18,6 +20,10 @@ namespace tessera {
 class JsonlContinuation {
 public:
     using Clock = std::chrono::steady_clock;
+    JsonlContinuation() = default;
+    // The result index holds iterators into this continuation's own list.
+    JsonlContinuation(const JsonlContinuation&) = delete;
+    JsonlContinuation& operator=(const JsonlContinuation&) = delete;
     static constexpr uint64_t sliceLimit = 64 * 1024 * 1024;
     struct Source {
         std::string path, identity, stamp, provider;
@@ -25,9 +31,8 @@ public:
         uint64_t observedRevision = 0;
         bool same(const Source& other) const {
             if (path != other.path || identity != other.identity || provider != other.provider) return false;
-            // Full-prefix validation preserves a revision only after matching
-            // the previous captured prefix. Appending beyond it need not
-            // discard a giant record's already-consumed immutable prefix.
+            // Validation keeps a revision across appends, which leave a giant
+            // record's already-consumed prefix as it was.
             if (observedRevision || other.observedRevision)
                 return observedRevision && observedRevision == other.observedRevision;
             return size == other.size && stamp == other.stamp;
@@ -128,30 +133,48 @@ public:
     // ordinary jobs, so interleaved pages never evict each other's progress.
     static constexpr size_t resultLimit = 2048;
     static constexpr size_t resultBudget = 8 * 1024 * 1024;
-    const NormalizedRecord* result(const Source& source, uint64_t start, uint64_t end) {
+    // A kind names the normalizer that produced a result; "" is the default.
+    // Every record read looks here, so a lookup visits only results with the
+    // same bounds: walking all of them per record cost a warm page 14 ms once
+    // index walks filled the list.
+    const NormalizedRecord* result(const Source& source, uint64_t start, uint64_t end, const std::string& kind = {}) {
         const auto now = Clock::now();
-        for (auto it = results_.begin(); it != results_.end();) {
-            if (now - it->touched > std::chrono::seconds(30) || it->source.retiredBy(source)) {
-                resultBytes_ -= it->bytes; it = results_.erase(it); continue;
-            }
-            if (it->source.same(source) && it->start == start && it->end == end) {
+        // A hit moves to the back, so the front is always the least recent.
+        while (!results_.empty() && now - results_.front().touched > std::chrono::seconds(30)) forget(results_.begin());
+        const NormalizedRecord* found = nullptr;
+        bool retired = false;
+        const auto range = resultIndex_.equal_range({start, end});
+        for (auto entry = range.first; entry != range.second; ++entry) {
+            const auto it = entry->second;
+            if (it->source.retiredBy(source)) retired = true;
+            else if (!found && it->kind == kind && it->source.same(source)) {
                 it->source = source; it->touched = now;
                 results_.splice(results_.end(), results_, it);
-                return &results_.back().value;
+                found = &it->value;
             }
-            ++it;
         }
-        return nullptr;
+        // The source changed under these results: drop all it retired, as a
+        // stale result left elsewhere would outlive live ones under pressure.
+        // A hit is never retired.
+        if (retired) for (auto it = results_.begin(); it != results_.end();) {
+            const auto next = std::next(it);
+            if (it->source.retiredBy(source)) forget(it);
+            it = next;
+        }
+        return found;
     }
-    void remember(const Source& source, uint64_t start, uint64_t end, const NormalizedRecord& value) {
+    void remember(const Source& source, uint64_t start, uint64_t end, const NormalizedRecord& value, const std::string& kind = {}) {
         const auto bytes = 256 + value.json.size() + value.sourceType.size() + value.disposition.size() +
-            value.providerID.size() + value.parentID.size() + value.chainID.size() + value.chainParentID.size() +
+            value.providerID.size() + value.parentID.size() + value.turnID.size() + value.chainID.size() + value.chainParentID.size() +
             value.chainLogicalParentID.size() + value.legacyMatchText.size() + value.legacyMatchRole.size();
         if (bytes > resultBudget / 16) return;
-        while (!results_.empty() && (results_.size() >= resultLimit || resultBytes_ + bytes > resultBudget)) {
-            resultBytes_ -= results_.front().bytes; results_.pop_front();
-        }
-        results_.push_back({source, start, end, bytes, value, Clock::now()});
+        while (!results_.empty() && (results_.size() >= resultLimit || resultBytes_ + bytes > resultBudget))
+            forget(results_.begin());
+        results_.push_back({source, kind, start, end, bytes, value, Clock::now()});
+        // An unindexed result would later be forgotten without ever having
+        // been counted, wrapping the byte total so every remember flushed all.
+        try { resultIndex_.emplace(Bounds{start, end}, std::prev(results_.end())); }
+        catch (...) { results_.pop_back(); throw; }
         resultBytes_ += bytes;
     }
     Scan& scan(const Source& source, uint64_t end, bool previous) {
@@ -173,13 +196,30 @@ private:
     Clock::time_point sliceStarted_ = Clock::now();
     struct Result {
         Source source;
+        std::string kind;
         uint64_t start = 0, end = 0;
         size_t bytes = 0;
         NormalizedRecord value;
         Clock::time_point touched;
     };
     std::list<Record> records_;
+    struct Bounds {
+        uint64_t start = 0, end = 0;
+        bool operator==(const Bounds& other) const { return start == other.start && end == other.end; }
+    };
+    struct BoundsHash {
+        size_t operator()(const Bounds& value) const {
+            return std::hash<uint64_t>()(value.start * 0x9e3779b97f4a7c15ULL ^ value.end);
+        }
+    };
+    void forget(std::list<Result>::iterator it) {
+        const auto range = resultIndex_.equal_range({it->start, it->end});
+        for (auto entry = range.first; entry != range.second; ++entry)
+            if (entry->second == it) { resultIndex_.erase(entry); break; }
+        resultBytes_ -= it->bytes; results_.erase(it);
+    }
     std::list<Result> results_;
+    std::unordered_multimap<Bounds, std::list<Result>::iterator, BoundsHash> resultIndex_;
     size_t resultBytes_ = 0;
     std::list<Scan> scans_;
 };

@@ -95,7 +95,13 @@ class SshjPortForwardingRuntime(
             SocketForwardingConnectListener(InetSocketAddress(target.host, target.port)),
         )
         return managedLease(bound.address, bound.port) {
-            runCatching { client.remotePortForwarder.cancel(bound) }
+            val cancel = { runCatching { client.remotePortForwarder.cancel(bound) } }
+            // The cancel is a global request that waits for the server's reply,
+            // up to SSHJ's 30 s timeout on a stalled link. A rule stopped on a
+            // live route still waits, so restarting it can bind the same server
+            // port again. Retiring the runtime does not: its route closes next,
+            // which drops the forward anyway, and teardown runs on Main.
+            if (closed.get()) runCatching { executor.execute { cancel() } } else cancel()
         }
     }
 

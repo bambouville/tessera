@@ -1,4 +1,5 @@
 #include "CodexHistoryIndex.h"
+#include "SourceDigest.h"
 #include "Catalog.h"
 #include "Json.h"
 #include <algorithm>
@@ -197,7 +198,7 @@ CodexHistoryIndex::Entry CodexHistoryIndex::decode(JsonlReader& reader, const Co
     RestoreNormalizer restore(reader);
     reader.setNormalizer(mode_ == "legacy" ? JsonlReader::Normalizer(legacyMatch) : JsonlReader::Normalizer(metadata));
     const auto record = reader.readRecord(value.start, value.end);
-    if (proved(value, record.value.json).proof != value.proof) throw std::runtime_error("sourceChanged");
+    if (proved(value, record.value.json).proof != value.proof) { contradicted(); throw std::runtime_error("sourceChanged"); }
     Entry result{value.start, value.end, value.ordinal, value.updatedOrdinal, "", ""};
     if (mode_ == "legacy") result.id = record.value.providerID;
     else if (record.value.disposition == "metadata") {
@@ -465,6 +466,9 @@ void CodexHistoryIndex::refreshLegacy(JsonlReader& reader, const std::function<b
         if (cancelled && cancelled()) throw std::runtime_error("cancelled");
         const auto page = reader.page(position_, true, 100);
         if (page.records.empty()) throw std::runtime_error("codexIndexNoProgress");
+        // A cancelled page keeps its scanned records: the witness follows them.
+        struct Witness { JsonlReader& reader; uint64_t& position, &witness;
+            ~Witness() { try { witness = reader.anchor(position); } catch (...) { witness = 0; } } } keep{reader, position_, witness_};
         for (const auto& record : page.records) {
             if (cancelled && cancelled()) throw std::runtime_error("cancelled");
             const auto& value = record.value;
@@ -498,18 +502,20 @@ void CodexHistoryIndex::refreshLegacy(JsonlReader& reader, const std::function<b
             else append(proved({record.start, record.end, lastOrdinal_, lastOrdinal_, 0, {}}, record.value.json), budget);
             ++lastOrdinal_; position_ = record.end;
         }
-        witness_ = reader.anchor(position_);
     }
 }
 
 void CodexHistoryIndex::refresh(JsonlReader& reader, const std::function<bool()>& cancelled, size_t budget, bool physicalLineageSegment) {
-    auto proof = validation_.progress();
-    if (!skipValidation_) {
-        proof = reader.validatePrefix(validation_, SourceValidation::defaultSlice, SourceValidation::Clock::now(), position_);
-        if (!proof.ready) throw std::runtime_error("readPending");
-    }
+    SourceValidation::Result proof{validation_.revision(), 0};
+    if (!skipValidation_) proof = reader.validatePrefix(validation_, position_);
+    // The boundary witness catches a rewrite that also grew the file, which
+    // the stat-only validation cannot see.
     if (identity_ != reader.identity() || position_ > reader.size() ||
-        (!skipValidation_ && validationRevision_ != proof.revision)) {
+        (!skipValidation_ && validationRevision_ != proof.revision) ||
+        (position_ && reader.anchor(position_) != witness_) || contradicted_) {
+        // A change the stat did not show retires what continuations hold for
+        // the old revision.
+        if (!skipValidation_ && validationRevision_ == proof.revision) { validation_.invalidate(); proof = reader.validatePrefix(validation_); }
         auto validation = std::move(validation_);
         const auto force = forceLazy_, capture = captureRange_, skip = skipValidation_;
         const auto first = captureFirst_, limit = windowLimit_;

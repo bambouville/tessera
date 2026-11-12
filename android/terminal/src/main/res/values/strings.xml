@@ -2,6 +2,8 @@
   <string name="paste_text">Paste</string>
   <string name="copy_text">Copy</string>
   <string name="text_selection_more">More…</string>
-  <string name="quick_open_selected_path">Quick open</string>
+  <string name="quick_open_selected_path">Open in Artifacts</string>
   <string name="reveal_selected_path">Reveal in Files</string>
+  <string name="terminal_page_up">Page up</string>
+  <string name="terminal_page_down">Page down</string>
 </resources>

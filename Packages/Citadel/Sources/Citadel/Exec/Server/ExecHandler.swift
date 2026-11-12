@@ -63,7 +63,12 @@ final class ExecHandler: ChannelDuplexHandler {
 
     func channelInactive(context: ChannelHandlerContext) {
         Task {
-            try await self.context?.terminate()
+            do {
+                try await self.context?.terminate()
+            } catch {
+                // Failed termination must not leave the local pipe channel open.
+                self.pipeChannel?.close(promise: nil)
+            }
             self.context = nil
             self.pipeChannel = nil
         }
@@ -82,13 +87,28 @@ final class ExecHandler: ChannelDuplexHandler {
             }
         case let event as SSHChannelRequestEvent.EnvironmentRequest:
             if let delegate = delegate {
-                Task {
-                    try await delegate.setEnvironmentValue(event.value, forKey: event.name)
+                Task { [weak channel = context.channel] in
+                    let accepted: Bool
+                    do {
+                        try await delegate.setEnvironmentValue(event.value, forKey: event.name)
+                        accepted = true
+                    } catch {
+                        accepted = false
+                    }
+                    // RFC 4254 §6.4: a refused variable earns a failure reply when
+                    // one is wanted, never a closed channel.
+                    guard event.wantReply, let channel else { return }
+                    if accepted {
+                        channel.triggerUserOutboundEvent(ChannelSuccessEvent(), promise: nil)
+                    } else {
+                        channel.triggerUserOutboundEvent(ChannelFailureEvent(), promise: nil)
+                    }
                 }
             }
         case ChannelEvent.inputClosed:
             Task {
-                try await self.context?.inputClosed()
+                // A failed EOF leaves the command running; its exit still ends the channel.
+                try? await self.context?.inputClosed()
             }
         default:
             context.fireUserInboundEventTriggered(event)
@@ -140,9 +160,9 @@ final class ExecHandler: ChannelDuplexHandler {
                 .channelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
                 .channelInitializer { pipeChannel in
                     pipeChannel.pipeline.addHandlers(SSHInboundChannelDataWrapper(), SSHOutboundChannelDataUnwrapper(), theirs)
-                }.withPipes(
-                    inputDescriptor: dup(handler.stdoutPipe.fileHandleForReading.fileDescriptor),
-                    outputDescriptor: dup(handler.stdinPipe.fileHandleForWriting.fileDescriptor)
+                }.takingOwnershipOfDescriptors(
+                    input: dup(handler.stdoutPipe.fileHandleForReading.fileDescriptor),
+                    output: dup(handler.stdinPipe.fileHandleForWriting.fileDescriptor)
                 )
         }.flatMap { pipeChannel -> EventLoopFuture<Channel> in
             self.pipeChannel = pipeChannel

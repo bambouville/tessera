@@ -12,6 +12,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+/**
+ * A payload the codec refuses for a reason the host list can word for the
+ * user: [reason] is the string resource, the message stays English for logs.
+ */
+internal class HostImportRejected(val reason: Int, message: String) : IllegalArgumentException(message)
+
 internal object HostImportCodec {
     data class Payload(val host: HostDraft, val forwardingRules: List<PortForwardRule>)
 
@@ -41,11 +47,13 @@ internal object HostImportCodec {
         .toString(2)
 
     fun decode(value: String): Payload {
-        require(value.length <= 64 * 1024) { "host import is too large" }
+        if (value.length > 64 * 1024) {
+            throw HostImportRejected(R.string.hosts_import_too_large, "host import is too large")
+        }
         val json = JSONObject(value)
         val format = json.optString("format")
-        require(format == "tessera-host-v1" || format == "tessera-host-v2") {
-            "unsupported host import format"
+        if (format != "tessera-host-v1" && format != "tessera-host-v2") {
+            throw HostImportRejected(R.string.hosts_import_unsupported_format, "unsupported host import format")
         }
         val tmuxMode = json.optString("tmuxMode", TmuxModes.OFF)
         val rules = if (format == "tessera-host-v2") decodeForwards(json.optJSONArray("portForwards")) else emptyList()
@@ -66,7 +74,9 @@ internal object HostImportCodec {
 
     private fun decodeForwards(items: JSONArray?): List<PortForwardRule> = buildList {
         val array = items ?: return@buildList
-        require(array.length() <= 128) { "too many port forwards" }
+        if (array.length() > 128) {
+            throw HostImportRejected(R.string.hosts_import_too_many_forwards, "too many port forwards")
+        }
         for (index in 0 until array.length()) {
             val item = array.getJSONObject(index)
             val direction = PortForwardDirection.valueOf(item.getString("direction").uppercase())
@@ -81,7 +91,9 @@ internal object HostImportCodec {
                 target = targetHost?.let { PortForwardEndpoint(it, targetPort) },
                 label = item.optString("label"),
             )
-            require(PortForwardRuleValidator.validate(rule, this) == null) { "invalid port forward" }
+            if (PortForwardRuleValidator.validate(rule, this) != null) {
+                throw HostImportRejected(R.string.hosts_import_invalid_forward, "invalid port forward")
+            }
             add(rule)
         }
     }

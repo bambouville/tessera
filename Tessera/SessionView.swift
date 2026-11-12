@@ -3,11 +3,14 @@ import SwiftTerm
 import ScrollDispatcher
 import TesseraCore
 import TesseraInputCore
+import TesseraArtifactsCore
 import TmuxControl
 import TmuxControlCore
 import PortForwarding
 import UIKit
 import GameController
+import Combine
+import Observation
 
 var integrationScrollHarnessSuppressesFirstResponder: Bool {
 #if DEBUG
@@ -123,6 +126,26 @@ struct TerminalCaretClearance {
     let above: CGFloat
     /// Bottom of the caret's row → surface bottom edge.
     let below: CGFloat
+}
+
+/// The scene a keyboard showed in: its interface orientation and window size.
+/// Rotating, or a Duo changing pose, hides the keyboard after the scene has
+/// already changed and shows it again once the change lands, with the
+/// terminal first responder throughout. A Duo's inner display turns from
+/// 951×669 to 669×951 between book and laptop whatever its orientation says,
+/// so the size counts as much as the orientation.
+struct KeyboardSceneGeometry: Equatable {
+    let orientation: UIInterfaceOrientation?
+    let windowSize: CGSize
+
+    /// A hide in other geometry than the keyboard showed in is that
+    /// transition, not the user putting the keyboard away.
+    static func hideIsTransition(shown: KeyboardSceneGeometry?, now: KeyboardSceneGeometry?) -> Bool {
+        guard let shown, let now else { return false }
+        return shown.orientation != now.orientation
+            || abs(shown.windowSize.width - now.windowSize.width) > 0.5
+            || abs(shown.windowSize.height - now.windowSize.height) > 0.5
+    }
 }
 
 /// Decides how much of a docked keyboard's overlap the terminal layer may
@@ -253,8 +276,18 @@ func terminalCaretCellHeight(fontID: String, fontSize: Double) -> CGFloat {
 /// session therefore does not move at all — the keyboard covers rows that were
 /// blank anyway — while a prompt at the last row still rides the full overlap
 /// exactly as before.
+/// What the keyboard layout settled on, logged once per change.
+private struct KeyboardLayoutSample: Equatable {
+    let proposedMaxY: CGFloat
+    let lift: CGFloat
+    let folded: Bool
+    /// The full height while the pane is on screen; nil while it is hidden.
+    let visibleHeight: CGFloat?
+}
+
 private struct TerminalKeyboardLayoutModifier: ViewModifier {
     let resizesTerminal: Bool
+    let foldedLayoutActive: Bool
     /// Where the caret sits inside the terminal surface, sampled on demand.
     /// `nil` means "no surface can answer" (a mounted pane grid, a session
     /// being torn down) and keeps the pre-caret behavior: move by the full
@@ -276,26 +309,36 @@ private struct TerminalKeyboardLayoutModifier: ViewModifier {
     @State private var caretSampler = Timer
         .publish(every: 0.15, on: .main, in: .common)
         .autoconnect()
+    @Environment(\.duoPaneHidden) private var paneHidden
+    /// A hidden Duo pane keeps the full height it last had on screen. The
+    /// window under it changes as the Duo closes or turns, and a terminal
+    /// following it would resize the remote while nobody sees it.
+    @State private var visibleRetainedHeight: CGFloat?
 
     func body(content: Content) -> some View {
         GeometryReader { proxy in
             let proposedSize = proxy.size
             let globalFrame = proxy.frame(in: .global)
-            let retainedHeight = fullHeight(
+            let measuredHeight = fullHeight(
                 proposedHeight: proposedSize.height,
                 globalMinY: globalFrame.minY
             )
-            let lift = resizesTerminal
-                ? 0
-                : max(0, retainedHeight - proposedSize.height)
-            let contentHeight = resizesTerminal
-                ? proposedSize.height
-                : retainedHeight
+            let retainedHeight = paneHidden
+                ? max(proposedSize.height, visibleRetainedHeight ?? proposedSize.height)
+                : measuredHeight
+            let layout = TerminalKeyboardLayoutPolicy.layout(
+                proposedHeight: proposedSize.height, retainedHeight: retainedHeight,
+                resizesTerminal: resizesTerminal, foldedLayoutActive: foldedLayoutActive
+            )
+            let lift = layout.lift
+            let contentHeight = layout.height
             let hold = caretHold ?? caretClearance()?.below ?? 0
             let caretShift = min(max(0, hold), lift)
 
             content
                 .environment(\.softwareKeyboardLift, lift)
+                .environment(\.softwareKeyboardOverlap, foldedLayoutActive ? 0 : max(0, retainedHeight - proposedSize.height))
+                .environment(\.softwareKeyboardUp, retainedHeight - proposedSize.height > 0.5)
                 .environment(\.terminalKeyboardCaretShift, caretShift)
                 .frame(
                     width: proposedSize.width,
@@ -309,6 +352,13 @@ private struct TerminalKeyboardLayoutModifier: ViewModifier {
                     y: contentHeight / 2
                 )
                 .offset(y: -lift)
+                .onChange(of: KeyboardLayoutSample(
+                    proposedMaxY: globalFrame.minY + proposedSize.height, lift: lift, folded: foldedLayoutActive,
+                    visibleHeight: paneHidden ? nil : measuredHeight
+                ), initial: true) { _, sample in
+                    if let height = sample.visibleHeight { visibleRetainedHeight = height }
+                    noteLayoutDiagnostic("keyboard-layout bottom=\(sample.proposedMaxY) lift=\(sample.lift) folded=\(sample.folded)")
+                }
         }
         // Keeps the resting proposal at the window bottom (the session roots
         // deliberately ignore this inset) while still receiving `.keyboard`.
@@ -352,6 +402,7 @@ private struct TerminalKeyboardLayoutModifier: ViewModifier {
         // Floating / undocked keyboards do not inset the bottom edge, so they
         // move nothing and need no caret work.
         let docked = inWindow.maxY >= window.bounds.maxY - 1
+        noteLayoutDiagnostic("keyboard-frame end=\(inWindow) window=\(window.bounds.size) docked=\(docked)")
         let overlap = docked
             ? max(0, window.bounds.maxY - max(inWindow.minY, 0))
             : 0
@@ -382,6 +433,14 @@ private struct TerminalKeyboardLayoutModifier: ViewModifier {
         caretHold = next
     }
 
+    /// Where the session's bottom edge lands against the keyboard: the
+    /// proposal SwiftUI makes beside the frame the notifications report.
+    private func noteLayoutDiagnostic(_ message: String) {
+        guard DiagnosticLogStore.isVerboseEnabled else { return }
+        DiagnosticLogStore.appendSSH(message)
+        NSLog("[Tessera][KeyboardDiag] %@", message)
+    }
+
     private var keyWindow: UIWindow? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -406,6 +465,7 @@ private struct TerminalKeyboardLayoutModifier: ViewModifier {
 /// straight through the accessory bar's material.
 private struct TerminalKeyboardCaretShift: ViewModifier {
     @Environment(\.terminalKeyboardCaretShift) private var caretShift
+    @Environment(\.softwareKeyboardLift) private var lift
 
     func body(content: Content) -> some View {
         content
@@ -414,6 +474,62 @@ private struct TerminalKeyboardCaretShift: ViewModifier {
             // terminal's own region — the shifted-down rows land behind the
             // accessory bar instead of through it.
             .clipped()
+            // The lift carries the layer's top slice above where the terminal
+            // rests, up into the status bar's band beside the Dynamic Island.
+            // It stays hidden there, as it is with the keyboard down.
+            .mask(alignment: .top) {
+                Rectangle().padding(.top, max(0, lift))
+            }
+    }
+}
+
+/// Slides the terminal layer up under Duo's open bar. The bar floats over the
+/// terminal's bottom rows instead of resizing it, so the layer moves only as
+/// far as the caret needs, and back when the bar closes. The caret is read
+/// only while rows cover the visible session's terminal; it moves under the
+/// remote's control.
+private struct DuoDeckCaretLift: ViewModifier {
+    @Environment(\.duoDeckCover) private var covered
+    let isActive: Bool
+    let caretClearance: () -> TerminalCaretClearance?
+    /// The last sample; nil until the first one, when the body reads the
+    /// caret itself so the bar's first frame is already right.
+    @State private var sample: CaretSample?
+
+    private struct CaretSample: Equatable {
+        var below: CGFloat?
+
+        /// Sub-point caret jitter moves nothing.
+        func isClose(to other: Self) -> Bool {
+            switch (below, other.below) {
+            case let (a?, b?): abs(a - b) <= 0.5
+            case (nil, nil): true
+            default: false
+            }
+        }
+    }
+
+    /// Sessions mounted behind the visible one keep still and read nothing.
+    private var cover: CGFloat { isActive ? covered : 0 }
+
+    func body(content: Content) -> some View {
+        let lift = cover > 0
+            ? DuoDeckCaretPolicy.lift(cover: cover, below: (sample ?? CaretSample(below: caretClearance()?.below)).below)
+            : 0
+        content
+            .offset(y: -lift)
+            .animation(.easeOut(duration: 0.2), value: lift)
+            .task(id: cover > 0) {
+                guard cover > 0 else {
+                    sample = nil
+                    return
+                }
+                while !Task.isCancelled {
+                    let next = CaretSample(below: caretClearance()?.below)
+                    if sample.map({ !$0.isClose(to: next) }) ?? true { sample = next }
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
+            }
     }
 }
 
@@ -435,10 +551,12 @@ extension EnvironmentValues {
 extension View {
     func terminalKeyboardLayout(
         resizesTerminal: Bool,
+        foldedLayoutActive: Bool = false,
         caretClearance: @escaping () -> TerminalCaretClearance?
     ) -> some View {
         modifier(TerminalKeyboardLayoutModifier(
             resizesTerminal: resizesTerminal,
+            foldedLayoutActive: foldedLayoutActive,
             caretClearance: caretClearance
         ))
     }
@@ -447,6 +565,12 @@ extension View {
     /// overlays share its canvas).
     func terminalKeyboardCaretShift() -> some View {
         modifier(TerminalKeyboardCaretShift())
+    }
+
+    /// Applied to the terminal layer, before `terminalKeyboardCaretShift`
+    /// clips it to the terminal's region.
+    func duoDeckCaretLift(isActive: Bool, caretClearance: @escaping () -> TerminalCaretClearance?) -> some View {
+        modifier(DuoDeckCaretLift(isActive: isActive, caretClearance: caretClearance))
     }
 }
 
@@ -491,6 +615,43 @@ struct KeyboardLiftExemptChrome<Content: View>: View {
             content
         }
         .offset(y: keyboardLift)
+    }
+}
+
+/// Two panes dock Files in the context pane. A panel opened there never turns
+/// into the phone's sheet: it closes when the screen changes between one and
+/// two panes, like the context it lived in.
+private struct DuoFilesDocking: ViewModifier {
+    let panel: FilesPanelController
+    let docked: Bool
+    @Binding var openedDocked: Bool
+    /// Opening into a files slot the context shows already, which needs no
+    /// turning to and must not drop the keyboard as `show` does.
+    @Binding var openingInPlace: Bool
+    /// Turns the context pane to the panel. However Files opens or reveals
+    /// (the button, its shortcut, a selection, Agent Center), the context
+    /// shows it.
+    let show: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: panel.isOpen) { _, open in
+                openedDocked = open && docked
+                if open, docked, !openingInPlace { show() }
+                openingInPlace = false
+            }
+            .onChange(of: panel.reveals) { _, _ in if docked { show() } }
+            .onChange(of: docked) { _, docked in
+                guard panel.isOpen else { return }
+                if docked {
+                    // Opened a moment before the panes arrived, as a reveal
+                    // that selects this session does: the context takes it.
+                    openedDocked = true
+                    show()
+                } else {
+                    panel.close()
+                }
+            }
     }
 }
 
@@ -592,6 +753,140 @@ private final class InlineTmuxHistoryRequestStore {
 struct SessionContinuityActions {
     let continueSession: () -> Void
     let setUpAndContinue: () -> Void
+}
+
+private struct SessionRailActionPublisher: ViewModifier {
+    let center: SessionRailActionCenter?
+    let state: SessionRailActionState
+    let actions: SessionRailActions
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                guard let center else { return }
+                state.synchronize(actions, previousSessionID: nil, with: center)
+            }
+            .onChange(of: state) { previous, current in
+                guard let center else { return }
+                current.synchronize(actions, previousSessionID: previous.sessionID, with: center)
+            }
+            .onChange(of: center.map(ObjectIdentifier.init)) { _, _ in
+                guard let center else { return }
+                state.synchronize(actions, previousSessionID: nil, with: center)
+            }
+            .onDisappear { center?.withdraw(sessionID: state.sessionID) }
+    }
+}
+
+private struct SessionTerminalDropFailure: ViewModifier {
+    let T: DesignTokens
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .top) {
+                if let message {
+                    HStack(spacing: 7) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 12, weight: .light))
+                            .foregroundStyle(T.red)
+                        Text(verbatim: message)
+                            .font(Typography.tesseraMono(size: 11.5))
+                            .foregroundStyle(T.fg)
+                            .lineLimit(2)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(T.bg.opacity(0.92), in: Capsule())
+                    .overlay(Capsule().stroke(T.red, lineWidth: 1))
+                    .frame(maxWidth: 420)
+                    .padding(.top, 54)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("terminal-drop-failure")
+                    .transition(.opacity)
+                }
+            }
+            .task(id: message) {
+                let displayed = message
+                guard displayed != nil else { return }
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                guard !Task.isCancelled, message == displayed else { return }
+                message = nil
+            }
+    }
+}
+
+@MainActor
+enum SessionDuoInput {
+    /// A tmux grid edits through its focused pane's own surface on every
+    /// idiom, a phone included (it shows that pane alone). Without a grid
+    /// the shared box edits; a grid whose pane isn't ready yet has none.
+    static func inputBox(
+        gridActive: Bool, activePaneID: PaneId?, shared: TerminalBox,
+        paneBox: (PaneId) -> TerminalBox?
+    ) -> TerminalBox? {
+        guard gridActive else { return shared }
+        return activePaneID.flatMap(paneBox)
+    }
+
+    /// SSH grids edit through the focused pane; the shared box stays the
+    /// fallback editor when the grid goes away. Clear each distinct mirror.
+    static func pathInputBoxes(target: TerminalBox?, fallback: TerminalBox) -> [TerminalBox] {
+        guard let target, target !== fallback else { return [fallback] }
+        return [target, fallback]
+    }
+
+    /// A typed path is typing sent past the view: each box drops its mirror
+    /// before the next key, and a reader goes to the live prompt only once
+    /// the session has the path. An undelivered one goes to the clipboard
+    /// instead and leaves them reading. Returns the acknowledged send's
+    /// completion.
+    static func typePath(
+        into boxes: [TerminalBox],
+        onSent: @escaping @MainActor () -> Void = {},
+        onUndelivered: @escaping @MainActor (_ refusedByAuthority: Bool) -> Void
+    ) -> @MainActor (AppleSessionCommandFacade.InputDelivery) -> Void {
+        boxes.forEach { $0.noteOutOfBandInput() }
+        return { delivery in
+            switch delivery {
+            case .sent:
+                onSent()
+                boxes.forEach { $0.followLiveOutputForTyping() }
+            case .refused: onUndelivered(true)
+            case .dropped: onUndelivered(false)
+            }
+        }
+    }
+
+    static func paste(_ text: String, into box: TerminalBox, allowed: Bool) {
+        defer { box.noteOutOfBandInput() }
+        guard allowed, let view = box.view else { return }
+        // SwiftTerm's paste reads the general pasteboard. Keep the user's
+        // clipboard intact while using the pane's atomic paste collector.
+        let pasteboard = UIPasteboard.general
+        let previousItems = pasteboard.items
+        pasteboard.string = text
+        defer { pasteboard.items = previousItems }
+        view.paste(nil)
+    }
+
+    static func reply(
+        _ option: AgentPromptOption,
+        displayed: SwipePadAgentSnapshot?,
+        context: SwipePadAgentContext,
+        box: TerminalBox,
+        allowed: Bool
+    ) {
+        defer { box.noteOutOfBandInput() }
+        guard allowed, let displayed else { return }
+        context.answer(displayed, option: option)
+    }
+}
+
+enum SessionFilesSheetPolicy {
+    static func coversContext(presented: Bool, detent: PresentationDetent, isActive: Bool) -> Bool {
+        isActive && presented && detent == .large
+    }
 }
 
 struct SessionView: View {
@@ -779,6 +1074,7 @@ struct SessionView: View {
     /// Hidden compact sessions keep this current without resizing their remote
     /// TUI; the selected session replays it when it becomes active.
     @State private var lastCompactViewportSize: (cols: Int, rows: Int)?
+    @State private var compactViewportSettle = CompactViewportSettle()
     /// Expanded canvas last requested for this viewport, including geometry
     /// withheld by the controller. Deduplicate requests here; reprojection
     /// uses the controller's successfully published geometry instead.
@@ -807,8 +1103,15 @@ struct SessionView: View {
     /// Remote Files panel. Per-session, mirrors the find controller's
     /// scoping; the FileBridge attaches lazily on first open via the
     /// app-wide FileBridgeRegistry (never-auto-connect: nothing dials
-    /// until the user opens the panel).
+    /// until the user opens the panel, or the Duo desk shows files over a
+    /// connected terminal whose route needs no Face ID).
     @State private var filesPanel = FilesPanelController()
+    @Environment(\.onboardingInputSuppressed) private var onboardingInputSuppressed
+    @Environment(\.duoPaneHidden) private var duoPaneHidden
+    /// A modal walkthrough, or a Duo pane that the other's full screen hides:
+    /// the mounted terminal must neither hold nor reclaim the keyboard.
+    private var terminalInputSuppressed: Bool { onboardingInputSuppressed || duoPaneHidden }
+    @Environment(\.openArtifact) private var openArtifact
     /// True once OSC 7 has delivered outside tmux this session — the
     /// only state that proves the signal is live in passthrough. The
     /// terminal's `hostCurrentDirectory` alone can't prove it: that
@@ -837,6 +1140,28 @@ struct SessionView: View {
     @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
     @Environment(\.designTokens) private var appDesignTokens
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(SessionRailActionCenter.self) private var railActions: SessionRailActionCenter?
+    @Environment(\.duoFilesDocked) private var duoFilesDocked
+    @Environment(\.duoShowFilesInContext) private var duoShowFilesInContext
+    @Environment(\.duoLeaveFilesInContext) private var duoLeaveFilesInContext
+    /// Traded below the context on the laptop's desk: a plain session.
+    @Environment(\.duoSessionOnTheDesk) private var onTheDesk
+    @State private var railEdge: HorizontalEdge?
+    @State private var railForwardingPresented = false
+    @State private var railContinuityPresented = false
+    @State private var inputFold: DuoFold?
+    /// The laptop bar's seat for the swipe pad's puck, globally.
+    @State private var puckDock: CGRect?
+    /// The fold's top, globally, while a context takes this session's desk:
+    /// floating chrome keeps above it.
+    @State private var deskFloor: CGFloat?
+    @State private var compactFilesDetent: PresentationDetent = .medium
+    @State private var filesOpenedDocked = false
+    /// The panel is opening where the context shows files already.
+    @State private var filesOpeningInPlace = false
+    @State private var railSwitcher = SessionRailSwitcher()
+
+    private var inputDeckExpanded: Bool { isPhone && !onTheDesk && inputFold?.splitsSideBySide == false }
 
     private var activeTheme: TerminalTheme {
         TerminalTheme.find(id: appearance.terminalThemeID)
@@ -844,6 +1169,173 @@ struct SessionView: View {
 
     private var isPhone: Bool {
         CompactLayout.isPhone(horizontalSizeClass)
+    }
+
+    private var isRailMode: Bool { isPhone && railEdge != nil }
+
+    private var sessionTopBarHeight: CGFloat {
+        SessionTopBar.reservedHeight(
+            pillHeight: appearance.topBarHeight,
+            compact: isPhone,
+            railMode: isRailMode
+        )
+    }
+
+    private var railCanCreateTmuxWindow: Bool {
+        SessionRailPolicy.canCreateTmuxWindow(
+            controlActive: tmux.mode == .tmuxControl,
+            degraded: false,
+            hasWindows: !tmux.windows.isEmpty,
+            controlledElsewhere: tmux.gridAuthority.isPeer
+        )
+    }
+
+    private var sessionRailActions: SessionRailActions {
+        SessionRailActions(
+            sessionID: liveSessionID,
+            canCreateTmuxWindow: railCanCreateTmuxWindow,
+            findOpen: findController.isOpen,
+            filesOpen: filesPanel.isOpen,
+            hasForwarding: !session.portForwarderManager.forwarders.isEmpty,
+            hasContinuity: continuityActions != nil,
+            filesPanel: filesPanel,
+            filesConnectUnprompted: filesConnectUnprompted,
+            openFilesInPlace: openFilesInPlace,
+            openSwitcher: { railSwitcher.open() },
+            createTmuxWindow: {
+                guard railCanCreateTmuxWindow else { return }
+                appLockController.notifyUserActivity()
+                _ = session.sessionCommands(tmux: tmux).dispatch(.createTmuxWindow)
+            },
+            toggleFind: {
+                guard !tmux.gridAuthority.isPeer else { return }
+                findController.isOpen ? findController.close() : findController.open()
+            },
+            toggleFiles: toggleFilesPanel,
+            showForwarding: { railForwardingPresented = true },
+            showContinuity: { railContinuityPresented = true },
+            disconnect: {
+                terminalBox.dismissTransientInteractions()
+                onUserClosedSession()
+                session.sessionCommands.disconnect()
+            }
+        )
+    }
+
+    private var railActionState: SessionRailActionState {
+        let actions = sessionRailActions
+        return SessionRailActionState(
+            sessionID: liveSessionID,
+            isActive: isActive,
+            canCreateTmuxWindow: actions.canCreateTmuxWindow,
+            findOpen: actions.findOpen,
+            filesOpen: actions.filesOpen,
+            filesConnectUnprompted: actions.filesConnectUnprompted,
+            filesDocked: duoFilesDocked,
+            hasForwarding: actions.hasForwarding,
+            hasContinuity: actions.hasContinuity,
+            sourceIdentity: ObjectIdentifier(session),
+            forwarderIdentity: ObjectIdentifier(session.portForwarderManager)
+        )
+    }
+
+    /// Only the folded deck shows replies, so only it asks.
+    private var duoAgentWaiting: Bool {
+        inputDeckExpanded
+            && agentCenterV2.swipePadContext(sessionID: liveSessionID).snapshot?.prompt?.options.isEmpty == false
+    }
+
+    private var duoAgentReplies: some View {
+        let context = agentCenterV2.swipePadContext(sessionID: liveSessionID)
+        let displayed = context.snapshot
+        return DuoAgentRepliesRow(prompt: displayed?.prompt) { option in
+            let allowed = isActive && presentationSessionState == .connected
+                && !showsLaunchOverlay && !terminalInputGatedByAuthority
+                && inheritedTerminalInputAllowed()
+            if allowed {
+                appLockController.notifyUserActivity()
+            }
+            SessionDuoInput.reply(
+                option, displayed: displayed, context: context,
+                box: terminalDropInputBox ?? terminalBox, allowed: allowed
+            )
+        }
+        .environment(\.designTokens, activeTheme.chromeTokens(applying: appearance))
+        .allowsHitTesting(!sessionIsControlledElsewhere)
+    }
+
+    private var terminalDropEnabled: Bool {
+        TerminalDropPayload.isEnabled(
+            connected: presentationSessionState == .connected,
+            showsLaunchOverlay: showsLaunchOverlay,
+            authorityGated: terminalInputGatedByAuthority || !inheritedTerminalInputAllowed(),
+            isActive: isActive
+        )
+    }
+
+    private var terminalDropIdentity: TerminalDropIdentity {
+        TerminalDropIdentity(
+            sessionID: liveSessionID, carrier: ObjectIdentifier(session),
+            windowID: tmux.activeWindowId?.rawValue, paneID: tmux.activePaneId?.rawValue,
+            inputBox: terminalDropInputBox.map(ObjectIdentifier.init)
+        )
+    }
+
+    private func pasteDroppedText(_ text: String) {
+        appLockController.notifyUserActivity()
+        SessionDuoInput.paste(
+            text,
+            into: terminalDropInputBox ?? terminalBox,
+            allowed: isActive && presentationSessionState == .connected
+                && !showsLaunchOverlay && !terminalInputGatedByAuthority
+                && inheritedTerminalInputAllowed() && terminalDropInputBox != nil
+        )
+    }
+
+    private func uploadDroppedFiles(_ urls: [URL]) {
+        guard terminalDropEnabled else {
+            TerminalDropStaging.discard(urls)
+            terminalDropFailure = nil
+            return
+        }
+        appLockController.notifyUserActivity()
+        terminalDropFailure = nil
+        let bridge = fileBridges.bridge(
+            for: session.host,
+            requireBiometric: session.requireBiometric,
+            isSecureEnclave: session.isSecureEnclave
+        )
+        let queue = fileBridges.transferQueue(for: bridge)
+        FilesPanelController.handleTerminalDrop(
+            stagedURLs: urls,
+            queue: queue,
+            inject: { path in
+                await awaitOwnAuthorityTransition()
+                guard presentationSessionState == .connected, !showsLaunchOverlay else {
+                    copyUndeliveredPathToClipboard(path, refusedByAuthority: false)
+                    return
+                }
+                typeRemotePath(path, suffix: " ")
+            },
+            reportFailure: { message in
+                terminalDropFailure = message
+                DiagnosticLogStore.appendApp("terminal-drop failed: \(message)")
+            }
+        )
+    }
+
+    private var terminalDropInputBox: TerminalBox? {
+        SessionDuoInput.inputBox(
+            gridActive: activeGridWindow != nil, activePaneID: tmux.activePaneId, shared: terminalBox
+        ) { inlineHistory.paneBox(for: Self.inlinePaneSurfaceID($0)) }
+    }
+
+    /// Typing sent past the view (`TerminalBox.noteOutOfBandTyping`) lands in
+    /// the focused grid pane, or the shared surface, which also edits once a
+    /// grid goes away: each distinct box drops its mirror and its reader.
+    private func noteOutOfBandTyping() {
+        SessionDuoInput.pathInputBoxes(target: terminalDropInputBox, fallback: terminalBox)
+            .forEach { $0.noteOutOfBandTyping() }
     }
 
     private var themeChromeTokens: DesignTokens {
@@ -965,7 +1457,8 @@ struct SessionView: View {
     /// from the bar's reserved band, so the swipe pad clears the phone's
     /// home-indicator strip as well as the chip row.
     private var swipePadBottomInset: CGFloat {
-        appearance.showAccessoryBar
+        // Seated in the bar, the puck's canvas runs to the bottom.
+        puckDock != nil ? 0 : appearance.showAccessoryBar
             ? SessionAccessoryBar.reservedBandHeight()
             : max(Self.cornerInset - 8, 4)
     }
@@ -991,6 +1484,22 @@ struct SessionView: View {
                 cellSize: terminalCellSize
               )
         else { return }
+        compactViewportSettle.note(viewport, apply: applyCompactInlineViewport)
+    }
+
+    /// Regular sizing owns the remote grid once compact ends, and a view
+    /// appearing again measures afresh: a grid still settling, the last
+    /// compact request and its baselines all describe a grid the remote may
+    /// no longer have, and the request cache would drop the compact grid
+    /// that has to replace it.
+    private func forgetCompactPublication() {
+        compactViewportSettle.reset()
+        lastCompactViewportSize = nil
+        lastCompactRequestedClientSize = nil
+        compactReprojectionMemo = TmuxCompactReprojectionMemo()
+    }
+
+    private func applyCompactInlineViewport(_ viewport: (cols: Int, rows: Int)) {
         let previousViewport = lastCompactViewportSize
         lastCompactViewportSize = viewport
         guard isActive, appPhase.isActive,
@@ -1131,6 +1640,17 @@ struct SessionView: View {
         sessionRegistry.handleTmuxFocusRequest(
             sessionID: liveSessionID, carrier: session, tmux: tmux,
             commands: session.sessionCommands(tmux: tmux), isShown: isActive)
+    }
+
+    /// Agent Center's transcript "Reveal in Files", after it switched here:
+    /// the same panel reveal as the selection menu's directory hit. Only a
+    /// connected session reveals; the request never reconnects anything.
+    private func handleFilesRevealRequest() {
+        guard let directory = sessionRegistry.takeFilesReveal(
+            sessionID: liveSessionID, carrier: session, isShown: isActive) else { return }
+        guard presentationSessionState == .connected else { return }
+        configureFilesPanelIfNeeded()
+        filesPanel.revealDirectory(directory)
     }
 
     private var showsLaunchOverlay: Bool { launchOverlayVisible }
@@ -1460,9 +1980,38 @@ struct SessionView: View {
     private func toggleFilesPanel() {
         terminalBox.dismissTransientInteractions()
         if filesPanel.isOpen {
+            // Docked, the context's files slot would only open it again:
+            // the context goes back to its last tab, which closes it.
+            if let duoLeaveFilesInContext {
+                duoLeaveFilesInContext(liveSessionID)
+                return
+            }
             withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
             return
         }
+        openFilesPanel(animated: true)
+    }
+
+    private var filesConnectUnprompted: Bool {
+        DuoContextPolicy.filesConnectUnprompted(
+            terminalConnected: session.state == .connected,
+            keyFaceIDEnabled: appearance.requireBiometricForKeyUse,
+            sessionNeedsFaceID: session.requireBiometric,
+            hasJumpChain: !session.host.jumpChain.isEmpty
+        )
+    }
+
+    /// The context shows the files slot already: the panel takes it, and the
+    /// context and the keyboard stay as they are. False when it cannot dock.
+    private func openFilesInPlace() -> Bool {
+        guard duoFilesDocked else { return false }
+        guard !filesPanel.isOpen else { return true }
+        filesOpeningInPlace = true
+        openFilesPanel(animated: false)
+        return true
+    }
+
+    private func openFilesPanel(animated: Bool) {
         configureFilesPanelIfNeeded()
         if tmux.mode == .tmuxControl {
             filesPanel.terminalReportedDirectory(tmux.activePaneCurrentPath)
@@ -1470,7 +2019,13 @@ struct SessionView: View {
             filesPanel.terminalReportedDirectory(dir)
         }
         filesPanel.transfers?.acknowledgeBackgroundAttention()
-        withAnimation(.easeInOut(duration: 0.2)) { filesPanel.open() }
+        withAnimation(animated ? .easeInOut(duration: 0.2) : nil) { filesPanel.open() }
+    }
+
+    /// The docked panel in the context pane, which the keyboard may be
+    /// covering: it goes, as for an artifact opened there.
+    private func showFilesInContext() {
+        duoShowFilesInContext?(liveSessionID)
     }
 
     private var fileTransferAttention: BackgroundTransferAttention {
@@ -1480,9 +2035,27 @@ struct SessionView: View {
 
     private var compactFilesBinding: Binding<Bool> {
         Binding(
-            get: { isPhone && filesPanel.isOpen },
+            get: { isPhone && filesPanel.isOpen && !duoFilesDocked && !filesOpenedDocked },
             set: { if !$0 { filesPanel.close() } }
         )
+    }
+
+    /// Files and terminal selections share the saved-host identity, with
+    /// distinct origins and the live session only as an opening hint.
+    private func artifactFileOpener(origin: ArtifactOpenOrigin) -> ((RemoteFileEntry) -> Void)? {
+        guard let openArtifact else { return nil }
+        let hostID = filesPanel.bridge?.key.hostID ?? session.host.id
+        let sessionID = liveSessionID
+        return { [weak filesPanel, weak terminalView = terminalBox.view] entry in
+            filesPanel?.close()
+            _ = terminalView?.resignFirstResponder()
+            openArtifact(ArtifactOpenRequest(
+                hostID: hostID,
+                target: .file(path: entry.path),
+                origin: origin,
+                sessionID: sessionID
+            ))
+        }
     }
 
     /// Bridge/handler wiring shared by the panel toggle and the §3
@@ -1500,6 +2073,7 @@ struct SessionView: View {
                 hostFolderName: session.host.name
             )
         }
+        filesPanel.onOpenInArtifacts = artifactFileOpener(origin: .files)
         if filesPanel.onInstallShellIntegration == nil {
             let host = session.host
             let requireBiometric = session.requireBiometric
@@ -1548,7 +2122,7 @@ struct SessionView: View {
     }
 
     /// §3 selection menu: resolve the selected text over the file
-    /// bridge — file → Quick Look (works with the panel closed),
+    /// bridge — file → Artifacts (Quick Look without an installed action),
     /// directory → the panel opens there. Misses land on the same
     /// toast the terminal drop target uses.
     private func handleSelectionPathAction(
@@ -1556,6 +2130,23 @@ struct SessionView: View {
     ) {
         guard presentationSessionState == .connected, !showsLaunchOverlay else { return }
         appLockController.notifyUserActivity()
+        let selection = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if action == .quickLook, case .remoteLoopback = ArtifactsLinkClassifier.classify(selection) {
+            if let openArtifact,
+               let savedHostID = sessionRegistry.session(for: liveSessionID)?.persistedHostID,
+               let request = ArtifactTerminalLinkRouting.request(
+                   for: selection,
+                   hostID: filesPanel.bridge?.key.hostID ?? savedHostID,
+                   sessionID: liveSessionID,
+                   canOpenArtifact: true
+               ) {
+                _ = terminalBox.view?.resignFirstResponder()
+                openArtifact(request)
+            } else if let url = URL(string: selection) {
+                UIApplication.shared.open(url)
+            }
+            return
+        }
         configureFilesPanelIfNeeded()
         let cwd: String? = tmux.mode == .tmuxControl
             ? tmux.activePaneCurrentPath
@@ -1563,7 +2154,8 @@ struct SessionView: View {
         filesPanel.openTerminalPath(
             text,
             cwd: cwd,
-            intent: action == .quickLook ? .quickLook : .reveal
+            intent: action == .quickLook ? .openInArtifacts : .reveal,
+            openInArtifacts: artifactFileOpener(origin: .terminalSelection)
         ) { message in
             terminalDropFailure = message
         }
@@ -1572,40 +2164,6 @@ struct SessionView: View {
     /// Failed terminal drops surface here (the drop modifier's toast) —
     /// the panel and its error banner may be CLOSED during a drop.
     @State private var terminalDropFailure: String?
-
-    /// Drop-on-terminal: upload to temp over the host's bridge, then
-    /// type the quoted resolved path. Trailing space per the desktop
-    /// drag-into-terminal convention — it also keeps multi-file drops
-    /// from concatenating into one shell word.
-    private func handleTerminalDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard presentationSessionState == .connected,
-              !showsLaunchOverlay,
-              !terminalInputGatedByAuthority
-        else { return false }
-        let bridge = fileBridges.bridge(
-            for: session.host,
-            requireBiometric: session.requireBiometric,
-            isSecureEnclave: session.isSecureEnclave
-        )
-        let queue = fileBridges.transferQueue(for: bridge)
-        return FilesPanelController.handleTerminalDrop(
-            providers,
-            queue: queue,
-            inject: { path in
-                await awaitOwnAuthorityTransition()
-                // The upload outlived the connection: keep the path.
-                guard presentationSessionState == .connected, !showsLaunchOverlay else {
-                    copyUndeliveredPathToClipboard(path, refusedByAuthority: false)
-                    return
-                }
-                typeRemotePath(path, suffix: " ")
-            },
-            reportFailure: { message in
-                terminalDropFailure = message
-                DiagnosticLogStore.appendApp("terminal-drop failed: \(message)")
-            }
-        )
-    }
 
     /// Identity for the cwd-poll task; see RemoteCwdPoller.taskKey.
     private var sshCwdPollKey: String {
@@ -1637,14 +2195,10 @@ struct SessionView: View {
     /// clipboard with a message instead of vanishing.
     private func typeRemotePath(_ path: String, suffix: String = "") {
         let bytes = Array((FilesPanelController.shellQuoted(path) + suffix).utf8)
-        terminalBox.noteOutOfBandInput()
-        session.sessionCommands(tmux: tmux).sendInputAcknowledged(bytes) { delivery in
-            switch delivery {
-            case .sent: break
-            case .refused: copyUndeliveredPathToClipboard(path, refusedByAuthority: true)
-            case .dropped: copyUndeliveredPathToClipboard(path, refusedByAuthority: false)
-            }
-        }
+        session.sessionCommands(tmux: tmux).sendInputAcknowledged(bytes, completion: SessionDuoInput.typePath(
+            into: SessionDuoInput.pathInputBoxes(target: terminalDropInputBox, fallback: terminalBox),
+            onUndelivered: { copyUndeliveredPathToClipboard(path, refusedByAuthority: $0) }
+        ))
     }
 
     /// Whether typing waits on our own resume or take-back, which ends in
@@ -1701,6 +2255,602 @@ struct SessionView: View {
         )
     }
 
+    private var sessionTerminalContent: some View {
+        // Terminal content. Horizontal inset clears the bottom
+        // rounded corners (iPadOS's safeAreaInsets has no
+        // horizontal component on iPad, so we have to inset
+        // manually). The top is already pushed down by the
+        // VStack placement below the top bar; the bottom should
+        // run edge-to-edge so the terminal uses all rows.
+        ZStack {
+            TerminalSurfaceBound(
+                initialData: [],
+                onMade: { view in terminalBox.attach(view) },
+                onReady: { terminalBox.markRenderReady() },
+                onSend: { bytes in
+                    guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
+                        // Refused bytes never reach the PTY: drop the UIKit input
+                        // mirror so later edits cannot delete what it believes was typed.
+                        terminalBox.noteOutOfBandInput()
+                        return
+                    }
+                    session.sessionCommands(tmux: tmux).sendInput(Array(bytes))
+                },
+                onResize: { cols, rows in
+                    lastTerminalSize = (cols, rows)
+                    // Only propagate resize to the remote when this
+                    // session is the foreground tab. Background
+                    // sessions must not send SIGWINCH — it would
+                    // reflow vim/less/htop while the user isn't
+                    // looking, and the "new" size might reflect the
+                    // sidebar being open, not the actual terminal
+                    // viewport the user will see when they switch.
+                    guard isActive else { return }
+                    // While a multi-pane grid is mounted IT is the size
+                    // authority (it pushes a header-reserved row count via
+                    // refresh-client -C). The shared terminal's frame is
+                    // unchanged behind the grid, so its sizeChanged would
+                    // push the FULL row count and fight the grid's reserved
+                    // size — leaving tmux at the wrong height. Suppress the
+                    // push here; the grid owns it, and collapse re-pushes
+                    // the full size below.
+                    guard activeGridWindow == nil else { return }
+                    // The compact canvas is framed at the authoritative
+                    // server grid, so this inner callback reports server
+                    // cells rather than the phone's physical viewport.
+                    // Its outer GeometryReader is the sole compact size
+                    // authority; feeding this value back can erase the
+                    // smaller-phone baseline before an iPad cede.
+                    guard !(isPhone && tmux.mode == .tmuxControl) else { return }
+                    session.sessionCommands(tmux: tmux).resize(
+                        columns: cols,
+                        rows: rows
+                    )
+                },
+                onTitle: { title in
+                    // §3.2 C3: OSC 0/1/2 title sequences from the
+                    // active pane update the tab label. tmux treats
+                    // these as pane_title (no %window-renamed), so
+                    // the terminal renderer is the only source.
+                    tmux.updateActiveWindowName(title)
+                    currentTerminalTitle = title
+                },
+                onUserActivity: {
+                    appLockController.notifyUserActivity()
+                },
+                // A reader who typed or panned since a rebuild has moved on:
+                // its deep capture must not put them back.
+                onReaderInput: { terminalBox.noteReaderInput() },
+                onBell: {
+                    bellController.ring(
+                        source: .session(session.host.id),
+                        isOriginOnScreen: true,
+                        hostDisplayName: session.host.name,
+                        paneTitle: currentTerminalTitle
+                    )
+                },
+                onOpenLink: { link in
+                    ArtifactTerminalLinkRouting.handle(link, openArtifact: {
+                        guard let openArtifact,
+                              let savedHostID = sessionRegistry.session(for: liveSessionID)?.persistedHostID,
+                              let request = ArtifactTerminalLinkRouting.request(
+                                  for: link,
+                                  hostID: filesPanel.bridge?.key.hostID ?? savedHostID,
+                                  sessionID: liveSessionID,
+                                  canOpenArtifact: true
+                              ) else { return false }
+                        _ = terminalBox.view?.resignFirstResponder()
+                        openArtifact(request)
+                        return true
+                    }, showFailure: { terminalDropFailure = $0 })
+                },
+                // Trackpad/wheel/inertia frames: the coordinator reports
+                // the PROPOSED offset before clamping, so a negative
+                // value is the gesture genuinely crossing the oldest
+                // local row. Only scroll-up frames reach this hook.
+                onPrimaryScrollbackUnderflow: { view, pointsY, proposedOffsetY, maxOffsetY in
+                    noteInlineTmuxScrollUp(
+                        surfaceID: .live,
+                        view: view,
+                        proposedOffsetY: proposedOffsetY,
+                        maxOffsetY: maxOffsetY,
+                        pointsY: pointsY,
+                        isInertial: false
+                    )
+                },
+                agentScrollBlockingActive:
+                    agentScrollPrevention(paneID: activeAgentScrollPaneID) != nil,
+                onAgentScrollBlocked: {
+                    presentAgentScrollPrevention(paneID: activeAgentScrollPaneID)
+                },
+                mouseReportingImpliesAltScreen: false,
+                suppressDirectColorQueryResponses: true,
+                softwareModifierState: modifierState,
+                tmuxShortcutsEnabled: true,
+                onTmuxShortcut: handleTmuxShortcut,
+                onFindShortcut: { shortcut in
+                    appLockController.notifyUserActivity()
+                    switch shortcut {
+                    case .open:     findController.open()
+                    case .next:     findController.next()
+                    case .previous: findController.previous()
+                    }
+                },
+                onSwitcherShortcut: { shortcut in
+                    appLockController.notifyUserActivity()
+                    handleSwitcherShortcut(shortcut)
+                },
+                onOpenSettings: {
+                    appLockController.notifyUserActivity()
+                    onOpenSettings()
+                },
+                onOpenAgentCenter: onOpenAgentCenter.map { action in
+                    {
+                        appLockController.notifyUserActivity()
+                        action()
+                    }
+                },
+                // The shared terminal yields first responder to the
+                // grid's focused pane while a multi-pane window is up.
+                // `!isActive` is load-bearing: background (non-selected,
+                // opacity-0) sessions stay MOUNTED, and without this gate
+                // their terminal reclaims first responder on any
+                // re-render — stealing focus from whatever IS on screen
+                // (e.g. a TextField in the host editor). Only the
+                // foreground session may hold the keyboard.
+                suppressFirstResponderReclaim: integrationScrollHarnessSuppressesFirstResponder
+                    || !isActive
+                    || findController.isOpen
+                    || commandPalette.isOpen
+                    || filesPanel.textEntryActive
+                    || modifierState.suppressesSoftwareKeyboardReclaim
+                    || sessionIsControlledElsewhere
+                    || activeGridWindow != nil
+                    || terminalInputSuppressed,
+                forceResignFirstResponder: sessionIsControlledElsewhere || terminalInputSuppressed,
+                // On the laptop's desk the pane above holds the keyboard:
+                // only a tap on this terminal takes it back.
+                coveringSheetPresented: compactFilesBinding.wrappedValue || onTheDesk,
+                onHardwareKey: nil,
+                refusesInput: showsLaunchOverlay || terminalInputGatedByAuthority || terminalInputSuppressed,
+                // Committed moves that land while a finger is down
+                // or a glide runs (output under the reader).
+                onTerminalScrolled: { view in
+                    handleInlineTerminalScrolled(surfaceID: .live, view: view)
+                },
+                // Finger drags move SwiftTerm's own scroll view, which
+                // never reaches the underflow hook above, so the
+                // inline history gate is evaluated from each frame.
+                onNativeScrollFrame: { view, previousOffsetY in
+                    handleInlineNativeScrollFrame(
+                        surfaceID: .live,
+                        view: view,
+                        previousOffsetY: previousOffsetY
+                    )
+                },
+                scrollRetentionID: [
+                    "ssh",
+                    tmux.activeWindowId?.description ?? "nil",
+                    tmux.activePaneId?.description ?? "nil",
+                    activeGridWindow?.id.description ?? "nil",
+                ].joined(separator: ":"),
+                onScrollDiagnostic: { message in
+                    recordScrollDiagnostic(message)
+                },
+                onHostDirectory: { dir in
+                    // OSC 7 owns the cwd only while no tmux is
+                    // attached; under tmux the pane-metadata
+                    // subscription is the per-pane source of truth.
+                    guard tmux.mode == .passthrough else { return }
+                    if dir != nil { osc7DeliveredInPassthrough = true }
+                    filesPanel.terminalReportedDirectory(dir)
+                },
+                onFilesShortcut: {
+                    appLockController.notifyUserActivity()
+                    toggleFilesPanel()
+                },
+                onCustomShortcut: { shortcut in
+                    guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
+                        // Refused bytes never reach the PTY: drop the UIKit input
+                        // mirror so later edits cannot delete what it believes was typed.
+                        terminalBox.noteOutOfBandInput()
+                        return
+                    }
+                    guard shouldFire(shortcut) else { return }
+                    appLockController.notifyUserActivity()
+                    let cursor = terminalBox.view?.getTerminal().applicationCursor ?? false
+                    session.sessionCommands(tmux: tmux).sendInput(
+                        shortcut.encoded(applicationCursor: cursor)
+                    )
+                    noteOutOfBandTyping()
+                },
+                onSelectionPathAction: { action, text in
+                    handleSelectionPathAction(action, text: text)
+                },
+                terminalBackground: resolvedTerminalBackground
+            )
+            .modifier(GeometryNeutralTmuxCanvasModifier(
+                windowRect: compactSingleWindowRect,
+                focusRect: compactSingleWindowRect,
+                cellSize: terminalCellSize,
+                onViewportSize: updateCompactInlineViewport
+            ))
+            .allowsHitTesting(!showsLaunchOverlay && activeGridWindow == nil)
+            // With a background picture the grid canvas is transparent
+            // (it no longer paints an opaque fill over this inert
+            // surface), so hide the shared surface outright while a
+            // grid is mounted or its stale text bleeds through.
+            .opacity(
+                showsLaunchOverlay
+                    || (activeGridWindow != nil && resolvedTerminalBackground != nil)
+                    ? 0 : 1
+            )
+            .animation(
+                // Sequential dissolve: snap the terminal to
+                // invisible while the overlay reappears; on
+                // dismiss, wait for the overlay's own removal
+                // transition (0.25 s) to finish before fading
+                // the terminal back in over 0.3 s. The user
+                // sees overlay-out → terminal-in, not a
+                // crossfade.
+                showsLaunchOverlay
+                    ? .linear(duration: 0)
+                    : .easeInOut(duration: 0.30).delay(0.25),
+                value: showsLaunchOverlay
+            )
+
+            // Multi-pane grid overlays the shared terminal (which goes
+            // inert — its panes' %output routes to per-pane sinks).
+            if let gridWindow = activeGridWindow, !showsLaunchOverlay {
+                PaneGridView(
+                    window: gridWindow,
+                    tmux: tmux,
+                    renderDropSummary: renderDropSummary,
+                    sessionCommands: session.sessionCommands(tmux: tmux),
+                    cellSize: terminalCellSize,
+                    chrome: themeChromeTokens,
+                    backgroundColor: activeTheme.bg,
+                    terminalBackground: resolvedTerminalBackground,
+                    tmuxShortcutsEnabled: true,
+                    onTmuxShortcut: handleTmuxShortcut,
+                    onFindShortcut: { shortcut in
+                        appLockController.notifyUserActivity()
+                        switch shortcut {
+                        case .open:     findController.open()
+                        case .next:     findController.next()
+                        case .previous: findController.previous()
+                        }
+                    },
+                    onSwitcherShortcut: { shortcut in
+                        appLockController.notifyUserActivity()
+                        handleSwitcherShortcut(shortcut)
+                    },
+                    onOpenSettings: {
+                        appLockController.notifyUserActivity()
+                        onOpenSettings()
+                    },
+                    onOpenAgentCenter: onOpenAgentCenter.map { action in
+                        {
+                            appLockController.notifyUserActivity()
+                            action()
+                        }
+                    },
+                    onOpenLink: { link in
+                        ArtifactTerminalLinkRouting.handle(link, openArtifact: {
+                            guard let openArtifact,
+                                  let savedHostID = sessionRegistry.session(for: liveSessionID)?.persistedHostID,
+                                  let request = ArtifactTerminalLinkRouting.request(
+                                      for: link,
+                                      hostID: filesPanel.bridge?.key.hostID ?? savedHostID,
+                                      sessionID: liveSessionID,
+                                      canOpenArtifact: true
+                                  ) else { return false }
+                            _ = terminalBox.view?.resignFirstResponder()
+                            openArtifact(request)
+                            return true
+                        }, showFailure: { terminalDropFailure = $0 })
+                    },
+                    onSelectionPathAction: { action, text in
+                        handleSelectionPathAction(action, text: text)
+                    },
+                    onUserActivity: { appLockController.notifyUserActivity() },
+                    agentScrollPreventionForPane: { paneID in
+                        agentScrollPrevention(paneID: paneID.rawValue)
+                    },
+                    onAgentScrollBlocked: { paneID in
+                        presentAgentScrollPrevention(paneID: paneID.rawValue)
+                    },
+                    // `!isActive` so a backgrounded grid's focused pane
+                    // doesn't reclaim first responder from the foreground
+                    // (e.g. the host editor) — same rule as the shared
+                    // surface above.
+                    suppressFindReclaim: integrationScrollHarnessSuppressesFirstResponder
+                        || !isActive
+                        || findController.isOpen
+                        || commandPalette.isOpen
+                        || filesPanel.textEntryActive
+                        || modifierState.suppressesSoftwareKeyboardReclaim
+                        || sessionIsControlledElsewhere
+                        || terminalInputSuppressed,
+                    inputSuppressed: terminalInputGatedByAuthority || terminalInputSuppressed,
+                    // Same rule as the single pane: only the veil
+                    // resigns focus; `.resuming` gates sends only.
+                    forceResignFirstResponder: sessionIsControlledElsewhere || terminalInputSuppressed,
+                    coveringSheetPresented: compactFilesBinding.wrappedValue || onTheDesk,
+                    compactSinglePane: isPhone,
+                    modifierState: modifierState,
+                    kittyPaneModes: kittyPaneModes,
+                    onFocusedBoxChanged: { box in
+                        // Find is scoped to the focused pane: rebind
+                        // its search handlers and re-run any open query.
+                        findController.handlers = TerminalSearchAdapter.handlers(for: box)
+                        if findController.isOpen { findController.updateSearch() }
+                    },
+                    onFocusedPaneRefreshed: {
+                        if findController.isOpen { findController.updateSearch() }
+                    },
+                    onPaneBell: { paneTitle in
+                        bellController.ring(
+                            source: .session(session.host.id),
+                            isOriginOnScreen: true,
+                            hostDisplayName: session.host.name,
+                            paneTitle: paneTitle
+                        )
+                    },
+                    onScrollDiagnostic: { paneId, message in
+                        recordScrollDiagnostic("surface=pane:\(paneId.description) \(message)")
+                    },
+                    // Inline history ladder for the grid's own
+                    // `pane:<id>` render surfaces. Identical policy to
+                    // the shared `.live` surface; the grid only lends
+                    // this view its per-pane boxes and scroll frames.
+                    onPaneSurfaceReady: { paneId, box in
+                        inlineHistory.registerPaneBox(box, for: paneId)
+                    },
+                    onPaneSurfaceRetired: { paneId in
+                        inlineHistory.retirePane(paneId)
+                    },
+                    onPaneSurfaceRebound: { paneId, identityChanged in
+                        inlineHistory.state.surfaceRebound(
+                            Self.inlinePaneSurfaceID(paneId),
+                            identityChanged: identityChanged
+                        )
+                    },
+                    onPaneScrolled: { paneId, view in
+                        handleInlineTerminalScrolled(
+                            surfaceID: Self.inlinePaneSurfaceID(paneId),
+                            view: view
+                        )
+                    },
+                    onPaneNativeScrollFrame: { paneId, view, previousOffsetY in
+                        handleInlineNativeScrollFrame(
+                            surfaceID: Self.inlinePaneSurfaceID(paneId),
+                            view: view,
+                            previousOffsetY: previousOffsetY
+                        )
+                    },
+                    onPanePrimaryScrollbackUnderflow: { paneId, view, pointsY, proposedOffsetY, maxOffsetY in
+                        noteInlineTmuxScrollUp(
+                            surfaceID: Self.inlinePaneSurfaceID(paneId),
+                            view: view,
+                            proposedOffsetY: proposedOffsetY,
+                            maxOffsetY: maxOffsetY,
+                            pointsY: pointsY,
+                            isInertial: false
+                        )
+                    }
+                )
+                .id(gridWindow.id)
+            }
+
+            if showsLaunchOverlay {
+                SessionLaunchOverlay(
+                    T: themeChromeTokens,
+                    phase: launchPhase,
+                    subtitle: launchSubtitle,
+                    wslTailscaleMTUWarning: session.wslTailscaleMTUWarning,
+                    failureReason: launchFailureReason,
+                    onEditHost: onEditHost,
+                    onRetry: onRetry,
+                    onBack: {
+                        // The stall notice puts this button up while
+                        // the connect is still running, so leaving has
+                        // to tear it down: the run task holds the
+                        // session alive and would finish unseen.
+                        onUserClosedSession()
+                        onSessionEnded()
+                        session.sessionCommands.disconnect()
+                    },
+                    reconnectingElsewhere: reconnectingElsewhere
+                )
+                .transition(.opacity)
+                .zIndex(1)
+            }
+
+            // Continuity takeover veil: another device holds the grid.
+            // Connection loss and session end outrank it — both are
+            // covered because the veil requires `.connected` and the
+            // launch overlay's failure state wins via the gate above.
+            if let peerName = effectiveGridAuthorityPeerName, veilIsDrawn {
+                ContinuedElsewhereOverlay(
+                    T: themeChromeTokens,
+                    peerDisplayName: peerName,
+                    isReclaiming: gridAuthorityPresentation.isReclaiming,
+                    awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
+                    // Focus only the displayed, unlocked veil: hidden
+                    // tabs keep theirs mounted at opacity 0, and the
+                    // app lock covers a still-mounted ContentView.
+                    capturesKeys: ContinuedElsewhereKeyPolicy.admitsGesture(
+                        sessionIsActive: isActive,
+                        appIsLocked: appLockController.isLocked
+                    ),
+                    animatesMotion: ContinuedElsewherePresentationPolicy.breathes(
+                        displayed: ContinuedElsewhereKeyPolicy.admitsGesture(
+                            sessionIsActive: isActive,
+                            appIsLocked: appLockController.isLocked
+                        ),
+                        appIsActive: appPhase.isActive
+                    ),
+                    onTakeBack: takeBackContinuedSession,
+                    onCancel: cancelPendingGridAuthorityIntent,
+                    // ⌘⇧J / ⌘⇧K keep working while yielded: switching
+                    // sessions changes what is on screen here, never
+                    // what the peer's terminal receives. Only the
+                    // foreground session registers them — a background
+                    // session stays mounted (opacity 0) and its veil
+                    // would otherwise claim the same chords and step
+                    // from the wrong place in the list.
+                    onSwitcherShortcut: isActive
+                        ? { shortcut in
+                            appLockController.notifyUserActivity()
+                            handleSwitcherShortcut(shortcut)
+                        }
+                        : nil
+                )
+                .transition(.opacity)
+                .zIndex(2)
+            }
+
+            // A show resolving: the terminal stays visible (no veil
+            // flash on resume); only input waits for the read.
+            if gridAuthorityPresentation.isResuming,
+               !showsLaunchOverlay {
+                GridAuthorityResumingIndicator(
+                    T: themeChromeTokens,
+                    awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
+                    onCancel: cancelPendingGridAuthorityIntent
+                )
+                .transition(.opacity)
+                .zIndex(3)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(
+            .easeInOut(duration: ContinuedElsewherePresentationPolicy.veilFadeDuration),
+            value: sessionIsControlledElsewhere
+        )
+        .terminalDropTarget(
+            isEnabled: terminalDropEnabled,
+            target: { terminalDropIdentity },
+            failureMessage: $terminalDropFailure,
+            onText: pasteDroppedText,
+            onFiles: uploadDroppedFiles
+        )
+        .modifier(SessionTerminalDropFailure(
+            T: themeChromeTokens,
+            message: $terminalDropFailure
+        ))
+        // §3 terminal Quick Look with the panel closed: the
+        // panel hosts presentedPreview only while open, so this
+        // fallback presents it otherwise. The binding nils itself
+        // while the panel is open — exactly one host at a time by
+        // construction. Size (sheet vs full screen) is the user's
+        // persisted choice, applied identically on both hosts.
+        .quickLookPreview(item: Binding(
+            get: { filesPanel.isOpen ? nil : filesPanel.presentedPreview },
+            set: { filesPanel.presentedPreview = $0 }
+        ))
+        .sheet(isPresented: compactFilesBinding, onDismiss: { compactFilesDetent = .medium }) {
+            FilesPanelView(
+                controller: filesPanel,
+                T: filesPanelTokens,
+                sessionIsActive: isActive,
+                // The compact card sits over its own app-themed sheet,
+                // not directly over the terminal canvas.
+                terminalBackground: nil
+            )
+            .presentationDetents([.medium, .large], selection: $compactFilesDetent)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(filesPanelTokens.presentationBg)
+            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
+        // Remote Files panel floats as an overlay over the
+        // terminal — no trailing padding, so the terminal keeps
+        // its full width and toggling the panel never resizes it
+        // (no sizeChanged → no SIGWINCH / refresh-client reflow).
+        // A transparent tap-catcher behind the card dismisses the
+        // panel when the user taps the terminal, like the sidebar.
+        .overlay(alignment: .trailing) {
+            if filesPanel.isOpen, !isPhone {
+                ZStack(alignment: .trailing) {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
+                        }
+                    FilesPanelView(
+                        controller: filesPanel,
+                        T: themeChromeTokens,
+                        sessionIsActive: isActive,
+                        terminalBackground: resolvedTerminalBackground
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+        }
+        .padding(.horizontal, isPhone ? 4 : Self.cornerInset)
+        .duoDeckCaretLift(isActive: isActive, caretClearance: terminalCaretClearance)
+        .terminalKeyboardCaretShift()
+        .stackBoundary()
+    }
+
+    /// Where the caret sits for the keyboard and Duo's bar to clear.
+    private func terminalCaretClearance() -> TerminalCaretClearance? {
+        // A mounted pane grid owns the caret; the shared surface behind
+        // it is inert and its cursor is stale, so let the whole
+        // translation stand rather than aim at the wrong row. Find is
+        // the same call for a different reason: it scrolls the surface
+        // to a *match*, which has nothing to do with where the caret
+        // is, so the whole grid has to clear the keyboard.
+        guard activeGridWindow == nil, !findController.isOpen else { return nil }
+        return terminalBox.caretClearance(
+            cellHeight: terminalCaretCellHeight(
+                fontID: appearance.terminalFontID,
+                fontSize: appearance.fontSize
+            ),
+            mouseReportingImpliesAltScreen: false
+        )
+    }
+
+    @ViewBuilder
+    private var sessionInputDeck: some View {
+        if appearance.showAccessoryBar {
+            SessionAccessoryBar(
+                accent: appearance.tokens(systemColorScheme: .dark).accent,
+                modifierState: modifierState,
+                onSend: { bytes in
+                    guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
+                        // Refused bytes never reach the PTY: drop the UIKit input
+                        // mirror so later edits cannot delete what it believes was typed.
+                        terminalBox.noteOutOfBandInput()
+                        return
+                    }
+                    appLockController.notifyUserActivity()
+                    session.sessionCommands(tmux: tmux).sendInput(bytes)
+                    noteOutOfBandTyping()
+                },
+                applicationCursor: { [terminalBox] in
+                    terminalBox.view?.getTerminal().applicationCursor ?? false
+                },
+                onPageScrollAttempt: { _ in
+                    guard agentScrollPrevention(
+                        paneID: activeAgentScrollPaneID
+                    ) != nil else { return false }
+                    presentAgentScrollPrevention(
+                        paneID: activeAgentScrollPaneID
+                    )
+                    return true
+                },
+                customShortcutApplies: shouldFire,
+                spansKeyboard: isActive,
+                attention: duoAgentWaiting
+            )
+            .allowsHitTesting(!sessionIsControlledElsewhere)
+            .opacity(sessionIsControlledElsewhere ? 0.45 : 1)
+        }
+    }
+
     private var sessionDecoratedChrome: some View {
         ZStack(alignment: .top) {
             // §3.5 R3.5.4: background extends edge-to-edge under the
@@ -1747,12 +2897,13 @@ struct SessionView: View {
                         forwarderManager: session.portForwarderManager,
                         T: themeChromeTokens,
                         onOpenAgentCenter: onOpenAgentCenter,
-                        continuityActions: continuityActions
+                        continuityActions: continuityActions,
+                        railMode: isRailMode,
+                        terminalColumns: compactTmuxWindowRect?.width ?? lastTerminalSize?.cols,
+                        terminalRows: compactTmuxWindowRect?.height ?? lastTerminalSize?.rows,
+                        railSwitcher: railSwitcher
                     )
-                    .frame(height: SessionTopBar.reservedHeight(
-                        pillHeight: appearance.topBarHeight,
-                        compact: isPhone
-                    ))
+                    .frame(height: sessionTopBarHeight)
 
                     if findController.isOpen {
                         FindBar(
@@ -1767,530 +2918,36 @@ struct SessionView: View {
                 // above the terminal, which it now overlaps while lifted.
                 .zIndex(2)
 
-                // Terminal content. Horizontal inset clears the bottom
-                // rounded corners (iPadOS's safeAreaInsets has no
-                // horizontal component on iPad, so we have to inset
-                // manually). The top is already pushed down by the
-                // VStack placement below the top bar; the bottom should
-                // run edge-to-edge so the terminal uses all rows.
-                ZStack {
-                    TerminalSurfaceBound(
-                        initialData: [],
-                        onMade: { view in terminalBox.attach(view) },
-                        onReady: { terminalBox.markRenderReady() },
-                        onSend: { bytes in
-                            guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
-                                // Refused bytes never reach the PTY: drop the UIKit input
-                                // mirror so later edits cannot delete what it believes was typed.
-                                terminalBox.noteOutOfBandInput()
-                                return
+                DuoFoldedInputLayout(
+                    isEnabled: isPhone && !onTheDesk, fold: inputFold,
+                    bar: DuoDeckBar(appearance), publishesDesk: isActive
+                ) {
+                    sessionTerminalContent
+                } deck: {
+                    sessionInputDeck
+                } desk: {
+                    if isPhone && inputDeckExpanded { duoAgentReplies }
+                }
+                // Observed here, the fold is in the deck's own coordinates, and
+                // the keyboard layout reads the same state in the same pass.
+                // On the desk the fold lies above the session, which keeps the
+                // fold it had on top for its return; a fresh reader reports
+                // the pose as it is then.
+                .background {
+                    if !onTheDesk {
+                        Color.clear
+                            .onKeyboardUnliftedDuoFoldChange { fold in
+                                if inputFold != fold { inputFold = fold }
                             }
-                            session.sessionCommands(tmux: tmux).sendInput(Array(bytes))
-                        },
-                        onResize: { cols, rows in
-                            lastTerminalSize = (cols, rows)
-                            // Only propagate resize to the remote when this
-                            // session is the foreground tab. Background
-                            // sessions must not send SIGWINCH — it would
-                            // reflow vim/less/htop while the user isn't
-                            // looking, and the "new" size might reflect the
-                            // sidebar being open, not the actual terminal
-                            // viewport the user will see when they switch.
-                            guard isActive else { return }
-                            // While a multi-pane grid is mounted IT is the size
-                            // authority (it pushes a header-reserved row count via
-                            // refresh-client -C). The shared terminal's frame is
-                            // unchanged behind the grid, so its sizeChanged would
-                            // push the FULL row count and fight the grid's reserved
-                            // size — leaving tmux at the wrong height. Suppress the
-                            // push here; the grid owns it, and collapse re-pushes
-                            // the full size below.
-                            guard activeGridWindow == nil else { return }
-                            // The compact canvas is framed at the authoritative
-                            // server grid, so this inner callback reports server
-                            // cells rather than the phone's physical viewport.
-                            // Its outer GeometryReader is the sole compact size
-                            // authority; feeding this value back can erase the
-                            // smaller-phone baseline before an iPad cede.
-                            guard !(isPhone && tmux.mode == .tmuxControl) else { return }
-                            session.sessionCommands(tmux: tmux).resize(
-                                columns: cols,
-                                rows: rows
-                            )
-                        },
-                        onTitle: { title in
-                            // §3.2 C3: OSC 0/1/2 title sequences from the
-                            // active pane update the tab label. tmux treats
-                            // these as pane_title (no %window-renamed), so
-                            // the terminal renderer is the only source.
-                            tmux.updateActiveWindowName(title)
-                            currentTerminalTitle = title
-                        },
-                        onUserActivity: {
-                            appLockController.notifyUserActivity()
-                        },
-                        onBell: {
-                            bellController.ring(
-                                source: .session(session.host.id),
-                                isOriginOnScreen: true,
-                                hostDisplayName: session.host.name,
-                                paneTitle: currentTerminalTitle
-                            )
-                        },
-                        // Trackpad/wheel/inertia frames: the coordinator reports
-                        // the PROPOSED offset before clamping, so a negative
-                        // value is the gesture genuinely crossing the oldest
-                        // local row. Only scroll-up frames reach this hook.
-                        onPrimaryScrollbackUnderflow: { view, pointsY, proposedOffsetY, maxOffsetY in
-                            noteInlineTmuxScrollUp(
-                                surfaceID: .live,
-                                view: view,
-                                proposedOffsetY: proposedOffsetY,
-                                maxOffsetY: maxOffsetY,
-                                pointsY: pointsY,
-                                isInertial: false
-                            )
-                        },
-                        agentScrollBlockingActive:
-                            agentScrollPrevention(paneID: activeAgentScrollPaneID) != nil,
-                        onAgentScrollBlocked: {
-                            presentAgentScrollPrevention(paneID: activeAgentScrollPaneID)
-                        },
-                        mouseReportingImpliesAltScreen: false,
-                        suppressDirectColorQueryResponses: true,
-                        softwareModifierState: modifierState,
-                        tmuxShortcutsEnabled: true,
-                        onTmuxShortcut: handleTmuxShortcut,
-                        onFindShortcut: { shortcut in
-                            appLockController.notifyUserActivity()
-                            switch shortcut {
-                            case .open:     findController.open()
-                            case .next:     findController.next()
-                            case .previous: findController.previous()
-                            }
-                        },
-                        onSwitcherShortcut: { shortcut in
-                            appLockController.notifyUserActivity()
-                            handleSwitcherShortcut(shortcut)
-                        },
-                        onOpenSettings: {
-                            appLockController.notifyUserActivity()
-                            onOpenSettings()
-                        },
-                        onOpenAgentCenter: onOpenAgentCenter.map { action in
-                            {
-                                appLockController.notifyUserActivity()
-                                action()
-                            }
-                        },
-                        // The shared terminal yields first responder to the
-                        // grid's focused pane while a multi-pane window is up.
-                        // `!isActive` is load-bearing: background (non-selected,
-                        // opacity-0) sessions stay MOUNTED, and without this gate
-                        // their terminal reclaims first responder on any
-                        // re-render — stealing focus from whatever IS on screen
-                        // (e.g. a TextField in the host editor). Only the
-                        // foreground session may hold the keyboard.
-                        suppressFirstResponderReclaim: integrationScrollHarnessSuppressesFirstResponder
-                            || !isActive
-                            || findController.isOpen
-                            || commandPalette.isOpen
-                            || filesPanel.textEntryActive
-                            || modifierState.suppressesSoftwareKeyboardReclaim
-                            || sessionIsControlledElsewhere
-                            || activeGridWindow != nil,
-                        forceResignFirstResponder: sessionIsControlledElsewhere,
-                        onHardwareKey: nil,
-                        // Committed moves that land while a finger is down
-                        // or a glide runs (output under the reader).
-                        onTerminalScrolled: { view in
-                            handleInlineTerminalScrolled(surfaceID: .live, view: view)
-                        },
-                        // Finger drags move SwiftTerm's own scroll view, which
-                        // never reaches the underflow hook above, so the
-                        // inline history gate is evaluated from each frame.
-                        onNativeScrollFrame: { view, previousOffsetY in
-                            handleInlineNativeScrollFrame(
-                                surfaceID: .live,
-                                view: view,
-                                previousOffsetY: previousOffsetY
-                            )
-                        },
-                        scrollRetentionID: [
-                            "ssh",
-                            tmux.activeWindowId?.description ?? "nil",
-                            tmux.activePaneId?.description ?? "nil",
-                            activeGridWindow?.id.description ?? "nil",
-                        ].joined(separator: ":"),
-                        onScrollDiagnostic: { message in
-                            recordScrollDiagnostic(message)
-                        },
-                        onHostDirectory: { dir in
-                            // OSC 7 owns the cwd only while no tmux is
-                            // attached; under tmux the pane-metadata
-                            // subscription is the per-pane source of truth.
-                            guard tmux.mode == .passthrough else { return }
-                            if dir != nil { osc7DeliveredInPassthrough = true }
-                            filesPanel.terminalReportedDirectory(dir)
-                        },
-                        onFilesShortcut: {
-                            appLockController.notifyUserActivity()
-                            toggleFilesPanel()
-                        },
-                        onCustomShortcut: { shortcut in
-                            guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
-                                // Refused bytes never reach the PTY: drop the UIKit input
-                                // mirror so later edits cannot delete what it believes was typed.
-                                terminalBox.noteOutOfBandInput()
-                                return
-                            }
-                            guard shouldFire(shortcut) else { return }
-                            appLockController.notifyUserActivity()
-                            let cursor = terminalBox.view?.getTerminal().applicationCursor ?? false
-                            session.sessionCommands(tmux: tmux).sendInput(
-                                shortcut.encoded(applicationCursor: cursor)
-                            )
-                        },
-                        onSelectionPathAction: { action, text in
-                            handleSelectionPathAction(action, text: text)
-                        },
-                        terminalBackground: resolvedTerminalBackground
-                    )
-                    .modifier(GeometryNeutralTmuxCanvasModifier(
-                        windowRect: compactSingleWindowRect,
-                        focusRect: compactSingleWindowRect,
-                        cellSize: terminalCellSize,
-                        onViewportSize: updateCompactInlineViewport
-                    ))
-                    .allowsHitTesting(!showsLaunchOverlay && activeGridWindow == nil)
-                    // With a background picture the grid canvas is transparent
-                    // (it no longer paints an opaque fill over this inert
-                    // surface), so hide the shared surface outright while a
-                    // grid is mounted or its stale text bleeds through.
-                    .opacity(
-                        showsLaunchOverlay
-                            || (activeGridWindow != nil && resolvedTerminalBackground != nil)
-                            ? 0 : 1
-                    )
-                    .animation(
-                        // Sequential dissolve: snap the terminal to
-                        // invisible while the overlay reappears; on
-                        // dismiss, wait for the overlay's own removal
-                        // transition (0.25 s) to finish before fading
-                        // the terminal back in over 0.3 s. The user
-                        // sees overlay-out → terminal-in, not a
-                        // crossfade.
-                        showsLaunchOverlay
-                            ? .linear(duration: 0)
-                            : .easeInOut(duration: 0.30).delay(0.25),
-                        value: showsLaunchOverlay
-                    )
-
-                    // Multi-pane grid overlays the shared terminal (which goes
-                    // inert — its panes' %output routes to per-pane sinks).
-                    if let gridWindow = activeGridWindow, !showsLaunchOverlay {
-                        PaneGridView(
-                            window: gridWindow,
-                            tmux: tmux,
-                            renderDropSummary: renderDropSummary,
-                            sessionCommands: session.sessionCommands(tmux: tmux),
-                            cellSize: terminalCellSize,
-                            chrome: themeChromeTokens,
-                            backgroundColor: activeTheme.bg,
-                            terminalBackground: resolvedTerminalBackground,
-                            tmuxShortcutsEnabled: true,
-                            onTmuxShortcut: handleTmuxShortcut,
-                            onFindShortcut: { shortcut in
-                                appLockController.notifyUserActivity()
-                                switch shortcut {
-                                case .open:     findController.open()
-                                case .next:     findController.next()
-                                case .previous: findController.previous()
-                                }
-                            },
-                            onSwitcherShortcut: { shortcut in
-                                appLockController.notifyUserActivity()
-                                handleSwitcherShortcut(shortcut)
-                            },
-                            onOpenSettings: {
-                                appLockController.notifyUserActivity()
-                                onOpenSettings()
-                            },
-                            onOpenAgentCenter: onOpenAgentCenter.map { action in
-                                {
-                                    appLockController.notifyUserActivity()
-                                    action()
-                                }
-                            },
-                            onSelectionPathAction: { action, text in
-                                handleSelectionPathAction(action, text: text)
-                            },
-                            onUserActivity: { appLockController.notifyUserActivity() },
-                            agentScrollPreventionForPane: { paneID in
-                                agentScrollPrevention(paneID: paneID.rawValue)
-                            },
-                            onAgentScrollBlocked: { paneID in
-                                presentAgentScrollPrevention(paneID: paneID.rawValue)
-                            },
-                            // `!isActive` so a backgrounded grid's focused pane
-                            // doesn't reclaim first responder from the foreground
-                            // (e.g. the host editor) — same rule as the shared
-                            // surface above.
-                            suppressFindReclaim: integrationScrollHarnessSuppressesFirstResponder
-                                || !isActive
-                                || findController.isOpen
-                                || commandPalette.isOpen
-                                || filesPanel.textEntryActive
-                                || modifierState.suppressesSoftwareKeyboardReclaim
-                                || sessionIsControlledElsewhere,
-                            inputSuppressed: terminalInputGatedByAuthority,
-                            // Same rule as the single pane: only the veil
-                            // resigns focus; `.resuming` gates sends only.
-                            forceResignFirstResponder: sessionIsControlledElsewhere,
-                            compactSinglePane: isPhone,
-                            modifierState: modifierState,
-                            kittyPaneModes: kittyPaneModes,
-                            onFocusedBoxChanged: { box in
-                                // Find is scoped to the focused pane: rebind
-                                // its search handlers and re-run any open query.
-                                findController.handlers = TerminalSearchAdapter.handlers(for: box)
-                                if findController.isOpen { findController.updateSearch() }
-                            },
-                            onFocusedPaneRefreshed: {
-                                if findController.isOpen { findController.updateSearch() }
-                            },
-                            onPaneBell: { paneTitle in
-                                bellController.ring(
-                                    source: .session(session.host.id),
-                                    isOriginOnScreen: true,
-                                    hostDisplayName: session.host.name,
-                                    paneTitle: paneTitle
-                                )
-                            },
-                            onScrollDiagnostic: { paneId, message in
-                                recordScrollDiagnostic("surface=pane:\(paneId.description) \(message)")
-                            },
-                            // Inline history ladder for the grid's own
-                            // `pane:<id>` render surfaces. Identical policy to
-                            // the shared `.live` surface; the grid only lends
-                            // this view its per-pane boxes and scroll frames.
-                            onPaneSurfaceReady: { paneId, box in
-                                inlineHistory.registerPaneBox(box, for: paneId)
-                            },
-                            onPaneSurfaceRetired: { paneId in
-                                inlineHistory.retirePane(paneId)
-                            },
-                            onPaneSurfaceRebound: { paneId, identityChanged in
-                                inlineHistory.state.surfaceRebound(
-                                    Self.inlinePaneSurfaceID(paneId),
-                                    identityChanged: identityChanged
-                                )
-                            },
-                            onPaneScrolled: { paneId, view in
-                                handleInlineTerminalScrolled(
-                                    surfaceID: Self.inlinePaneSurfaceID(paneId),
-                                    view: view
-                                )
-                            },
-                            onPaneNativeScrollFrame: { paneId, view, previousOffsetY in
-                                handleInlineNativeScrollFrame(
-                                    surfaceID: Self.inlinePaneSurfaceID(paneId),
-                                    view: view,
-                                    previousOffsetY: previousOffsetY
-                                )
-                            },
-                            onPanePrimaryScrollbackUnderflow: { paneId, view, pointsY, proposedOffsetY, maxOffsetY in
-                                noteInlineTmuxScrollUp(
-                                    surfaceID: Self.inlinePaneSurfaceID(paneId),
-                                    view: view,
-                                    proposedOffsetY: proposedOffsetY,
-                                    maxOffsetY: maxOffsetY,
-                                    pointsY: pointsY,
-                                    isInertial: false
-                                )
-                            }
-                        )
-                        .id(gridWindow.id)
-                    }
-
-                    if showsLaunchOverlay {
-                        SessionLaunchOverlay(
-                            T: themeChromeTokens,
-                            phase: launchPhase,
-                            subtitle: launchSubtitle,
-                            wslTailscaleMTUWarning: session.wslTailscaleMTUWarning,
-                            failureReason: launchFailureReason,
-                            onEditHost: onEditHost,
-                            onRetry: onRetry,
-                            onBack: {
-                                // The stall notice puts this button up while
-                                // the connect is still running, so leaving has
-                                // to tear it down: the run task holds the
-                                // session alive and would finish unseen.
-                                onUserClosedSession()
-                                onSessionEnded()
-                                session.sessionCommands.disconnect()
-                            },
-                            reconnectingElsewhere: reconnectingElsewhere
-                        )
-                        .transition(.opacity)
-                        .zIndex(1)
-                    }
-
-                    // Continuity takeover veil: another device holds the grid.
-                    // Connection loss and session end outrank it — both are
-                    // covered because the veil requires `.connected` and the
-                    // launch overlay's failure state wins via the gate above.
-                    if let peerName = effectiveGridAuthorityPeerName, veilIsDrawn {
-                        ContinuedElsewhereOverlay(
-                            T: themeChromeTokens,
-                            peerDisplayName: peerName,
-                            isReclaiming: gridAuthorityPresentation.isReclaiming,
-                            awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
-                            // Focus only the displayed, unlocked veil: hidden
-                            // tabs keep theirs mounted at opacity 0, and the
-                            // app lock covers a still-mounted ContentView.
-                            capturesKeys: ContinuedElsewhereKeyPolicy.admitsGesture(
-                                sessionIsActive: isActive,
-                                appIsLocked: appLockController.isLocked
-                            ),
-                            animatesMotion: ContinuedElsewherePresentationPolicy.breathes(
-                                displayed: ContinuedElsewhereKeyPolicy.admitsGesture(
-                                    sessionIsActive: isActive,
-                                    appIsLocked: appLockController.isLocked
-                                ),
-                                appIsActive: appPhase.isActive
-                            ),
-                            onTakeBack: takeBackContinuedSession,
-                            onCancel: cancelPendingGridAuthorityIntent,
-                            // ⌘⇧J / ⌘⇧K keep working while yielded: switching
-                            // sessions changes what is on screen here, never
-                            // what the peer's terminal receives. Only the
-                            // foreground session registers them — a background
-                            // session stays mounted (opacity 0) and its veil
-                            // would otherwise claim the same chords and step
-                            // from the wrong place in the list.
-                            onSwitcherShortcut: isActive
-                                ? { shortcut in
-                                    appLockController.notifyUserActivity()
-                                    handleSwitcherShortcut(shortcut)
-                                }
-                                : nil
-                        )
-                        .transition(.opacity)
-                        .zIndex(2)
-                    }
-
-                    // A show resolving: the terminal stays visible (no veil
-                    // flash on resume); only input waits for the read.
-                    if gridAuthorityPresentation.isResuming,
-                       !showsLaunchOverlay {
-                        GridAuthorityResumingIndicator(
-                            T: themeChromeTokens,
-                            awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
-                            onCancel: cancelPendingGridAuthorityIntent
-                        )
-                        .transition(.opacity)
-                        .zIndex(3)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(
-                    .easeInOut(duration: ContinuedElsewherePresentationPolicy.veilFadeDuration),
-                    value: sessionIsControlledElsewhere
-                )
-                // Drop a file onto the terminal → upload to the host's
-                // temp dir, then type the quoted path (mockup §4). The
-                // open panel's own drop zone sits on top and wins over
-                // its strip.
-                .modifier(TerminalFileDropTarget(
-                    T: themeChromeTokens,
-                    failureMessage: $terminalDropFailure,
-                    handle: handleTerminalDrop
-                ))
-                // §3 terminal Quick Look with the panel closed: the
-                // panel hosts presentedPreview only while open, so this
-                // fallback presents it otherwise. The binding nils itself
-                // while the panel is open — exactly one host at a time by
-                // construction. Size (sheet vs full screen) is the user's
-                // persisted choice, applied identically on both hosts.
-                .quickLookPreview(item: Binding(
-                    get: { filesPanel.isOpen ? nil : filesPanel.presentedPreview },
-                    set: { filesPanel.presentedPreview = $0 }
-                ))
-                .sheet(isPresented: compactFilesBinding) {
-                    FilesPanelView(
-                        controller: filesPanel,
-                        T: filesPanelTokens,
-                        sessionIsActive: isActive,
-                        // The compact card sits over its own app-themed sheet,
-                        // not directly over the terminal canvas.
-                        terminalBackground: nil
-                    )
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(filesPanelTokens.presentationBg)
-                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                .onPreferenceChange(SwipePadDockKey.self) { dock in
+                    if puckDock != dock { puckDock = dock }
                 }
-                // Remote Files panel floats as an overlay over the
-                // terminal — no trailing padding, so the terminal keeps
-                // its full width and toggling the panel never resizes it
-                // (no sizeChanged → no SIGWINCH / refresh-client reflow).
-                // A transparent tap-catcher behind the card dismisses the
-                // panel when the user taps the terminal, like the sidebar.
-                .overlay(alignment: .trailing) {
-                    if filesPanel.isOpen, !isPhone {
-                        ZStack(alignment: .trailing) {
-                            Color.clear
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
-                                }
-                            FilesPanelView(
-                                controller: filesPanel,
-                                T: themeChromeTokens,
-                                sessionIsActive: isActive,
-                                terminalBackground: resolvedTerminalBackground
-                            )
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                        }
-                    }
-                }
-                .padding(.horizontal, isPhone ? 4 : Self.cornerInset)
-                .terminalKeyboardCaretShift()
-
-                if appearance.showAccessoryBar {
-                    SessionAccessoryBar(
-                        accent: appearance.tokens(systemColorScheme: .dark).accent,
-                        modifierState: modifierState,
-                        onSend: { bytes in
-                            guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
-                                // Refused bytes never reach the PTY: drop the UIKit input
-                                // mirror so later edits cannot delete what it believes was typed.
-                                terminalBox.noteOutOfBandInput()
-                                return
-                            }
-                            appLockController.notifyUserActivity()
-                            session.sessionCommands(tmux: tmux).sendInput(bytes)
-                            terminalBox.noteOutOfBandInput()
-                        },
-                        applicationCursor: { [terminalBox] in
-                            terminalBox.view?.getTerminal().applicationCursor ?? false
-                        },
-                        onPageScrollAttempt: { _ in
-                            guard agentScrollPrevention(
-                                paneID: activeAgentScrollPaneID
-                            ) != nil else { return false }
-                            presentAgentScrollPrevention(
-                                paneID: activeAgentScrollPaneID
-                            )
-                            return true
-                        },
-                        customShortcutApplies: shouldFire
-                    )
-                    .allowsHitTesting(!sessionIsControlledElsewhere)
-                    .opacity(sessionIsControlledElsewhere ? 0.45 : 1)
+                .onPreferenceChange(DuoDeskAreaKey.self) { desk in
+                    if deskFloor != desk?.foldTop { deskFloor = desk?.foldTop }
                 }
             }
 
@@ -2319,10 +2976,7 @@ struct SessionView: View {
                         )
                     }
                 }
-                    .padding(.top, SessionTopBar.reservedHeight(
-                        pillHeight: appearance.topBarHeight,
-                        compact: isPhone
-                    ))
+                    .padding(.top, sessionTopBarHeight)
                     .padding(.horizontal, Self.cornerInset + 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(3)
@@ -2334,10 +2988,7 @@ struct SessionView: View {
                     T: themeChromeTokens
                 )
                 .padding(.top,
-                    SessionTopBar.reservedHeight(
-                        pillHeight: appearance.topBarHeight,
-                        compact: isPhone
-                    )
+                    sessionTopBarHeight
                     + (findController.isOpen ? 44 : 8)
                     + (noTmuxBannerVisible ? 58 : 0)
                 )
@@ -2358,7 +3009,7 @@ struct SessionView: View {
                     }
                     appLockController.notifyUserActivity()
                     session.sessionCommands(tmux: tmux).sendInput(bytes)
-                    terminalBox.noteOutOfBandInput()
+                    noteOutOfBandTyping()
                 },
                 tmux: tmux,
                 outputActivityToken: swipePadOutputActivityToken,
@@ -2389,12 +3040,11 @@ struct SessionView: View {
                 sessionIsActive: swipePadSessionIsActive,
                 onShowMore: onOpenAgentCenter,
                 profileStore: swipePadStore,
-                dictationController: dictationController
+                dictationController: dictationController,
+                dock: puckDock,
+                floor: deskFloor
             )
-            .padding(.top, SessionTopBar.reservedHeight(
-                pillHeight: appearance.topBarHeight,
-                compact: isPhone
-            ))
+            .padding(.top, sessionTopBarHeight)
             .padding(.horizontal, isPhone ? 10 : Self.cornerInset)
             .padding(.bottom, swipePadBottomInset)
             // The puck is terminal input chrome. Move the entire sibling
@@ -2405,13 +3055,17 @@ struct SessionView: View {
             .zIndex(sessionIsControlledElsewhere ? -1 : 5)
 
             if let toast = paneCommandToast {
+                // A context on the laptop's desk covers the bottom; the toast
+                // drops in under the top bar instead.
                 PaneCommandToast(message: toast, T: themeChromeTokens)
-                    .padding(.bottom, paneToastBottomInset)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.top, deskFloor == nil ? 0 : sessionTopBarHeight + 12)
+                    .padding(.bottom, deskFloor == nil ? paneToastBottomInset : 0)
+                    .frame(maxHeight: .infinity, alignment: deskFloor == nil ? .bottom : .top)
+                    .transition(.move(edge: deskFloor == nil ? .bottom : .top).combined(with: .opacity))
                     .zIndex(6)
             }
         }
+        .stackBoundary()
         .animation(.easeInOut(duration: 0.2), value: noTmuxBannerVisible)
         .animation(.easeInOut(duration: 0.25), value: showsLaunchOverlay)
         .animation(.easeInOut(duration: 0.2), value: paneCommandToast)
@@ -2419,22 +3073,8 @@ struct SessionView: View {
         .ignoresSafeArea(.container, edges: .bottom)
         .terminalKeyboardLayout(
             resizesTerminal: appearance.resizeTerminalWithKeyboard,
-            caretClearance: {
-                // A mounted pane grid owns the caret; the shared surface behind
-                // it is inert and its cursor is stale, so let the whole
-                // translation stand rather than aim at the wrong row. Find is
-                // the same call for a different reason: it scrolls the surface
-                // to a *match*, which has nothing to do with where the caret
-                // is, so the whole grid has to clear the keyboard.
-                guard activeGridWindow == nil, !findController.isOpen else { return nil }
-                return terminalBox.caretClearance(
-                    cellHeight: terminalCaretCellHeight(
-                        fontID: appearance.terminalFontID,
-                        fontSize: appearance.fontSize
-                    ),
-                    mouseReportingImpliesAltScreen: false
-                )
-            }
+            foldedLayoutActive: inputDeckExpanded,
+            caretClearance: terminalCaretClearance
         )
         .onChange(of: activeGridWindow?.id) { oldValue, newValue in
             reconcileAgentScrollNotice()
@@ -2505,8 +3145,14 @@ struct SessionView: View {
                 terminalBox.view?.getTerminal().hostCurrentDirectory
             )
         }
-        .onChange(of: sessionRegistry.tmuxFocusRequest?.token, initial: true) { _, _ in
-            handleCompactTmuxFocusRequest()
+        .onChange(of: SessionRegistryRequestTokens(
+            tmuxFocus: sessionRegistry.tmuxFocusRequest?.token,
+            filesReveal: sessionRegistry.filesRevealRequest?.token
+        ), initial: true) { old, new in
+            // One modifier for both one-shot requests keeps this chain's
+            // depth (see stackBoundary); each handler runs for its own token.
+            if old == new || old.tmuxFocus != new.tmuxFocus { handleCompactTmuxFocusRequest() }
+            if old == new || old.filesReveal != new.filesReveal { handleFilesRevealRequest() }
         }
         .onChange(of: tmux.gridAuthority) { _, _ in handleCompactTmuxFocusRequest() }
         .onChange(of: tmux.mode) { _, _ in handleCompactTmuxFocusRequest() }
@@ -2514,7 +3160,10 @@ struct SessionView: View {
         .onChange(of: ObjectIdentifier(session)) { _, _ in handleCompactTmuxFocusRequest() }
         .onChange(of: tmux.windows) { _, _ in handleCompactTmuxFocusRequest() }
         .onChange(of: tmux.isWindowListHydrated) { _, _ in handleCompactTmuxFocusRequest() }
-        .onChange(of: isActive) { _, _ in handleCompactTmuxFocusRequest() }
+        .onChange(of: isActive) { _, _ in
+            handleCompactTmuxFocusRequest()
+            handleFilesRevealRequest()
+        }
         .onChange(of: liveSessionID) { oldID, _ in sessionRegistry.cancelTmuxFocus(sessionID: oldID) }
         .onDisappear { sessionRegistry.cancelTmuxFocus(sessionID: liveSessionID) }
         .statusBarHidden(true)
@@ -2526,7 +3175,7 @@ struct SessionView: View {
             enabled: appearance.programStatusEnabled,
             presented: ProgramStatusCenter.presentedTerminals(
                 isActive: isActive,
-                isObscured: showsLaunchOverlay || veilIsDrawn || (isPhone && filesPanel.isOpen)
+                isObscured: showsLaunchOverlay || veilIsDrawn || (isPhone && filesPanel.isOpen && !duoFilesDocked && !filesOpenedDocked)
                     || filesPanel.presentedPreview != nil || filesPanel.presentedShare != nil
                     || filesPanel.showingUploadPicker,
                 tmux: tmux,
@@ -2543,11 +3192,7 @@ struct SessionView: View {
                 isReady: tmux.isInitialRenderReady
             )
             if integrationScrollHarnessSuppressesFirstResponder {
-                LiveScrollForegroundProbe.registerSendAction {
-                    session.sessionCommands(tmux: tmux).sendInput(
-                        Array((LiveScrollForegroundProbe.marker + "\r").utf8)
-                    )
-                }
+                registerLiveScrollForegroundSendAction()
             }
             #endif
         }
@@ -2569,7 +3214,20 @@ struct SessionView: View {
             swipePadOutputActivityTask?.cancel()
             swipePadOutputActivityTask = nil
         }
+        .stackBoundary()
     }
+
+    #if DEBUG
+    // Kept out of the modifier chain above: inline there, this closure took
+    // Xcode 27.1's type checker past its time limit.
+    private func registerLiveScrollForegroundSendAction() {
+        LiveScrollForegroundProbe.registerSendAction {
+            session.sessionCommands(tmux: tmux).sendInput(
+                Array((LiveScrollForegroundProbe.marker + "\r").utf8)
+            )
+        }
+    }
+    #endif
 
     private var sessionDecoratedConnection: some View {
         sessionDecoratedChrome
@@ -2582,7 +3240,7 @@ struct SessionView: View {
             #endif
             // Mirror every cwd report onto the session object so
             // transport-agnostic consumers (Upload sheet) can read it.
-            filesPanel.onTerminalDirectoryChanged = { [weak session] dir in
+            filesPanel.onTerminalDirectoryChanged = { [weak session = session] dir in
                 // Change-guarded: the poller re-reports the same path
                 // every tick and the mirror is @Published now.
                 if session?.remoteWorkingDirectory != dir {
@@ -2745,6 +3403,17 @@ struct SessionView: View {
             tmux.terminalIsInAltScreen = { [terminalBox] in
                 terminalBox.view?.getTerminal().isCurrentBufferAlternate ?? false
             }
+            // The live terminal's committed grid, as the mosh view reports
+            // it. Without it the ledger compares a capture with the size this
+            // client asked tmux for, which always matches, and paints into a
+            // grid the resize settle has not committed yet: a taller pane's
+            // top rows scroll off, then the commit pulls them back below the
+            // cursor (Duo closing, then the outer display turning).
+            tmux.renderSurfaceState = { [terminalBox] surfaceID in
+                guard surfaceID == .live, let state = terminalBox.surfaceState else { return nil }
+                return (altScreen: state.altScreen, mouseMode: state.mouseMode,
+                        columns: state.columns, rows: state.rows)
+            }
             tmux.displayDidSwap = { [terminalBox, findController] windowId in
                 recordScrollDiagnostic(
                     "tmux-display-did-swap window=\(windowId.description) after=\(describeScrollPosition(for: terminalBox.view))"
@@ -2775,6 +3444,7 @@ struct SessionView: View {
             tmux.onCommandError = { message in
                 showPaneCommandError(message)
             }
+            tmux.gridAuthorityOwnedGeometryStore = TmuxOwnedGeometryFileStore.shared.store(for: session.host)
             tmux.gridAuthorityIdentity = GridAuthorityDeviceIdentity.current()
             _ = session.sessionCommands(tmux: tmux).dispatch(
                 .setTmuxGridPresentation(isPhone ? .singlePane : .paneGrid)
@@ -2921,6 +3591,8 @@ struct SessionView: View {
                     if case .connecting = state {} else { sharedChallenge = nil }
                     continue
                 case .tmuxSnapshotChanged(_, let snapshot):
+                    agentCenterV2.noteTmuxTopology(snapshot, replacing: sharedTmuxSnapshot,
+                                                   sessionID: liveSessionID, registrationID: sourceRegistrationID)
                     sharedTmuxSnapshot = snapshot
                     continue
                 case .gridAuthorityChanged:
@@ -3079,6 +3751,7 @@ struct SessionView: View {
 
             if case .connected = newState { sendConfiguredLaunchIfNeeded() }
         }
+        .stackBoundary()
     }
 
     /// Keep the PTY-generation observer behind its own opaque result boundary.
@@ -3091,6 +3764,7 @@ struct SessionView: View {
             guard newGeneration > oldGeneration else { return }
             relaunchAfterInlineTmuxPTYRecovery(generation: newGeneration)
         }
+        .stackBoundary()
     }
 
     /// Keep render-preference propagation outside the large lifecycle modifier
@@ -3116,6 +3790,7 @@ struct SessionView: View {
             // letting a later grid capture silently use the default limit.
             tmux.submitRenderFact(.scrollbackLimit(lines: lines))
         }
+        .stackBoundary()
     }
 
     /// Grid-authority edges for input: a split of the chain below, which
@@ -3141,6 +3816,7 @@ struct SessionView: View {
                 terminalBox.noteOutOfBandInput()
             }
         }
+        .stackBoundary()
     }
 
     private var sessionDecoratedLifecycle: some View {
@@ -3152,14 +3828,24 @@ struct SessionView: View {
         }
         .onDisappear {
             showEdges?.unregister(tmux, for: liveSessionID)
+            // Appearing again measures afresh.
+            forgetCompactPublication()
         }
         .onChange(of: isPhone) { _, compact in
+            // The session stays mounted across this boundary. A compact grid
+            // still waiting would otherwise overwrite the regular pane
+            // grid's own size after it published. Back in compact, its first
+            // grid goes at once (it may be measured before this runs).
+            if !compact { forgetCompactPublication() }
             _ = session.sessionCommands(tmux: tmux).dispatch(
                 .setTmuxGridPresentation(compact ? .singlePane : .paneGrid)
             )
         }
         .onChange(of: isActive) { _, nowActive in
             DiagnosticLogStore.appendSSH("latency-surface-v3 host=\(session.host.id.uuidString.prefix(8)) active=\(nowActive) transport=ssh")
+            // A grid still settling was measured under the old activity;
+            // it is this session's size now, replayed below if active.
+            if let settling = compactViewportSettle.takePending() { lastCompactViewportSize = settling }
             swipePadSessionIsActive = nowActive
             updateSwipePadAgentFocus()
             if !nowActive {
@@ -3212,6 +3898,10 @@ struct SessionView: View {
         }
         .onChange(of: session.pendingPathInjection) { _, _ in
             consumePendingPathInjection()
+        }
+        .onChange(of: modifierState.terminalTapKeyboardRequests) { _, _ in
+            guard compactFilesBinding.wrappedValue else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
         }
         .onChange(of: appPhase.isActive) { _, nowForeground in
             // App background→foreground is a SEPARATE signal from `isActive`
@@ -3389,10 +4079,48 @@ struct SessionView: View {
         .onChange(of: agentCenterV2.presentation.listSnapshot) { _, _ in
             reconcileAgentScrollNotice()
         }
+        .stackBoundary()
+    }
+
+    private var duoSessionPresentation: some View {
+        let filesCoverContext = SessionFilesSheetPolicy.coversContext(
+            presented: compactFilesBinding.wrappedValue,
+            detent: compactFilesDetent, isActive: isActive
+        )
+        return sessionDecoratedLifecycle
+            .onDuoRailEdgeChange { railEdge = $0 }
+            .modifier(DuoFilesDocking(panel: filesPanel, docked: duoFilesDocked, openedDocked: $filesOpenedDocked,
+                                      openingInPlace: $filesOpeningInPlace, show: showFilesInContext))
+            .modifier(SessionRailActionPublisher(
+                center: railActions,
+                state: railActionState,
+                actions: sessionRailActions
+            ))
+            .modifier(SessionRailSheets(
+                forwardingPresented: $railForwardingPresented,
+                continuityPresented: $railContinuityPresented,
+                manager: session.portForwarderManager,
+                continuityActions: continuityActions,
+                hostID: session.host.id,
+                sessionID: liveSessionID,
+                sessionIsActive: isActive,
+                T: activeTheme.chromeTokens(applying: appearance)
+            ))
+            .transformPreference(ArtifactCoveringSheetPreferenceKey.self) { value in
+                value = value || filesCoverContext
+            }
+            .task(id: isRailMode && isActive && appPhase.isActive
+                && !session.portForwarderManager.forwarders.isEmpty) {
+                guard isRailMode, isActive, appPhase.isActive else { return }
+                let manager = session.portForwarderManager
+                guard !manager.forwarders.isEmpty else { return }
+                await manager.monitorServices()
+            }
+            .stackBoundary()
     }
 
     var body: some View {
-        sessionDecoratedLifecycle
+        duoSessionPresentation
             .environment(\.terminalInputAllowed, authorityGatedTerminalInputAllowed)
             .environment(\.terminalKeyboardHandoff, commandPalette.keyboardHandoff)
             // P9: nothing under the veil draws once it has faded in
@@ -3798,13 +4526,42 @@ struct SessionView: View {
         MoshDiagnostics.log(
             "render-ledger inline-history-settled surface=\(surfaceID.description) depth=\(depth) size=\(historySize) canDeepen=\(canDeepen)"
         )
-        // A settle with no pending gesture only updates the record; the reader
-        // never moved, so neither should the view.
-        guard settlement.answeredRequest else { return }
         guard let box = inlineHistoryBox(for: surfaceID),
               let terminalOwner = Self.inlineRenderOwner(owner),
               box.boundOwner == terminalOwner
         else { return }
+        guard settlement.answeredRequest else {
+            // Nobody asked, but a rebuild of the reader's own pane (a resize,
+            // a font change, a repaint that could not refresh in place)
+            // emptied the transcript they were reading, and this deep capture
+            // refilled it. Put them back at their distance from the tail.
+            // After a switch to another pane they stay on its tail; with no
+            // rebuild the reader never moved, so neither does the view.
+            // A reader who typed or panned since moved on themselves, as does
+            // one who starts to while the placement converges.
+            guard let rebuilt = box.takeScrollPositionBeforeRebind(for: terminalOwner),
+                  rebuilt.keepsPane, !rebuilt.readerMoved,
+                  box.view.map({ !$0.isTracking && !$0.isDragging && !$0.isDecelerating }) ?? false
+            else { return }
+            let anchor = InlineTmuxHistoryRequestState.ScrollAnchor(
+                offsetY: rebuilt.offsetY,
+                maxOffsetY: rebuilt.maxOffsetY
+            )
+            // A taller grid can pull a reader's rows onto the screen, where
+            // their text still finds them.
+            guard anchor.distanceFromBottom > 0 || rebuilt.readerText != nil else { return }
+            placeInlineHistoryReader(
+                surfaceID: surfaceID,
+                owner: terminalOwner,
+                anchor: anchor,
+                readerText: rebuilt.readerText,
+                held: rebuilt.held,
+                awaitsGrowth: true,
+                attemptsRemaining: 8,
+                yieldsToReader: true
+            )
+            return
+        }
 
         // The bind that preceded the deep feed already emptied the buffer, so
         // the box's pre-clear snapshot — not the view — is the authority on
@@ -3832,6 +4589,8 @@ struct SessionView: View {
             surfaceID: surfaceID,
             owner: terminalOwner,
             anchor: anchor,
+            readerText: reboundSnapshot?.readerText,
+            held: reboundSnapshot?.held ?? false,
             awaitsGrowth: reboundSnapshot != nil,
             attemptsRemaining: 8
         )
@@ -3850,12 +4609,23 @@ struct SessionView: View {
     /// The feed is synchronous but its content size lands on a later layout
     /// pass, so the placement is re-applied until the transcript is actually
     /// longer than it was — or the reader takes over with a gesture.
+    /// `yieldsToReader`: a placement nobody asked for stops the moment the
+    /// reader types or scrolls, or a finger or a glide moves the view; a
+    /// deepen places its reader anyway. `readerInputs`: the box's reader
+    /// input count when the placement began.
+    /// `readerText`: what the reader saw, found again near that distance in
+    /// a page tmux rewrapped at a new width. `held`: the view held their
+    /// place through output before the bind's clear dropped the hold.
     private func placeInlineHistoryReader(
         surfaceID: SurfaceId,
         owner: TerminalRenderOwner,
         anchor: InlineTmuxHistoryRequestState.ScrollAnchor,
+        readerText: TesseraResponderAwareTerminalView.ReaderText? = nil,
+        held: Bool = false,
         awaitsGrowth: Bool,
-        attemptsRemaining: Int
+        attemptsRemaining: Int,
+        yieldsToReader: Bool = false,
+        readerInputs: Int? = nil
     ) {
         guard attemptsRemaining > 0 else { return }
         DispatchQueue.main.async {
@@ -3871,6 +4641,11 @@ struct SessionView: View {
                 )
                 return
             }
+            let startInputs = readerInputs ?? box.readerInputCount
+            if yieldsToReader, startInputs != box.readerInputCount { return }
+            if yieldsToReader, let view = box.view, view.isTracking || view.isDragging || view.isDecelerating {
+                return
+            }
             guard let view = box.view,
                   box.isReadyForOwnedPresentation,
                   !box.isAwaitingContentAfterRebind
@@ -3879,13 +4654,18 @@ struct SessionView: View {
                     surfaceID: surfaceID,
                     owner: owner,
                     anchor: anchor,
+                    readerText: readerText,
+                    held: held,
                     awaitsGrowth: awaitsGrowth,
-                    attemptsRemaining: attemptsRemaining - 1
+                    attemptsRemaining: attemptsRemaining - 1,
+                    yieldsToReader: yieldsToReader,
+                    readerInputs: startInputs
                 )
                 return
             }
             let newMaxOffsetY = max(0, view.contentSize.height - view.bounds.height)
-            let targetY = anchor.restoredOffsetY(newMaxOffsetY: newMaxOffsetY)
+            let restored = (view as? TesseraResponderAwareTerminalView)?.offsetY(restoring: anchor, text: readerText)
+            let targetY = restored?.offsetY ?? anchor.restoredOffsetY(newMaxOffsetY: newMaxOffsetY)
             // A replacement page arrives with the view sitting on the cleared
             // buffer's trivial tail; a live glide over that must not fight
             // the write.
@@ -3893,9 +4673,10 @@ struct SessionView: View {
                 view.setContentOffset(view.contentOffset, animated: false)
             }
             view.contentOffset = CGPoint(x: view.contentOffset.x, y: targetY)
+            (view as? TesseraResponderAwareTerminalView)?.onReaderPlaced?(held)
             inlineHistory.setLastScrollOffsetY(targetY, for: surfaceID)
             recordScrollDiagnostic(
-                "render-ledger inline-history-placed surface=\(surfaceID.description) target=\(Self.format(targetY)) max=\(Self.format(newMaxOffsetY)) was=\(Self.format(anchor.offsetY))/\(Self.format(anchor.maxOffsetY))"
+                "render-ledger inline-history-placed surface=\(surfaceID.description) to=\(Self.format(targetY)) max=\(Self.format(newMaxOffsetY)) was=\(Self.format(anchor.offsetY))/\(Self.format(anchor.maxOffsetY)) text=\(restored?.matched.map { $0 ? "matched" : "missed" } ?? "none")"
             )
             if findController.isOpen { findController.updateSearch() }
             // Content can still be growing; keep converging on the same
@@ -3909,8 +4690,12 @@ struct SessionView: View {
                 surfaceID: surfaceID,
                 owner: owner,
                 anchor: anchor,
+                readerText: readerText,
+                held: held,
                 awaitsGrowth: awaitsGrowth,
-                attemptsRemaining: attemptsRemaining - 1
+                attemptsRemaining: attemptsRemaining - 1,
+                yieldsToReader: yieldsToReader,
+                readerInputs: startInputs
             )
         }
     }
@@ -3919,8 +4704,12 @@ struct SessionView: View {
         surfaceID: SurfaceId,
         owner: TerminalRenderOwner,
         anchor: InlineTmuxHistoryRequestState.ScrollAnchor,
+        readerText: TesseraResponderAwareTerminalView.ReaderText?,
+        held: Bool,
         awaitsGrowth: Bool,
-        attemptsRemaining: Int
+        attemptsRemaining: Int,
+        yieldsToReader: Bool = false,
+        readerInputs: Int? = nil
     ) {
         guard attemptsRemaining > 0 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) {
@@ -3928,8 +4717,12 @@ struct SessionView: View {
                 surfaceID: surfaceID,
                 owner: owner,
                 anchor: anchor,
+                readerText: readerText,
+                held: held,
                 awaitsGrowth: awaitsGrowth,
-                attemptsRemaining: attemptsRemaining
+                attemptsRemaining: attemptsRemaining,
+                yieldsToReader: yieldsToReader,
+                readerInputs: readerInputs
             )
         }
     }
@@ -4098,6 +4891,12 @@ struct GeometryNeutralTmuxCanvasModifier: ViewModifier {
                 .onChange(of: geo.size) { _, newSize in
                     onViewportSize?(newSize)
                 }
+                // A new font changes the grid the same size holds. Measured
+                // only on size, the session never asked tmux for it, and the
+                // projection scaled the old grid back up to fill the screen.
+                .onChange(of: cellSize) { _, _ in
+                    onViewportSize?(geo.size)
+                }
             }
         } else {
             content
@@ -4151,6 +4950,12 @@ struct MoshSessionView: View {
     /// The bridge is a plain SSH connection independent of the mosh
     /// transport, shared per-host via FileBridgeRegistry.
     @State private var filesPanel = FilesPanelController()
+    @Environment(\.onboardingInputSuppressed) private var onboardingInputSuppressed
+    @Environment(\.duoPaneHidden) private var duoPaneHidden
+    /// A modal walkthrough, or a Duo pane that the other's full screen hides:
+    /// the mounted terminal must neither hold nor reclaim the keyboard.
+    private var terminalInputSuppressed: Bool { onboardingInputSuppressed || duoPaneHidden }
+    @Environment(\.openArtifact) private var openArtifact
     @State private var tmux = TmuxController(
         controlPath: .sideChannel,
         clientSizePolicy: .resizeTmux,
@@ -4215,6 +5020,7 @@ struct MoshSessionView: View {
     @State private var agentScrollNotice = AgentScrollPreventionNoticeController()
     @State private var lastTerminalSize: (cols: Int, rows: Int)?
     @State private var lastCompactViewportSize: (cols: Int, rows: Int)?
+    @State private var compactViewportSettle = CompactViewportSettle()
     @State private var lastCompactRequestedClientSize: (cols: Int, rows: Int)?
     @State private var compactReprojectionMemo = TmuxCompactReprojectionMemo()
     @State private var resolvedTmuxSessionName: String?
@@ -4312,6 +5118,28 @@ struct MoshSessionView: View {
     @Environment(HostTerminalBackgroundStore.self) private var hostBackgrounds
     @Environment(\.designTokens) private var appDesignTokens
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(SessionRailActionCenter.self) private var railActions: SessionRailActionCenter?
+    @Environment(\.duoFilesDocked) private var duoFilesDocked
+    @Environment(\.duoShowFilesInContext) private var duoShowFilesInContext
+    @Environment(\.duoLeaveFilesInContext) private var duoLeaveFilesInContext
+    /// Traded below the context on the laptop's desk: a plain session.
+    @Environment(\.duoSessionOnTheDesk) private var onTheDesk
+    @State private var railEdge: HorizontalEdge?
+    @State private var railForwardingPresented = false
+    @State private var railContinuityPresented = false
+    @State private var inputFold: DuoFold?
+    /// The laptop bar's seat for the swipe pad's puck, globally.
+    @State private var puckDock: CGRect?
+    /// The fold's top, globally, while a context takes this session's desk:
+    /// floating chrome keeps above it.
+    @State private var deskFloor: CGFloat?
+    @State private var compactFilesDetent: PresentationDetent = .medium
+    @State private var filesOpenedDocked = false
+    /// The panel is opening where the context shows files already.
+    @State private var filesOpeningInPlace = false
+    @State private var railSwitcher = SessionRailSwitcher()
+
+    private var inputDeckExpanded: Bool { isPhone && !onTheDesk && inputFold?.splitsSideBySide == false }
 
     private var activeTheme: TerminalTheme {
         TerminalTheme.find(id: appearance.terminalThemeID)
@@ -4321,11 +5149,166 @@ struct MoshSessionView: View {
         CompactLayout.isPhone(horizontalSizeClass)
     }
 
+    private var isRailMode: Bool { isPhone && railEdge != nil }
+
+    private var sessionTopBarHeight: CGFloat {
+        SessionTopBar.reservedHeight(
+            pillHeight: appearance.topBarHeight,
+            compact: isPhone,
+            railMode: isRailMode
+        )
+    }
+
+    private var railCanCreateTmuxWindow: Bool {
+        SessionRailPolicy.canCreateTmuxWindow(
+            controlActive: tmux.mode == .tmuxControl,
+            degraded: isTmuxDegraded,
+            hasWindows: !tmux.windows.isEmpty,
+            controlledElsewhere: tmux.gridAuthority.isPeer
+        )
+    }
+
+    private var sessionRailActions: SessionRailActions {
+        SessionRailActions(
+            sessionID: liveSessionID,
+            canCreateTmuxWindow: railCanCreateTmuxWindow,
+            findOpen: findController.isOpen,
+            filesOpen: filesPanel.isOpen,
+            hasForwarding: !session.portForwarderManager.forwarders.isEmpty,
+            hasContinuity: continuityActions != nil,
+            filesPanel: filesPanel,
+            filesConnectUnprompted: filesConnectUnprompted,
+            openFilesInPlace: openFilesInPlace,
+            openSwitcher: { railSwitcher.open() },
+            createTmuxWindow: {
+                guard railCanCreateTmuxWindow else { return }
+                appLockController.notifyUserActivity()
+                _ = session.sessionCommands(tmux: tmux).dispatch(.createTmuxWindow)
+            },
+            toggleFind: {
+                guard !tmux.gridAuthority.isPeer else { return }
+                findController.isOpen ? findController.close() : findController.open()
+            },
+            toggleFiles: toggleFilesPanel,
+            showForwarding: { railForwardingPresented = true },
+            showContinuity: { railContinuityPresented = true },
+            disconnect: {
+                terminalBox.dismissTransientInteractions()
+                onUserClosedSession()
+                session.sessionCommands.disconnect()
+            }
+        )
+    }
+
+    private var railActionState: SessionRailActionState {
+        let actions = sessionRailActions
+        return SessionRailActionState(
+            sessionID: liveSessionID,
+            isActive: isActive,
+            canCreateTmuxWindow: actions.canCreateTmuxWindow,
+            findOpen: actions.findOpen,
+            filesOpen: actions.filesOpen,
+            filesConnectUnprompted: actions.filesConnectUnprompted,
+            filesDocked: duoFilesDocked,
+            hasForwarding: actions.hasForwarding,
+            hasContinuity: actions.hasContinuity,
+            sourceIdentity: ObjectIdentifier(session),
+            forwarderIdentity: ObjectIdentifier(session.portForwarderManager)
+        )
+    }
+
+    /// Only the folded deck shows replies, so only it asks.
+    private var duoAgentWaiting: Bool {
+        inputDeckExpanded
+            && agentCenterV2.swipePadContext(sessionID: liveSessionID).snapshot?.prompt?.options.isEmpty == false
+    }
+
+    private var duoAgentReplies: some View {
+        let context = agentCenterV2.swipePadContext(sessionID: liveSessionID)
+        let displayed = context.snapshot
+        return DuoAgentRepliesRow(prompt: displayed?.prompt) { option in
+            let allowed = isActive && presentationSessionState == .connected
+                && !showsLaunchOverlay && !terminalInputGatedByAuthority
+                && inheritedTerminalInputAllowed()
+            if allowed {
+                appLockController.notifyUserActivity()
+                invalidateMoshScrollbackForTerminalInput(reason: "agent-reply")
+            }
+            SessionDuoInput.reply(
+                option, displayed: displayed, context: context,
+                box: terminalBox, allowed: allowed
+            )
+        }
+        .environment(\.designTokens, activeTheme.chromeTokens(applying: appearance))
+        .allowsHitTesting(!sessionIsControlledElsewhere)
+    }
+
+    private var terminalDropEnabled: Bool {
+        TerminalDropPayload.isEnabled(
+            connected: presentationSessionState == .connected,
+            showsLaunchOverlay: showsLaunchOverlay,
+            authorityGated: terminalInputGatedByAuthority || !inheritedTerminalInputAllowed(),
+            isActive: isActive
+        )
+    }
+
+    private var terminalDropIdentity: TerminalDropIdentity {
+        TerminalDropIdentity(
+            sessionID: liveSessionID, carrier: ObjectIdentifier(session),
+            windowID: tmux.activeWindowId?.rawValue, paneID: tmux.activePaneId?.rawValue,
+            inputBox: ObjectIdentifier(terminalBox)
+        )
+    }
+
+    private func pasteDroppedText(_ text: String) {
+        appLockController.notifyUserActivity()
+        SessionDuoInput.paste(
+            text,
+            into: terminalBox,
+            allowed: isActive && presentationSessionState == .connected
+                && !showsLaunchOverlay && !terminalInputGatedByAuthority
+                && inheritedTerminalInputAllowed()
+        )
+    }
+
+    private func uploadDroppedFiles(_ urls: [URL]) {
+        guard terminalDropEnabled else {
+            TerminalDropStaging.discard(urls)
+            terminalDropFailure = nil
+            return
+        }
+        appLockController.notifyUserActivity()
+        terminalDropFailure = nil
+        let bridge = fileBridges.bridge(
+            for: session.host,
+            requireBiometric: session.requireBiometric,
+            isSecureEnclave: session.isSecureEnclave
+        )
+        let queue = fileBridges.transferQueue(for: bridge)
+        FilesPanelController.handleTerminalDrop(
+            stagedURLs: urls,
+            queue: queue,
+            inject: { path in
+                await awaitOwnAuthorityTransition()
+                guard presentationSessionState == .connected, !showsLaunchOverlay else {
+                    copyUndeliveredPathToClipboard(path, refusedByAuthority: false)
+                    return
+                }
+                typeRemotePath(path, suffix: " ")
+            },
+            reportFailure: { message in
+                terminalDropFailure = message
+                DiagnosticLogStore.appendApp("terminal-drop failed: \(message)")
+            }
+        )
+    }
+
     /// Bottom inset for chrome that stacks above the accessory bar. Measured
     /// from the bar's reserved band, so the swipe pad clears the phone's
     /// home-indicator strip as well as the chip row.
     private var swipePadBottomInset: CGFloat {
-        appearance.showAccessoryBar
+        // Seated in the bar, the puck's canvas runs to the bottom.
+        puckDock != nil ? 0 : appearance.showAccessoryBar
             ? SessionAccessoryBar.reservedBandHeight()
             : max(SessionView.cornerInset - 8, 4)
     }
@@ -4390,9 +5373,38 @@ struct MoshSessionView: View {
     private func toggleFilesPanel() {
         terminalBox.dismissTransientInteractions()
         if filesPanel.isOpen {
+            // Docked, the context's files slot would only open it again:
+            // the context goes back to its last tab, which closes it.
+            if let duoLeaveFilesInContext {
+                duoLeaveFilesInContext(liveSessionID)
+                return
+            }
             withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
             return
         }
+        openFilesPanel(animated: true)
+    }
+
+    private var filesConnectUnprompted: Bool {
+        DuoContextPolicy.filesConnectUnprompted(
+            terminalConnected: session.state == .connected,
+            keyFaceIDEnabled: appearance.requireBiometricForKeyUse,
+            sessionNeedsFaceID: session.requireBiometric,
+            hasJumpChain: !session.host.jumpChain.isEmpty
+        )
+    }
+
+    /// The context shows the files slot already: the panel takes it, and the
+    /// context and the keyboard stay as they are. False when it cannot dock.
+    private func openFilesInPlace() -> Bool {
+        guard duoFilesDocked else { return false }
+        guard !filesPanel.isOpen else { return true }
+        filesOpeningInPlace = true
+        openFilesPanel(animated: false)
+        return true
+    }
+
+    private func openFilesPanel(animated: Bool) {
         configureFilesPanelIfNeeded()
         if tmux.mode == .tmuxControl {
             filesPanel.terminalReportedDirectory(tmux.activePaneCurrentPath)
@@ -4400,7 +5412,13 @@ struct MoshSessionView: View {
             filesPanel.terminalReportedDirectory(dir)
         }
         filesPanel.transfers?.acknowledgeBackgroundAttention()
-        withAnimation(.easeInOut(duration: 0.2)) { filesPanel.open() }
+        withAnimation(animated ? .easeInOut(duration: 0.2) : nil) { filesPanel.open() }
+    }
+
+    /// The docked panel in the context pane, which the keyboard may be
+    /// covering: it goes, as for an artifact opened there.
+    private func showFilesInContext() {
+        duoShowFilesInContext?(liveSessionID)
     }
 
     private var fileTransferAttention: BackgroundTransferAttention {
@@ -4410,9 +5428,27 @@ struct MoshSessionView: View {
 
     private var compactMoshFilesBinding: Binding<Bool> {
         Binding(
-            get: { isPhone && filesPanel.isOpen },
+            get: { isPhone && filesPanel.isOpen && !duoFilesDocked && !filesOpenedDocked },
             set: { if !$0 { filesPanel.close() } }
         )
+    }
+
+    /// Files and terminal selections share the saved-host identity, with
+    /// distinct origins and the live session only as an opening hint.
+    private func artifactFileOpener(origin: ArtifactOpenOrigin) -> ((RemoteFileEntry) -> Void)? {
+        guard let openArtifact else { return nil }
+        let hostID = filesPanel.bridge?.key.hostID ?? session.host.id
+        let sessionID = liveSessionID
+        return { [weak filesPanel, weak terminalView = terminalBox.view] entry in
+            filesPanel?.close()
+            _ = terminalView?.resignFirstResponder()
+            openArtifact(ArtifactOpenRequest(
+                hostID: hostID,
+                target: .file(path: entry.path),
+                origin: origin,
+                sessionID: sessionID
+            ))
+        }
     }
 
     /// Bridge/handler wiring shared by the panel toggle and the §3
@@ -4430,6 +5466,7 @@ struct MoshSessionView: View {
                 hostFolderName: session.host.name
             )
         }
+        filesPanel.onOpenInArtifacts = artifactFileOpener(origin: .files)
         // Plain-mosh cwd comes from the bridge poller (below), not from
         // OSC 7 — a stock mosh-server drops OSC 7 server-side before it
         // ever reaches the state sync, so the shell-integration CTA
@@ -4490,6 +5527,23 @@ struct MoshSessionView: View {
     ) {
         guard presentationSessionState == .connected, !showsLaunchOverlay else { return }
         appLockController.notifyUserActivity()
+        let selection = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if action == .quickLook, case .remoteLoopback = ArtifactsLinkClassifier.classify(selection) {
+            if let openArtifact,
+               let savedHostID = sessionRegistry.session(for: liveSessionID)?.persistedHostID,
+               let request = ArtifactTerminalLinkRouting.request(
+                   for: selection,
+                   hostID: filesPanel.bridge?.key.hostID ?? savedHostID,
+                   sessionID: liveSessionID,
+                   canOpenArtifact: true
+               ) {
+                _ = terminalBox.view?.resignFirstResponder()
+                openArtifact(request)
+            } else if let url = URL(string: selection) {
+                UIApplication.shared.open(url)
+            }
+            return
+        }
         configureFilesPanelIfNeeded()
         let cwd: String? = tmux.mode == .tmuxControl
             ? tmux.activePaneCurrentPath
@@ -4497,7 +5551,8 @@ struct MoshSessionView: View {
         filesPanel.openTerminalPath(
             text,
             cwd: cwd,
-            intent: action == .quickLook ? .quickLook : .reveal
+            intent: action == .quickLook ? .openInArtifacts : .reveal,
+            openInArtifacts: artifactFileOpener(origin: .terminalSelection)
         ) { message in
             terminalDropFailure = message
         }
@@ -4506,39 +5561,6 @@ struct MoshSessionView: View {
     /// Failed terminal drops surface here (the drop modifier's toast) —
     /// the panel and its error banner may be CLOSED during a drop.
     @State private var terminalDropFailure: String?
-
-    /// Drop-on-terminal, mosh variant: same temp-upload + quoted-path
-    /// injection, routed like consumePendingPathInjection (the mosh
-    /// transport, as keys go).
-    private func handleTerminalDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard presentationSessionState == .connected,
-              !showsLaunchOverlay,
-              !terminalInputGatedByAuthority
-        else { return false }
-        let bridge = fileBridges.bridge(
-            for: session.host,
-            requireBiometric: session.requireBiometric,
-            isSecureEnclave: session.isSecureEnclave
-        )
-        let queue = fileBridges.transferQueue(for: bridge)
-        return FilesPanelController.handleTerminalDrop(
-            providers,
-            queue: queue,
-            inject: { path in
-                await awaitOwnAuthorityTransition()
-                // The upload outlived the connection: keep the path.
-                guard presentationSessionState == .connected, !showsLaunchOverlay else {
-                    copyUndeliveredPathToClipboard(path, refusedByAuthority: false)
-                    return
-                }
-                typeRemotePath(path, suffix: " ")
-            },
-            reportFailure: { message in
-                terminalDropFailure = message
-                DiagnosticLogStore.appendApp("terminal-drop failed: \(message)")
-            }
-        )
-    }
 
     /// Identity for the cwd-poll task; see RemoteCwdPoller.taskKey.
     private var moshCwdPollKey: String {
@@ -4597,14 +5619,11 @@ struct MoshSessionView: View {
     /// clipboard with a message instead of vanishing.
     private func typeRemotePath(_ path: String, suffix: String = "") {
         let bytes = Array((FilesPanelController.shellQuoted(path) + suffix).utf8)
-        terminalBox.noteOutOfBandInput()
-        session.sessionCommands(tmux: tmux).sendInputAcknowledged(bytes) { delivery in
-            switch delivery {
-            case .sent: break
-            case .refused: copyUndeliveredPathToClipboard(path, refusedByAuthority: true)
-            case .dropped: copyUndeliveredPathToClipboard(path, refusedByAuthority: false)
-            }
-        }
+        session.sessionCommands(tmux: tmux).sendInputAcknowledged(bytes, completion: SessionDuoInput.typePath(
+            into: [terminalBox],
+            onSent: { invalidateMoshScrollbackForTerminalInput(reason: "typed-path") },
+            onUndelivered: { copyUndeliveredPathToClipboard(path, refusedByAuthority: $0) }
+        ))
     }
 
     /// Whether typing waits on our own resume or take-back, which ends in
@@ -4677,12 +5696,13 @@ struct MoshSessionView: View {
             T: activeTheme.chromeTokens(applying: appearance),
             onOpenAgentCenter: onOpenAgentCenter,
             continuityActions: continuityActions,
-            onTmuxPaneMutation: showMoshPaneChromeTopMask
+            onTmuxPaneMutation: showMoshPaneChromeTopMask,
+            railMode: isRailMode,
+            terminalColumns: compactMoshWindowRect?.width ?? lastTerminalSize?.cols,
+            terminalRows: compactMoshWindowRect?.height ?? lastTerminalSize?.rows,
+            railSwitcher: railSwitcher
         )
-        .frame(height: SessionTopBar.reservedHeight(
-            pillHeight: appearance.topBarHeight,
-            compact: isPhone
-        ))
+        .frame(height: sessionTopBarHeight)
         .zIndex(2))
     }
 
@@ -4727,6 +5747,363 @@ struct MoshSessionView: View {
         }
     }
 
+    private var sessionTerminalContent: some View {
+        ZStack {
+            moshTerminalSurface
+            .modifier(GeometryNeutralTmuxCanvasModifier(
+                windowRect: compactMoshWindowRect,
+                focusRect: compactMoshFocusRect,
+                cellSize: compactMoshCellSize,
+                onViewportSize: updateCompactMoshViewport
+            ))
+            .allowsHitTesting(!showsLaunchOverlay)
+            .opacity(showsLaunchOverlay ? 0 : 1)
+            .animation(
+                // Sequential dissolve — overlay fades out first
+                // (0.25 s), then terminal fades in (0.3 s).
+                showsLaunchOverlay
+                    ? .linear(duration: 0)
+                    : .easeInOut(duration: 0.30).delay(0.25),
+                value: showsLaunchOverlay
+            )
+
+            if !isPhone, !showsLaunchOverlay {
+                // Keep both cached UIKit views mounted under stable IDs.
+                // Retaining only the runtime would recreate SwiftTerm
+                // when SwiftUI swaps the active subtree back in.
+                ForEach([moshPaneScrollbackOverlay, moshDormantScrollbackOverlay].compactMap { $0 }, id: \.id) { overlay in
+                    if let frame = moshPaneScrollbackFrame(for: overlay.paneId) {
+                        MoshPaneScrollbackOverlay(
+                            runtime: overlay,
+                            paneFrame: frame.surfaceFrame,
+                            terminalBackground: resolvedTerminalBackground,
+                            backdropBaseColor: activeTheme.bg,
+                            backdropBleed: moshOverlayBackdropBleed,
+                            onReady: {
+                                applyPendingMoshPaneScrollbackOverlayOffset()
+                                restorePendingMoshWindowModesAfterHistory(
+                                    surfaceID: moshOverlaySurfaceID(overlay.paneId)
+                                )
+                            },
+                            onTerminalScrolled: handleMoshPaneScrollbackOverlayScrolled,
+                            onReaderScrolled: handleMoshPaneScrollbackOverlayReaderMoved,
+                            onScrollDiagnostic: { message in
+                                recordMoshScrollDiagnostic(message)
+                            },
+                            agentScrollBlockingActive:
+                                agentScrollPrevention(paneID: overlay.paneId.rawValue) != nil,
+                            onAgentScrollBlocked: {
+                                presentAgentScrollPrevention(paneID: overlay.paneId.rawValue)
+                            }
+                        )
+                        .id(overlay.id)
+                        // Invisible until its first capture has been fed: the
+                        // surface must MOUNT immediately (feeding a not-yet-
+                        // laid-out terminal wraps the capture at the interim
+                        // tiny column count, and SwiftTerm doesn't reflow on
+                        // resize), but painting it black over the live pane
+                        // for the whole capture round trip reads as a black
+                        // flash — so it mounts hidden and appears with content.
+                        .opacity(overlay.id == moshOverlayContentReadyId ? 1 : 0)
+                        // Only a REVEALED overlay may take (scroll-only) hits —
+                        // a hidden/parked one must never intercept anything.
+                        // Once visible, trackpad pans land on the overlay's own
+                        // scroll view and scroll natively; clicks fall through
+                        // via the container's scroll-only hitTest.
+                        .allowsHitTesting(overlay.id == moshOverlayContentReadyId)
+                        .modifier(GeometryNeutralTmuxCanvasModifier(
+                            windowRect: compactMoshWindowRect,
+                            focusRect: compactMoshFocusRect,
+                            cellSize: compactMoshCellSize
+                        ))
+                    }
+                }
+            }
+
+            // Alt-screen pans get a local scroll surface to move from
+            // event 1 (htop scroll feel — see the proxy view's doc).
+            // Mutually exclusive with a revealed scrollback overlay:
+            // an alt-screen pane never reveals one (capture skips
+            // alt-screen), and the proxy unmounts the moment the
+            // cached pane state says primary.
+            if !showsLaunchOverlay,
+               agentScrollPrevention(paneID: activeAgentScrollPaneID) == nil,
+               let proxyTarget = moshAltScreenScrollProxyTarget {
+                MoshAltScreenScrollProxy(onScrollDelta: { delta in
+                    handleMoshAltScreenProxyScroll(
+                        paneId: proxyTarget.paneId,
+                        pointsY: delta
+                    )
+                })
+                .frame(
+                    width: proxyTarget.frame.width,
+                    height: proxyTarget.frame.height
+                )
+                .offset(x: proxyTarget.frame.minX, y: proxyTarget.frame.minY)
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .topLeading
+                )
+                .modifier(GeometryNeutralTmuxCanvasModifier(
+                    windowRect: compactMoshWindowRect,
+                    focusRect: compactMoshFocusRect,
+                    cellSize: compactMoshCellSize
+                ))
+            }
+
+            // Mosh paints split pane contents natively in the shared
+            // terminal, but Tessera owns the pane chrome so SSH and
+            // mosh splits look and tap the same.
+            if !isPhone,
+               !showsLaunchOverlay,
+               let snapshot = moshPaneChromeSnapshot(),
+               let cellSize = moshCellSize {
+                let frames = moshPaneChromeFrames(
+                    for: snapshot,
+                    cellSize: cellSize
+                )
+                MoshPaneChromeOverlay(
+                    root: snapshot.layout.root,
+                    frames: frames,
+                    titles: moshPaneChromeTitles(
+                        for: frames,
+                        snapshot: snapshot
+                    ),
+                    cellSize: cellSize,
+                    activePaneId: snapshot.activePaneId,
+                    chrome: activeTheme.chromeTokens(applying: appearance),
+                    backgroundColor: activeTheme.bg,
+                    terminalBackground: resolvedTerminalBackground,
+                    backdropBleed: moshOverlayBackdropBleed
+                )
+            }
+
+            if !isPhone,
+               !showsLaunchOverlay,
+               let cellSize = moshCellSize,
+               shouldShowMoshPaneChromeTopMask
+                || !moshPaneChromeCollapseMaskFrames(cellSize: cellSize).isEmpty {
+                let collapseFrames = moshPaneChromeCollapseMaskFrames(cellSize: cellSize)
+                GeometryReader { geo in
+                    let topMaskRects: [CGRect] = shouldShowMoshPaneChromeTopMask
+                        ? [CGRect(
+                            x: 0,
+                            y: 0,
+                            width: geo.size.width,
+                            height: ceil(cellSize.height) + 1
+                        )]
+                        : []
+                    moshChromeTransitionMask(rects: topMaskRects + collapseFrames)
+                }
+                .allowsHitTesting(false)
+            }
+
+            if showsLaunchOverlay {
+                SessionLaunchOverlay(
+                    T: activeTheme.chromeTokens(applying: appearance),
+                    phase: launchPhase,
+                    subtitle: launchSubtitle,
+                    wslTailscaleMTUWarning: session.wslTailscaleMTUWarning,
+                    failureReason: launchFailureReason,
+                    onEditHost: onEditHost,
+                    onRetry: onRetry,
+                    onBack: {
+                        // The stall notice puts this button up while
+                        // the bootstrap is still running, so leaving
+                        // has to tear it down: a bootstrap left to
+                        // finish has already spawned a `mosh-server`
+                        // on the host with nothing left to reach it.
+                        onUserClosedSession()
+                        onSessionEnded()
+                        session.sessionCommands.disconnect()
+                    },
+                    reconnectingElsewhere: reconnectingElsewhere
+                )
+                .transition(.opacity)
+                .zIndex(1)
+            }
+
+            // Continuity takeover veil: another device holds the grid.
+            // Requires `.connected`, so mosh transport loss falls back
+            // to the existing reconnect presentation.
+            if let peerName = effectiveGridAuthorityPeerName, veilIsDrawn {
+                ContinuedElsewhereOverlay(
+                    T: activeTheme.chromeTokens(applying: appearance),
+                    peerDisplayName: peerName,
+                    isReclaiming: gridAuthorityPresentation.isReclaiming,
+                    awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
+                    // Focus only the displayed, unlocked veil: hidden
+                    // tabs keep theirs mounted at opacity 0, and the
+                    // app lock covers a still-mounted ContentView.
+                    capturesKeys: ContinuedElsewhereKeyPolicy.admitsGesture(
+                        sessionIsActive: isActive,
+                        appIsLocked: appLockController.isLocked
+                    ),
+                    animatesMotion: ContinuedElsewherePresentationPolicy.breathes(
+                        displayed: ContinuedElsewhereKeyPolicy.admitsGesture(
+                            sessionIsActive: isActive,
+                            appIsLocked: appLockController.isLocked
+                        ),
+                        appIsActive: appPhase.isActive
+                    ),
+                    onTakeBack: takeBackContinuedSession,
+                    onCancel: cancelPendingGridAuthorityIntent,
+                    // ⌘⇧J / ⌘⇧K keep working while yielded: switching
+                    // sessions changes what is on screen here, never
+                    // what the peer's terminal receives. Only the
+                    // foreground session registers them — a background
+                    // session stays mounted (opacity 0) and its veil
+                    // would otherwise claim the same chords and step
+                    // from the wrong place in the list.
+                    onSwitcherShortcut: isActive
+                        ? { shortcut in
+                            appLockController.notifyUserActivity()
+                            handleSwitcherShortcut(shortcut)
+                        }
+                        : nil
+                )
+                .transition(.opacity)
+                .zIndex(2)
+            }
+
+            // A show resolving: the terminal stays visible (no veil
+            // flash on resume); only input waits for the read.
+            if gridAuthorityPresentation.isResuming,
+               !showsLaunchOverlay {
+                GridAuthorityResumingIndicator(
+                    T: activeTheme.chromeTokens(applying: appearance),
+                    awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
+                    onCancel: cancelPendingGridAuthorityIntent
+                )
+                .transition(.opacity)
+                .zIndex(3)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(
+            .easeInOut(duration: ContinuedElsewherePresentationPolicy.veilFadeDuration),
+            value: sessionIsControlledElsewhere
+        )
+        .terminalDropTarget(
+            isEnabled: terminalDropEnabled,
+            target: { terminalDropIdentity },
+            failureMessage: $terminalDropFailure,
+            onText: pasteDroppedText,
+            onFiles: uploadDroppedFiles
+        )
+        .modifier(SessionTerminalDropFailure(
+            T: activeTheme.chromeTokens(applying: appearance),
+            message: $terminalDropFailure
+        ))
+        // §3 terminal Quick Look with the panel closed: the
+        // panel hosts presentedPreview only while open, so this
+        // fallback presents it otherwise. The binding nils itself
+        // while the panel is open — exactly one host at a time by
+        // construction. Size (sheet vs full screen) is the user's
+        // persisted choice, applied identically on both hosts.
+        .quickLookPreview(item: Binding(
+            get: { filesPanel.isOpen ? nil : filesPanel.presentedPreview },
+            set: { filesPanel.presentedPreview = $0 }
+        ))
+        .sheet(isPresented: compactMoshFilesBinding, onDismiss: { compactFilesDetent = .medium }) {
+            FilesPanelView(
+                controller: filesPanel,
+                T: filesPanelTokens,
+                sessionIsActive: isActive,
+                terminalBackground: nil
+            )
+            .presentationDetents([.medium, .large], selection: $compactFilesDetent)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(filesPanelTokens.presentationBg)
+            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
+        // Remote Files panel floats as an overlay over the
+        // terminal — same as the SSH view. No trailing padding,
+        // so the terminal keeps full width and toggling never
+        // triggers a mosh SSP / tmux refresh-client resize. A
+        // transparent tap-catcher behind the card dismisses the
+        // panel when the user taps the terminal, like the sidebar.
+        .overlay(alignment: .trailing) {
+            if filesPanel.isOpen, !isPhone {
+                ZStack(alignment: .trailing) {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
+                        }
+                    FilesPanelView(
+                        controller: filesPanel,
+                        T: activeTheme.chromeTokens(applying: appearance),
+                        sessionIsActive: isActive,
+                        terminalBackground: resolvedTerminalBackground
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+        }
+        .padding(.horizontal, isPhone ? 4 : SessionView.cornerInset)
+        .duoDeckCaretLift(isActive: isActive, caretClearance: terminalCaretClearance)
+        .terminalKeyboardCaretShift()
+        .stackBoundary()
+    }
+
+    /// Where the caret sits for the keyboard and Duo's bar to clear.
+    private func terminalCaretClearance() -> TerminalCaretClearance? {
+        // mosh paints every pane into this one surface, so its caret is
+        // the caret in all layouts — no grid case to exclude. Find
+        // still is one: it scrolls to a match rather than to the caret,
+        // so the whole grid has to clear the keyboard.
+        guard !findController.isOpen else { return nil }
+        return terminalBox.caretClearance(
+            cellHeight: terminalCaretCellHeight(
+                fontID: appearance.terminalFontID,
+                fontSize: appearance.fontSize
+            ),
+            mouseReportingImpliesAltScreen: tmux.mode != .tmuxControl
+        )
+    }
+
+    @ViewBuilder
+    private var sessionInputDeck: some View {
+        if appearance.showAccessoryBar {
+            SessionAccessoryBar(
+                accent: appearance.tokens(systemColorScheme: .dark).accent,
+                modifierState: modifierState,
+                onSend: { bytes in
+                    guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
+                        // Refused bytes never reach the PTY: drop the UIKit input
+                        // mirror so later edits cannot delete what it believes was typed.
+                        terminalBox.noteOutOfBandInput()
+                        return
+                    }
+                    appLockController.notifyUserActivity()
+                    invalidateMoshScrollbackForTerminalInput(reason: "accessory-input")
+                    session.sessionCommands.sendInput(bytes)
+                    terminalBox.noteOutOfBandTyping()
+                },
+                applicationCursor: { [terminalBox] in
+                    terminalBox.view?.getTerminal().applicationCursor ?? false
+                },
+                onPageScrollAttempt: { _ in
+                    guard agentScrollPrevention(
+                        paneID: activeAgentScrollPaneID
+                    ) != nil else { return false }
+                    presentAgentScrollPrevention(
+                        paneID: activeAgentScrollPaneID
+                    )
+                    return true
+                },
+                customShortcutApplies: shouldFire,
+                spansKeyboard: isActive,
+                attention: duoAgentWaiting
+            )
+            .allowsHitTesting(!sessionIsControlledElsewhere)
+            .opacity(sessionIsControlledElsewhere ? 0.45 : 1)
+        }
+    }
+
     private var moshDecoratedLayerStack: some View {
         ZStack(alignment: .top) {
             activeTheme.bg.ignoresSafeArea()
@@ -4762,333 +6139,39 @@ struct MoshSessionView: View {
                 // the chrome group draws above the terminal it now overlaps.
                 .zIndex(2)
 
-                ZStack {
-                    moshTerminalSurface
-                    .modifier(GeometryNeutralTmuxCanvasModifier(
-                        windowRect: compactMoshWindowRect,
-                        focusRect: compactMoshFocusRect,
-                        cellSize: compactMoshCellSize,
-                        onViewportSize: updateCompactMoshViewport
-                    ))
-                    .allowsHitTesting(!showsLaunchOverlay)
-                    .opacity(showsLaunchOverlay ? 0 : 1)
-                    .animation(
-                        // Sequential dissolve — overlay fades out first
-                        // (0.25 s), then terminal fades in (0.3 s).
-                        showsLaunchOverlay
-                            ? .linear(duration: 0)
-                            : .easeInOut(duration: 0.30).delay(0.25),
-                        value: showsLaunchOverlay
-                    )
-
-                    if !isPhone, !showsLaunchOverlay {
-                        // Keep both cached UIKit views mounted under stable IDs.
-                        // Retaining only the runtime would recreate SwiftTerm
-                        // when SwiftUI swaps the active subtree back in.
-                        ForEach([moshPaneScrollbackOverlay, moshDormantScrollbackOverlay].compactMap { $0 }, id: \.id) { overlay in
-                            if let frame = moshPaneScrollbackFrame(for: overlay.paneId) {
-                                MoshPaneScrollbackOverlay(
-                                    runtime: overlay,
-                                    paneFrame: frame.surfaceFrame,
-                                    terminalBackground: resolvedTerminalBackground,
-                                    backdropBaseColor: activeTheme.bg,
-                                    backdropBleed: moshOverlayBackdropBleed,
-                                    onReady: {
-                                        applyPendingMoshPaneScrollbackOverlayOffset()
-                                        restorePendingMoshWindowModesAfterHistory(
-                                            surfaceID: moshOverlaySurfaceID(overlay.paneId)
-                                        )
-                                    },
-                                    onTerminalScrolled: handleMoshPaneScrollbackOverlayScrolled,
-                                    onScrollDiagnostic: { message in
-                                        recordMoshScrollDiagnostic(message)
-                                    },
-                                    agentScrollBlockingActive:
-                                        agentScrollPrevention(paneID: overlay.paneId.rawValue) != nil,
-                                    onAgentScrollBlocked: {
-                                        presentAgentScrollPrevention(paneID: overlay.paneId.rawValue)
-                                    }
-                                )
-                                .id(overlay.id)
-                                // Invisible until its first capture has been fed: the
-                                // surface must MOUNT immediately (feeding a not-yet-
-                                // laid-out terminal wraps the capture at the interim
-                                // tiny column count, and SwiftTerm doesn't reflow on
-                                // resize), but painting it black over the live pane
-                                // for the whole capture round trip reads as a black
-                                // flash — so it mounts hidden and appears with content.
-                                .opacity(overlay.id == moshOverlayContentReadyId ? 1 : 0)
-                                // Only a REVEALED overlay may take (scroll-only) hits —
-                                // a hidden/parked one must never intercept anything.
-                                // Once visible, trackpad pans land on the overlay's own
-                                // scroll view and scroll natively; clicks fall through
-                                // via the container's scroll-only hitTest.
-                                .allowsHitTesting(overlay.id == moshOverlayContentReadyId)
-                                .modifier(GeometryNeutralTmuxCanvasModifier(
-                                    windowRect: compactMoshWindowRect,
-                                    focusRect: compactMoshFocusRect,
-                                    cellSize: compactMoshCellSize
-                                ))
+                DuoFoldedInputLayout(
+                    isEnabled: isPhone && !onTheDesk, fold: inputFold,
+                    bar: DuoDeckBar(appearance), publishesDesk: isActive
+                ) {
+                    sessionTerminalContent
+                } deck: {
+                    sessionInputDeck
+                } desk: {
+                    if isPhone && inputDeckExpanded { duoAgentReplies }
+                }
+                // Observed here, the fold is in the deck's own coordinates, and
+                // the keyboard layout reads the same state in the same pass.
+                // On the desk the fold lies above the session, which keeps the
+                // fold it had on top for its return; a fresh reader reports
+                // the pose as it is then.
+                .background {
+                    if !onTheDesk {
+                        Color.clear
+                            .onKeyboardUnliftedDuoFoldChange { fold in
+                                if inputFold != fold { inputFold = fold }
                             }
-                        }
-                    }
-
-                    // Alt-screen pans get a local scroll surface to move from
-                    // event 1 (htop scroll feel — see the proxy view's doc).
-                    // Mutually exclusive with a revealed scrollback overlay:
-                    // an alt-screen pane never reveals one (capture skips
-                    // alt-screen), and the proxy unmounts the moment the
-                    // cached pane state says primary.
-                    if !showsLaunchOverlay,
-                       agentScrollPrevention(paneID: activeAgentScrollPaneID) == nil,
-                       let proxyTarget = moshAltScreenScrollProxyTarget {
-                        MoshAltScreenScrollProxy(onScrollDelta: { delta in
-                            handleMoshAltScreenProxyScroll(
-                                paneId: proxyTarget.paneId,
-                                pointsY: delta
-                            )
-                        })
-                        .frame(
-                            width: proxyTarget.frame.width,
-                            height: proxyTarget.frame.height
-                        )
-                        .offset(x: proxyTarget.frame.minX, y: proxyTarget.frame.minY)
-                        .frame(
-                            maxWidth: .infinity,
-                            maxHeight: .infinity,
-                            alignment: .topLeading
-                        )
-                        .modifier(GeometryNeutralTmuxCanvasModifier(
-                            windowRect: compactMoshWindowRect,
-                            focusRect: compactMoshFocusRect,
-                            cellSize: compactMoshCellSize
-                        ))
-                    }
-
-                    // Mosh paints split pane contents natively in the shared
-                    // terminal, but Tessera owns the pane chrome so SSH and
-                    // mosh splits look and tap the same.
-                    if !isPhone,
-                       !showsLaunchOverlay,
-                       let snapshot = moshPaneChromeSnapshot(),
-                       let cellSize = moshCellSize {
-                        let frames = moshPaneChromeFrames(
-                            for: snapshot,
-                            cellSize: cellSize
-                        )
-                        MoshPaneChromeOverlay(
-                            root: snapshot.layout.root,
-                            frames: frames,
-                            titles: moshPaneChromeTitles(
-                                for: frames,
-                                snapshot: snapshot
-                            ),
-                            cellSize: cellSize,
-                            activePaneId: snapshot.activePaneId,
-                            chrome: activeTheme.chromeTokens(applying: appearance),
-                            backgroundColor: activeTheme.bg,
-                            terminalBackground: resolvedTerminalBackground,
-                            backdropBleed: moshOverlayBackdropBleed
-                        )
-                    }
-
-                    if !isPhone,
-                       !showsLaunchOverlay,
-                       let cellSize = moshCellSize,
-                       shouldShowMoshPaneChromeTopMask
-                        || !moshPaneChromeCollapseMaskFrames(cellSize: cellSize).isEmpty {
-                        let collapseFrames = moshPaneChromeCollapseMaskFrames(cellSize: cellSize)
-                        GeometryReader { geo in
-                            let topMaskRects: [CGRect] = shouldShowMoshPaneChromeTopMask
-                                ? [CGRect(
-                                    x: 0,
-                                    y: 0,
-                                    width: geo.size.width,
-                                    height: ceil(cellSize.height) + 1
-                                )]
-                                : []
-                            moshChromeTransitionMask(rects: topMaskRects + collapseFrames)
-                        }
-                        .allowsHitTesting(false)
-                    }
-
-                    if showsLaunchOverlay {
-                        SessionLaunchOverlay(
-                            T: activeTheme.chromeTokens(applying: appearance),
-                            phase: launchPhase,
-                            subtitle: launchSubtitle,
-                            wslTailscaleMTUWarning: session.wslTailscaleMTUWarning,
-                            failureReason: launchFailureReason,
-                            onEditHost: onEditHost,
-                            onRetry: onRetry,
-                            onBack: {
-                                // The stall notice puts this button up while
-                                // the bootstrap is still running, so leaving
-                                // has to tear it down: a bootstrap left to
-                                // finish has already spawned a `mosh-server`
-                                // on the host with nothing left to reach it.
-                                onUserClosedSession()
-                                onSessionEnded()
-                                session.sessionCommands.disconnect()
-                            },
-                            reconnectingElsewhere: reconnectingElsewhere
-                        )
-                        .transition(.opacity)
-                        .zIndex(1)
-                    }
-
-                    // Continuity takeover veil: another device holds the grid.
-                    // Requires `.connected`, so mosh transport loss falls back
-                    // to the existing reconnect presentation.
-                    if let peerName = effectiveGridAuthorityPeerName, veilIsDrawn {
-                        ContinuedElsewhereOverlay(
-                            T: activeTheme.chromeTokens(applying: appearance),
-                            peerDisplayName: peerName,
-                            isReclaiming: gridAuthorityPresentation.isReclaiming,
-                            awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
-                            // Focus only the displayed, unlocked veil: hidden
-                            // tabs keep theirs mounted at opacity 0, and the
-                            // app lock covers a still-mounted ContentView.
-                            capturesKeys: ContinuedElsewhereKeyPolicy.admitsGesture(
-                                sessionIsActive: isActive,
-                                appIsLocked: appLockController.isLocked
-                            ),
-                            animatesMotion: ContinuedElsewherePresentationPolicy.breathes(
-                                displayed: ContinuedElsewhereKeyPolicy.admitsGesture(
-                                    sessionIsActive: isActive,
-                                    appIsLocked: appLockController.isLocked
-                                ),
-                                appIsActive: appPhase.isActive
-                            ),
-                            onTakeBack: takeBackContinuedSession,
-                            onCancel: cancelPendingGridAuthorityIntent,
-                            // ⌘⇧J / ⌘⇧K keep working while yielded: switching
-                            // sessions changes what is on screen here, never
-                            // what the peer's terminal receives. Only the
-                            // foreground session registers them — a background
-                            // session stays mounted (opacity 0) and its veil
-                            // would otherwise claim the same chords and step
-                            // from the wrong place in the list.
-                            onSwitcherShortcut: isActive
-                                ? { shortcut in
-                                    appLockController.notifyUserActivity()
-                                    handleSwitcherShortcut(shortcut)
-                                }
-                                : nil
-                        )
-                        .transition(.opacity)
-                        .zIndex(2)
-                    }
-
-                    // A show resolving: the terminal stays visible (no veil
-                    // flash on resume); only input waits for the read.
-                    if gridAuthorityPresentation.isResuming,
-                       !showsLaunchOverlay {
-                        GridAuthorityResumingIndicator(
-                            T: activeTheme.chromeTokens(applying: appearance),
-                            awaitingConnection: gridAuthorityPresentation.isAwaitingConnection,
-                            onCancel: cancelPendingGridAuthorityIntent
-                        )
-                        .transition(.opacity)
-                        .zIndex(3)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(
-                    .easeInOut(duration: ContinuedElsewherePresentationPolicy.veilFadeDuration),
-                    value: sessionIsControlledElsewhere
-                )
-                // Drop a file onto the terminal → upload to the host's
-                // temp dir, then type the quoted path (mockup §4).
-                .modifier(TerminalFileDropTarget(
-                    T: activeTheme.chromeTokens(applying: appearance),
-                    failureMessage: $terminalDropFailure,
-                    handle: handleTerminalDrop
-                ))
-                // §3 terminal Quick Look with the panel closed: the
-                // panel hosts presentedPreview only while open, so this
-                // fallback presents it otherwise. The binding nils itself
-                // while the panel is open — exactly one host at a time by
-                // construction. Size (sheet vs full screen) is the user's
-                // persisted choice, applied identically on both hosts.
-                .quickLookPreview(item: Binding(
-                    get: { filesPanel.isOpen ? nil : filesPanel.presentedPreview },
-                    set: { filesPanel.presentedPreview = $0 }
-                ))
-                .sheet(isPresented: compactMoshFilesBinding) {
-                    FilesPanelView(
-                        controller: filesPanel,
-                        T: filesPanelTokens,
-                        sessionIsActive: isActive,
-                        terminalBackground: nil
-                    )
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(filesPanelTokens.presentationBg)
-                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                .onPreferenceChange(SwipePadDockKey.self) { dock in
+                    if puckDock != dock { puckDock = dock }
                 }
-                // Remote Files panel floats as an overlay over the
-                // terminal — same as the SSH view. No trailing padding,
-                // so the terminal keeps full width and toggling never
-                // triggers a mosh SSP / tmux refresh-client resize. A
-                // transparent tap-catcher behind the card dismisses the
-                // panel when the user taps the terminal, like the sidebar.
-                .overlay(alignment: .trailing) {
-                    if filesPanel.isOpen, !isPhone {
-                        ZStack(alignment: .trailing) {
-                            Color.clear
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
-                                }
-                            FilesPanelView(
-                                controller: filesPanel,
-                                T: activeTheme.chromeTokens(applying: appearance),
-                                sessionIsActive: isActive,
-                                terminalBackground: resolvedTerminalBackground
-                            )
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                        }
-                    }
-                }
-                .padding(.horizontal, isPhone ? 4 : SessionView.cornerInset)
-                .terminalKeyboardCaretShift()
-
-                if appearance.showAccessoryBar {
-                    SessionAccessoryBar(
-                        accent: appearance.tokens(systemColorScheme: .dark).accent,
-                        modifierState: modifierState,
-                        onSend: { bytes in
-                            guard !showsLaunchOverlay, !terminalInputGatedByAuthority else {
-                                // Refused bytes never reach the PTY: drop the UIKit input
-                                // mirror so later edits cannot delete what it believes was typed.
-                                terminalBox.noteOutOfBandInput()
-                                return
-                            }
-                            appLockController.notifyUserActivity()
-                            invalidateMoshScrollbackForTerminalInput(reason: "accessory-input")
-                            session.sessionCommands.sendInput(bytes)
-                            terminalBox.noteOutOfBandInput()
-                        },
-                        applicationCursor: { [terminalBox] in
-                            terminalBox.view?.getTerminal().applicationCursor ?? false
-                        },
-                        onPageScrollAttempt: { _ in
-                            guard agentScrollPrevention(
-                                paneID: activeAgentScrollPaneID
-                            ) != nil else { return false }
-                            presentAgentScrollPrevention(
-                                paneID: activeAgentScrollPaneID
-                            )
-                            return true
-                        },
-                        customShortcutApplies: shouldFire
-                    )
-                    .allowsHitTesting(!sessionIsControlledElsewhere)
-                    .opacity(sessionIsControlledElsewhere ? 0.45 : 1)
+                .onPreferenceChange(DuoDeskAreaKey.self) { desk in
+                    if deskFloor != desk?.foldTop { deskFloor = desk?.foldTop }
                 }
             }
+
 
             if !showsLaunchOverlay,
                !dismissedWSLTailscaleMTUWarning,
@@ -5098,10 +6181,7 @@ struct MoshSessionView: View {
                     T: activeTheme.chromeTokens(applying: appearance),
                     onDismiss: { dismissedWSLTailscaleMTUWarning = true }
                 )
-                .padding(.top, SessionTopBar.reservedHeight(
-                    pillHeight: appearance.topBarHeight,
-                    compact: isPhone
-                ))
+                .padding(.top, sessionTopBarHeight)
                 .padding(.horizontal, SessionView.cornerInset + 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -5110,7 +6190,7 @@ struct MoshSessionView: View {
 
             if tmuxShortcutToastVisible {
                 MoshTmuxShortcutBlockedToast()
-                    .padding(.top, appearance.topBarHeight + 44)
+                    .padding(.top, isRailMode ? sessionTopBarHeight + 44 : appearance.topBarHeight + 44)
                     .padding(.leading, SessionView.cornerInset + 8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .transition(.opacity)
@@ -5123,10 +6203,7 @@ struct MoshSessionView: View {
                     T: activeTheme.chromeTokens(applying: appearance)
                 )
                 .padding(.top,
-                    SessionTopBar.reservedHeight(
-                        pillHeight: appearance.topBarHeight,
-                        compact: isPhone
-                    ) + (findController.isOpen ? 44 : 8)
+                    sessionTopBarHeight + (findController.isOpen ? 44 : 8)
                 )
                 .padding(.horizontal, isPhone ? 12 : SessionView.cornerInset + 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -5146,7 +6223,7 @@ struct MoshSessionView: View {
                     appLockController.notifyUserActivity()
                     invalidateMoshScrollbackForTerminalInput(reason: "swipepad-input")
                     session.sessionCommands.sendInput(bytes)
-                    terminalBox.noteOutOfBandInput()
+                    terminalBox.noteOutOfBandTyping()
                 },
                 tmux: tmux,
                 outputActivityToken: swipePadOutputActivityToken,
@@ -5217,17 +6294,17 @@ struct MoshSessionView: View {
                 sessionIsActive: swipePadSessionIsActive,
                 onShowMore: onOpenAgentCenter,
                 profileStore: swipePadStore,
-                dictationController: dictationController
+                dictationController: dictationController,
+                dock: puckDock,
+                floor: deskFloor
             )
-            .padding(.top, SessionTopBar.reservedHeight(
-                pillHeight: appearance.topBarHeight,
-                compact: isPhone
-            ))
+            .padding(.top, sessionTopBarHeight)
             .padding(.horizontal, isPhone ? 10 : SessionView.cornerInset)
             .padding(.bottom, swipePadBottomInset)
             .allowsHitTesting(!sessionIsControlledElsewhere)
             .zIndex(sessionIsControlledElsewhere ? -1 : 5)
         }
+        .stackBoundary()
     }
 
     private var moshDecoratedChrome: some View {
@@ -5260,8 +6337,14 @@ struct MoshSessionView: View {
                 terminalBox.view?.getTerminal().hostCurrentDirectory
             )
         }
-        .onChange(of: sessionRegistry.tmuxFocusRequest?.token, initial: true) { _, _ in
-            handleCompactTmuxFocusRequest()
+        .onChange(of: SessionRegistryRequestTokens(
+            tmuxFocus: sessionRegistry.tmuxFocusRequest?.token,
+            filesReveal: sessionRegistry.filesRevealRequest?.token
+        ), initial: true) { old, new in
+            // One modifier for both one-shot requests keeps this chain's
+            // depth (see stackBoundary); each handler runs for its own token.
+            if old == new || old.tmuxFocus != new.tmuxFocus { handleCompactTmuxFocusRequest() }
+            if old == new || old.filesReveal != new.filesReveal { handleFilesRevealRequest() }
         }
         .onChange(of: tmux.gridAuthority) { _, _ in handleCompactTmuxFocusRequest() }
         .onChange(of: tmux.mode) { _, _ in handleCompactTmuxFocusRequest() }
@@ -5269,26 +6352,17 @@ struct MoshSessionView: View {
         .onChange(of: ObjectIdentifier(session)) { _, _ in handleCompactTmuxFocusRequest() }
         .onChange(of: tmux.windows) { _, _ in handleCompactTmuxFocusRequest() }
         .onChange(of: tmux.isWindowListHydrated) { _, _ in handleCompactTmuxFocusRequest() }
-        .onChange(of: isActive) { _, _ in handleCompactTmuxFocusRequest() }
+        .onChange(of: isActive) { _, _ in
+            handleCompactTmuxFocusRequest()
+            handleFilesRevealRequest()
+        }
         .onChange(of: liveSessionID) { oldID, _ in sessionRegistry.cancelTmuxFocus(sessionID: oldID) }
         .onDisappear { sessionRegistry.cancelTmuxFocus(sessionID: liveSessionID) }
         .ignoresSafeArea(.container, edges: .bottom)
         .terminalKeyboardLayout(
             resizesTerminal: appearance.resizeTerminalWithKeyboard,
-            caretClearance: {
-                // mosh paints every pane into this one surface, so its caret is
-                // the caret in all layouts — no grid case to exclude. Find
-                // still is one: it scrolls to a match rather than to the caret,
-                // so the whole grid has to clear the keyboard.
-                guard !findController.isOpen else { return nil }
-                return terminalBox.caretClearance(
-                    cellHeight: terminalCaretCellHeight(
-                        fontID: appearance.terminalFontID,
-                        fontSize: appearance.fontSize
-                    ),
-                    mouseReportingImpliesAltScreen: tmux.mode != .tmuxControl
-                )
-            }
+            foldedLayoutActive: inputDeckExpanded,
+            caretClearance: terminalCaretClearance
         )
         .statusBarHidden(true)
         .persistentSystemOverlays(isPhone ? .automatic : .hidden)
@@ -5301,7 +6375,7 @@ struct MoshSessionView: View {
             // pane is proven on screen, as for Agent Center's scroll lock.
             presented: ProgramStatusCenter.presentedTerminals(
                 isActive: isActive,
-                isObscured: showsLaunchOverlay || veilIsDrawn || (isPhone && filesPanel.isOpen)
+                isObscured: showsLaunchOverlay || veilIsDrawn || (isPhone && filesPanel.isOpen && !duoFilesDocked && !filesOpenedDocked)
                     || filesPanel.presentedPreview != nil || filesPanel.presentedShare != nil
                     || filesPanel.showingUploadPicker,
                 tmux: tmux,
@@ -5326,6 +6400,7 @@ struct MoshSessionView: View {
             swipePadOutputActivityTask?.cancel()
             swipePadOutputActivityTask = nil
         }
+        .stackBoundary()
     }
 
     private var moshDecoratedConnectionTask: some View {
@@ -5336,7 +6411,7 @@ struct MoshSessionView: View {
             )
             // Mirror every cwd report onto the session object so
             // transport-agnostic consumers (Upload sheet) can read it.
-            filesPanel.onTerminalDirectoryChanged = { [weak session] dir in
+            filesPanel.onTerminalDirectoryChanged = { [weak session = session] dir in
                 // Change-guarded: the poller re-reports the same path
                 // every tick and the mirror is @Published now.
                 if session?.remoteWorkingDirectory != dir {
@@ -5362,9 +6437,10 @@ struct MoshSessionView: View {
                 // loop; the primary mosh SSP session remains interactive.
                 tmuxControlBox.channel?.disconnect()
             }
-            tmux.onServerGeometryCeded = { [weak session] cols, rows in
+            tmux.onServerGeometryCeded = { [weak session = session] cols, rows in
                 session?.preserveRemoteTmuxSizeAfterCede(cols: cols, rows: rows)
             }
+            tmux.gridAuthorityOwnedGeometryStore = TmuxOwnedGeometryFileStore.shared.store(for: session.host)
             tmux.gridAuthorityIdentity = GridAuthorityDeviceIdentity.current()
             _ = session.sessionCommands(tmux: tmux).dispatch(
                 .setTmuxGridPresentation(isPhone ? .singlePane : .paneGrid)
@@ -5631,6 +6707,8 @@ struct MoshSessionView: View {
                     if case .connecting = state {} else { sharedChallenge = nil }
                     continue
                 case .tmuxSnapshotChanged(_, let snapshot):
+                    agentCenterV2.noteTmuxTopology(snapshot, replacing: sharedTmuxSnapshot,
+                                                   sessionID: liveSessionID, registrationID: sourceRegistrationID)
                     sharedTmuxSnapshot = snapshot
                     continue
                 case .gridAuthorityChanged:
@@ -5777,6 +6855,7 @@ struct MoshSessionView: View {
             // and `maybeDismissLaunchOverlay`).
             maybeDismissLaunchOverlay(reason: "state=\(MoshDiagnostics.stateDescription(newState))")
         }
+        .stackBoundary()
     }
 
     private var moshDecoratedTransport: some View {
@@ -5856,6 +6935,7 @@ struct MoshSessionView: View {
                 "output-activity session=mosh reason='pane-focus' token=\(swipePadOutputActivityToken)"
             )
         }
+        .stackBoundary()
     }
 
     /// Grid-authority edges for input: a split of the chain below, which
@@ -5881,6 +6961,7 @@ struct MoshSessionView: View {
                 terminalBox.noteOutOfBandInput()
             }
         }
+        .stackBoundary()
     }
 
     private var moshDecoratedCore: some View {
@@ -5892,8 +6973,16 @@ struct MoshSessionView: View {
         }
         .onDisappear {
             showEdges?.unregister(tmux, for: liveSessionID)
+            // Appearing again measures afresh.
+            forgetCompactPublication()
         }
         .onChange(of: isPhone) { _, compact in
+            // The session stays mounted across this boundary. A compact grid
+            // still waiting would otherwise overwrite the regular pane
+            // grid's own size, and the side channel's, after it published.
+            // Back in compact, its first grid goes at once (it may be
+            // measured before this runs).
+            if !compact { forgetCompactPublication() }
             _ = session.sessionCommands(tmux: tmux).dispatch(
                 .setTmuxGridPresentation(compact ? .singlePane : .paneGrid)
             )
@@ -5958,6 +7047,9 @@ struct MoshSessionView: View {
         }
         .onChange(of: isActive) { _, nowActive in
             DiagnosticLogStore.appendSSH("latency-surface-v3 host=\(session.host.id.uuidString.prefix(8)) active=\(nowActive) transport=mosh")
+            // A grid still settling was measured under the old activity;
+            // it is this session's size now, replayed below if active.
+            if let settling = compactViewportSettle.takePending() { lastCompactViewportSize = settling }
             recordMoshScrollDiagnostic(
                 "active-changed active=\(nowActive) position=\(describeScrollPosition(for: terminalBox.view))"
             )
@@ -6020,10 +7112,48 @@ struct MoshSessionView: View {
         .onChange(of: agentCenterV2.presentation.listSnapshot) { _, _ in
             reconcileAgentScrollNotice()
         }
+        .stackBoundary()
+    }
+
+    private var duoSessionPresentation: some View {
+        let filesCoverContext = SessionFilesSheetPolicy.coversContext(
+            presented: compactMoshFilesBinding.wrappedValue,
+            detent: compactFilesDetent, isActive: isActive
+        )
+        return moshDecoratedCore
+            .onDuoRailEdgeChange { railEdge = $0 }
+            .modifier(DuoFilesDocking(panel: filesPanel, docked: duoFilesDocked, openedDocked: $filesOpenedDocked,
+                                      openingInPlace: $filesOpeningInPlace, show: showFilesInContext))
+            .modifier(SessionRailActionPublisher(
+                center: railActions,
+                state: railActionState,
+                actions: sessionRailActions
+            ))
+            .modifier(SessionRailSheets(
+                forwardingPresented: $railForwardingPresented,
+                continuityPresented: $railContinuityPresented,
+                manager: session.portForwarderManager,
+                continuityActions: continuityActions,
+                hostID: session.host.id,
+                sessionID: liveSessionID,
+                sessionIsActive: isActive,
+                T: activeTheme.chromeTokens(applying: appearance)
+            ))
+            .transformPreference(ArtifactCoveringSheetPreferenceKey.self) { value in
+                value = value || filesCoverContext
+            }
+            .task(id: isRailMode && isActive && appPhase.isActive
+                && !session.portForwarderManager.forwarders.isEmpty) {
+                guard isRailMode, isActive, appPhase.isActive else { return }
+                let manager = session.portForwarderManager
+                guard !manager.forwarders.isEmpty else { return }
+                await manager.monitorServices()
+            }
+            .stackBoundary()
     }
 
     var body: some View {
-        moshDecoratedCore
+        duoSessionPresentation
         .environment(\.terminalInputAllowed, authorityGatedTerminalInputAllowed)
         .environment(\.terminalKeyboardHandoff, commandPalette.keyboardHandoff)
         // P9: nothing under the veil draws once it has faded in (output is
@@ -6057,6 +7187,10 @@ struct MoshSessionView: View {
         }
         .onChange(of: session.pendingPathInjection) { _, _ in
             consumePendingPathInjection()
+        }
+        .onChange(of: modifierState.terminalTapKeyboardRequests) { _, _ in
+            guard compactMoshFilesBinding.wrappedValue else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { filesPanel.close() }
         }
         .onChange(of: scrollDiagnosticsEnabled) { _, enabled in
             if enabled {
@@ -6750,6 +7884,22 @@ struct MoshSessionView: View {
                 cellSize: compactMoshCellSize
               )
         else { return }
+        compactViewportSettle.note(viewport, apply: applyCompactMoshViewport)
+    }
+
+    /// Regular sizing owns the remote grid once compact ends, and a view
+    /// appearing again measures afresh: a grid still settling, the last
+    /// compact request and its baselines all describe a grid the remote may
+    /// no longer have, and the request cache would drop the compact grid
+    /// that has to replace it.
+    private func forgetCompactPublication() {
+        compactViewportSettle.reset()
+        lastCompactViewportSize = nil
+        lastCompactRequestedClientSize = nil
+        compactReprojectionMemo = TmuxCompactReprojectionMemo()
+    }
+
+    private func applyCompactMoshViewport(_ viewport: (cols: Int, rows: Int)) {
         let previousViewport = lastCompactViewportSize
         lastCompactViewportSize = viewport
         guard isActive, appPhase.isActive,
@@ -6922,6 +8072,17 @@ struct MoshSessionView: View {
         sessionRegistry.handleTmuxFocusRequest(
             sessionID: liveSessionID, carrier: session, tmux: tmux,
             commands: session.sessionCommands(tmux: tmux), isShown: isActive)
+    }
+
+    /// Agent Center's transcript "Reveal in Files", after it switched here:
+    /// the same panel reveal as the selection menu's directory hit. Only a
+    /// connected session reveals; the request never reconnects anything.
+    private func handleFilesRevealRequest() {
+        guard let directory = sessionRegistry.takeFilesReveal(
+            sessionID: liveSessionID, carrier: session, isShown: isActive) else { return }
+        guard presentationSessionState == .connected else { return }
+        configureFilesPanelIfNeeded()
+        filesPanel.revealDirectory(directory)
     }
 
     /// Whether the mosh active window has a real multi-pane layout — gates the
@@ -7514,6 +8675,21 @@ struct MoshSessionView: View {
         resolveMoshOverlayNativeBoundary(overlay: overlay, view: view)
     }
 
+    /// A settled reader move the scroll view did not make itself
+    /// (VoiceOver's page): what a native pan's settle concludes.
+    private func handleMoshPaneScrollbackOverlayReaderMoved(_ view: TerminalView) {
+        guard let overlay = moshPaneScrollbackOverlay,
+              overlay.box.view === view
+        else { return }
+        if overlay.pendingDeferredHistory == nil, overlay.pendingScrollPlacement != nil {
+            overlay.pendingScrollPlacement = nil
+            overlay.pendingScrollPlacementRevision += 1
+        }
+        overlay.sawNativeScroll = true
+        overlay.desiredScrollOffsetY = view.contentOffset.y
+        resolveMoshOverlayNativeBoundary(overlay: overlay, view: view)
+    }
+
     /// 10Hz poll bridging the gap between the last active didScroll and
     /// actual settle (pan end with no momentum, or deceleration running
     /// out) — both end without a settled scroll callback.
@@ -7906,6 +9082,9 @@ struct MoshSessionView: View {
             },
             currentTransportOutputDeliveryID: { [weak session] in
                 session?.latestOutputDeliveryID ?? 0
+            },
+            transportIsReachable: { [weak session] in
+                session?.transportState == .connected
             },
             onSaveWindowModes: { [kittyWindowModes, terminalBox] surfaceID, windowID in
                 guard surfaceID == .live,
@@ -8308,18 +9487,7 @@ struct MoshSessionView: View {
         }
 
         if let pane = window.panes.first(where: { $0.id == paneId }),
-           pane.isAlternateScreen == true,
-           // A reader of revealed history (a pane can go full-screen
-           // mid-read) scrolls it back down first: the split's overlay, or
-           // this surface on compact layouts. Finger pans over the overlay
-           // land here, not on its scroll view. Only the tail belongs to
-           // the program.
-           !moshLiveHistoryRevealed,
-           !(moshPaneScrollbackOverlay.map {
-               $0.paneId == paneId && $0.windowId == window.id && $0.id == moshOverlayContentReadyId
-           } ?? false),
-           usesDetachedMoshHistoryOverlay(window: window)
-               || view.contentOffset.y >= maxOffsetY - 1 {
+           moshPaneProgramOwnsScroll(pane, in: window, view: view, maxOffsetY: maxOffsetY) {
             // Semantic forward — never from a synthetic glide frame: the
             // remote TUI would keep receiving motion after the fingers
             // left the trackpad.
@@ -8582,6 +9750,43 @@ struct MoshSessionView: View {
             useSgrMouse: pane.isSgrMouse == true,
             reason: "alt-proxy"
         )
+    }
+
+    /// A full-screen program in a mosh+tmux pane owns that pane's scroll. A
+    /// reader of revealed history (a pane can go full-screen mid-read)
+    /// scrolls it back down first: the split's overlay, or this surface on
+    /// compact layouts. Finger pans over the overlay land on this surface,
+    /// not on its scroll view. Only the tail belongs to the program.
+    private func moshPaneProgramOwnsScroll(
+        _ pane: TmuxController.PaneInfo,
+        in window: TmuxController.WindowInfo,
+        view: TerminalView,
+        maxOffsetY: CGFloat
+    ) -> Bool {
+        pane.isAlternateScreen == true
+            && !moshLiveHistoryRevealed
+            && !(moshPaneScrollbackOverlay.map {
+                $0.paneId == pane.id && $0.windowId == window.id && $0.id == moshOverlayContentReadyId
+            } ?? false)
+            && (usesDetachedMoshHistoryOverlay(window: window) || view.contentOffset.y >= maxOffsetY - 1)
+    }
+
+    /// A VoiceOver page on the shared canvas is the focused pane program's
+    /// Page Up or Page Down key wherever the trackpad's scroll is its wheel
+    /// or arrows; it goes through the canvas's own input, as typing does,
+    /// to tmux's active pane. A pane an agent's scroll block holds keeps the
+    /// page local, where the trackpad's path shows the block and VoiceOver
+    /// hears the edge.
+    private func moshFocusedPaneTakesPageKeys(_ view: TerminalView) -> Bool {
+        guard tmux.mode == .tmuxControl,
+              terminalBox.view === view,
+              let window = moshActiveWindow,
+              let paneId = window.activePaneId ?? tmux.activePaneId,
+              let pane = window.panes.first(where: { $0.id == paneId }),
+              agentScrollPrevention(paneID: paneId.rawValue) == nil
+        else { return false }
+        let maxOffsetY = max(0, view.contentSize.height - view.bounds.height)
+        return moshPaneProgramOwnsScroll(pane, in: window, view: view, maxOffsetY: maxOffsetY)
     }
 
     private func forwardMoshPaneAltScreenScroll(
@@ -8855,7 +10060,24 @@ struct MoshSessionView: View {
                 // Once the compact tmux canvas is active this inner SwiftTerm
                 // surface is intentionally framed at the full server grid.
                 // Only the outer viewport callback represents phone geometry.
-                guard !(isPhone && tmux.mode == .tmuxControl) else { return }
+                if isPhone && tmux.mode == .tmuxControl {
+                    // The compact push resizes mosh at once, but this canvas
+                    // reaches the new grid a layout pass later. Frames in
+                    // between (the switch's own full frame included) land at
+                    // the old width, and mosh never resends cells it thinks
+                    // are shown: a quiet pane stays blank until it prints.
+                    // One full frame at the matching grid resynchronizes it.
+                    let moshGrid = session.preservedRemoteTmuxSize ?? lastCompactRequestedClientSize
+                    if isActive, appPhase.isActive, presentationSessionState == .connected,
+                       let moshGrid, moshGrid.cols == cols, moshGrid.rows == rows {
+                        MoshDiagnostics.log("mosh view canvas-catch-up cols=\(cols) rows=\(rows)")
+                        moshRenderLedgerAdapter.requestOwnedTransportFullFrame(
+                            onScheduled: { _ in },
+                            completion: { _ in }
+                        )
+                    }
+                    return
+                }
                 if let previous = lastTerminalSize,
                    previous.cols != cols || previous.rows != rows {
                     resetMoshScrollbackCapture(clearLocal: true, reason: "resize")
@@ -8880,8 +10102,25 @@ struct MoshSessionView: View {
                     paneTitle: currentTerminalTitle
                 )
             },
+            onOpenLink: { link in
+                ArtifactTerminalLinkRouting.handle(link, openArtifact: {
+                    guard let openArtifact,
+                          let savedHostID = sessionRegistry.session(for: liveSessionID)?.persistedHostID,
+                          let request = ArtifactTerminalLinkRouting.request(
+                              for: link,
+                              hostID: filesPanel.bridge?.key.hostID ?? savedHostID,
+                              sessionID: liveSessionID,
+                              canOpenArtifact: true
+                          ) else { return false }
+                    _ = terminalBox.view?.resignFirstResponder()
+                    openArtifact(request)
+                    return true
+                }, showFailure: { terminalDropFailure = $0 })
+            },
             onPrimaryScrollbackDelta: handleMoshPrimaryScrollbackDelta,
             primaryScrollPaneAtLocation: moshScrollPaneAtLocation,
+            // A split pages within the pane being read, not the canvas.
+            primaryScrollPageRows: { compactMoshFocusRect?.height },
             primaryTouchScrollIsLocalForPane: { moshPrimaryTouchScrollIsLocal(paneID: $0) },
             remotePaneReportsMouse: { moshActivePaneReportsMouse },
             touchPansTakePointerRoute: { moshTouchPansTakePointerRoute },
@@ -8931,9 +10170,17 @@ struct MoshSessionView: View {
                 || commandPalette.isOpen
                 || filesPanel.textEntryActive
                 || modifierState.suppressesSoftwareKeyboardReclaim
-                || sessionIsControlledElsewhere,
-            forceResignFirstResponder: sessionIsControlledElsewhere,
+                || sessionIsControlledElsewhere
+                || terminalInputSuppressed,
+            forceResignFirstResponder: sessionIsControlledElsewhere || terminalInputSuppressed,
+            // On the laptop's desk the pane above holds the keyboard: only
+            // a tap on this terminal takes it back.
+            coveringSheetPresented: compactMoshFilesBinding.wrappedValue || onTheDesk,
             onHardwareKey: { key in
+                // The walkthrough and the release card are modal, a hidden
+                // pane takes no keys, and under the launch overlay the
+                // session refuses them, as `onSend` does.
+                guard !terminalInputSuppressed, !showsLaunchOverlay else { return }
                 // While authority is unresolved or yielded, a page key is
                 // never bytes into the PTY the peer is using (the GCKeyboard
                 // passthrough can fire before the veil's focus grab lands),
@@ -8949,7 +10196,12 @@ struct MoshSessionView: View {
                 )
                 invalidateMoshScrollbackForTerminalInput(reason: "hardware-key")
                 session.sessionCommands.sendInput(bytes)
+                terminalBox.noteOutOfBandTyping()
             },
+            refusesInput: showsLaunchOverlay || terminalInputGatedByAuthority || terminalInputSuppressed,
+            paneTakesPageKeys: { view in moshFocusedPaneTakesPageKeys(view) },
+            agentPageKeysBlocked: !sessionIsControlledElsewhere
+                && agentScrollPrevention(paneID: activeAgentScrollPaneID) != nil,
             onTerminalScrolled: handleMoshLiveTerminalScrolled,
             scrollRetentionID: [
                 "mosh",
@@ -8984,6 +10236,7 @@ struct MoshSessionView: View {
                 let bytes = shortcut.encoded(applicationCursor: cursor)
                 invalidateMoshScrollbackForTerminalInput(reason: "custom-shortcut")
                 session.sessionCommands.sendInput(bytes)
+                terminalBox.noteOutOfBandTyping()
             },
             onSelectionPathAction: { action, text in
                 handleSelectionPathAction(action, text: text)
@@ -9138,10 +10391,7 @@ struct MoshSessionView: View {
     /// its duplicate by the surrounding chrome reconstructs the same image
     /// dimensions and origin before the pane clip is applied.
     private var moshOverlayBackdropBleed: EdgeInsets {
-        let topBar = SessionTopBar.reservedHeight(
-            pillHeight: appearance.topBarHeight,
-            compact: isPhone
-        )
+        let topBar = sessionTopBarHeight
         let findBar = findController.isOpen ? CGFloat(appearance.topBarHeight + 4) : 0
         return EdgeInsets(
             top: topBar + findBar,
@@ -9292,6 +10542,7 @@ private struct MoshPaneScrollbackOverlay: View {
     let backdropBleed: EdgeInsets
     let onReady: () -> Void
     let onTerminalScrolled: (TerminalView) -> Void
+    let onReaderScrolled: (TerminalView) -> Void
     let onScrollDiagnostic: (String) -> Void
     let agentScrollBlockingActive: Bool
     let onAgentScrollBlocked: () -> Void
@@ -9319,6 +10570,7 @@ private struct MoshPaneScrollbackOverlay: View {
                 onTitle: { _ in },
                 onUserActivity: nil,
                 onBell: nil,
+                onOpenLink: nil,
                 agentScrollBlockingActive: agentScrollBlockingActive,
                 onAgentScrollBlocked: onAgentScrollBlocked,
                 mouseReportingImpliesAltScreen: false,
@@ -9330,7 +10582,11 @@ private struct MoshPaneScrollbackOverlay: View {
                 onOpenSettings: nil,
                 suppressFirstResponderReclaim: true,
                 onHardwareKey: nil,
+                // A capture of history: it sends nothing.
+                refusesInput: true,
                 onTerminalScrolled: onTerminalScrolled,
+                onNativeReaderScroll: onReaderScrolled,
+                onReaderReplaced: { view in runtime.followReaderReplacement(in: view) },
                 scrollRetentionID: [
                     "mosh-overlay",
                     runtime.windowId.description,
@@ -9825,6 +11081,22 @@ final class TerminalBox: TerminalRenderSurface {
         view?.discardTextInputMirror()
     }
 
+    /// Typing sent past the view (an accessory-bar key, a swipe-pad macro, a
+    /// custom shortcut, a typed path): out of band for the mirror, and typing
+    /// for a reader in history, whom it takes back to the live prompt as the
+    /// view's own keys do. Android's `TerminalSurface.sendInput` follows live
+    /// output the same way.
+    func noteOutOfBandTyping() {
+        noteOutOfBandInput()
+        followLiveOutputForTyping()
+    }
+
+    /// The reader half of `noteOutOfBandTyping`, for typing that reaches the
+    /// session after its mirror went (a typed path, once delivered).
+    func followLiveOutputForTyping() {
+        (view?.terminalDelegate as? TerminalSurfaceBound.Coordinator)?.followLiveOutputForTyping()
+    }
+
     private static let mouseModeSets = ["1000", "1002", "1003", "1006"].map { Array("\u{1B}[?\($0)h".utf8) }
 
     /// Mode sets arrive whole from mosh frames and tmux repaints.
@@ -9873,6 +11145,26 @@ final class TerminalBox: TerminalRenderSurface {
     struct ScrollPositionBeforeRebind: Equatable {
         let offsetY: CGFloat
         let maxOffsetY: CGFloat
+        /// The bind kept the window and pane: a rebuild of the transcript the
+        /// reader was in (a resize, a font change, a repaint that could not
+        /// refresh in place), not a switch to another one.
+        var keepsPane = false
+        /// The reader typed or panned since: a rebuild's deep capture no
+        /// longer puts them back. A deepen they asked for still places them.
+        var readerMoved = false
+        /// The view held the reader's place through output (a trackpad or
+        /// VoiceOver page put them there). The clear drops that hold; the
+        /// page that puts them back holds them again.
+        var held = false
+        /// How far below the tail a taller grid pulled the reader's rows, so
+        /// that a shorter one before the page pushes them back.
+        var belowTail: CGFloat = 0
+        /// Rows a taller grid pulled back from the pane's history that the
+        /// emptied buffer shows as blank rows below the cursor.
+        var pulledRows = 0
+        /// What the reader saw: the page, rewrapped by tmux at a new width,
+        /// is searched for it near their distance from the tail.
+        var readerText: TesseraResponderAwareTerminalView.ReaderText?
     }
 
     private var scrollPositionBeforeRebind: (owner: TerminalRenderOwner, position: ScrollPositionBeforeRebind)?
@@ -9884,6 +11176,72 @@ final class TerminalBox: TerminalRenderSurface {
         guard let snapshot = scrollPositionBeforeRebind, snapshot.owner == owner else { return nil }
         scrollPositionBeforeRebind = nil
         return snapshot.position
+    }
+
+    /// Reader input so far: a placement nobody asked for stops at the first
+    /// after it began.
+    private(set) var readerInputCount = 0
+
+    /// The reader typed or panned (`TerminalSurfaceBound.onReaderInput`).
+    func noteReaderInput() {
+        readerInputCount += 1
+        scrollPositionBeforeRebind?.position.readerMoved = true
+    }
+
+    /// A new font or grid before the page a bind awaits: the place it
+    /// recorded moves as the pane's history does, in the new rows. A taller
+    /// pane pulls its history back over the new rows wherever its cursor is,
+    /// as this view does while it has history; the buffer a bind emptied
+    /// shows blank rows below the cursor instead. A shorter pane drops the
+    /// rows below its cursor first, fewer than the view's by those blank
+    /// rows, and pushes the rest into history.
+    private func followGeometryChange(
+        from old: TesseraResponderAwareTerminalView.Geometry,
+        to new: TesseraResponderAwareTerminalView.Geometry
+    ) {
+        guard let recorded = scrollPositionBeforeRebind, old.cellHeight > 0, new.cellHeight > 0 else { return }
+        let position = recorded.position
+        let distance = position.maxOffsetY - position.offsetY - position.belowTail
+        var rows = distance / old.cellHeight
+        var pulledRows = position.pulledRows
+        // A reader on the live tail stays on it, as the view keeps one
+        // within a point of it.
+        if abs(distance) < 1, pulledRows == 0 { rows = 0 }
+        if rows != 0 || pulledRows > 0, !old.alternateScreen, !new.alternateScreen {
+            let pushed = old.cursorRow - new.cursorRow
+            let grown = new.rows - old.rows
+            let below = old.rows - 1 - old.cursorRow
+            let paneBelow = max(0, below - pulledRows)
+            if grown > 0 {
+                rows -= CGFloat(grown)
+            } else if grown < 0 {
+                rows += CGFloat(max(0, -grown - paneBelow))
+            } else {
+                // A new width rewraps the screen's rows into history too.
+                rows += CGFloat(pushed)
+            }
+            if grown != 0 {
+                let paneBelowAfter = grown > 0 ? paneBelow : max(0, paneBelow + grown)
+                pulledRows = max(0, new.rows - 1 - new.cursorRow - paneBelowAfter)
+            }
+        }
+        // The page grows past the transcript the bind cleared, in the new
+        // cells, before its placement stops waiting for it.
+        let cleared = position.maxOffsetY / old.cellHeight * new.cellHeight
+        let maxOffsetY = max(cleared, rows * new.cellHeight)
+        scrollPositionBeforeRebind = (
+            owner: recorded.owner,
+            position: ScrollPositionBeforeRebind(
+                offsetY: maxOffsetY - max(0, rows * new.cellHeight),
+                maxOffsetY: maxOffsetY,
+                keepsPane: position.keepsPane,
+                readerMoved: position.readerMoved,
+                held: position.held,
+                belowTail: max(0, -rows * new.cellHeight),
+                pulledRows: pulledRows,
+                readerText: position.readerText
+            )
+        )
     }
 
     /// True only while `bind` clears scrollback for a new owner. The clear
@@ -9971,22 +11329,32 @@ final class TerminalBox: TerminalRenderSurface {
 
     func resize(columns: Int, rows: Int) {
         guard columns > 0, rows > 0 else { return }
-        (view as? TesseraResponderAwareTerminalView)?.cancelPendingLayoutResize()
-        view?.resize(cols: columns, rows: rows)
+        guard let view = view as? TesseraResponderAwareTerminalView else {
+            view?.resize(cols: columns, rows: rows)
+            return
+        }
+        view.cancelPendingLayoutResize()
+        view.resizeKeepingReader(cols: columns, rows: rows)
     }
 
     func dismissTransientInteractions() {
-        view?.selectNone()
         if let terminal = view as? TesseraResponderAwareTerminalView {
             terminal.resignFirstResponderForTransition()
         } else {
-            view?.resignFirstResponder()
+            _ = view?.resignFirstResponder()
         }
         // Other sessions stay mounted in this same window. Their cleanup can
         // arrive after the newly selected terminal (or an editor) takes focus.
         // Ending editing on the window would resign that unrelated responder,
         // leaving hardware input without a destination until another update.
-        UIMenuController.shared.hideMenu()
+        dismissSelection()
+    }
+
+    private func dismissSelection() {
+        view?.selectNone()
+        for interaction in view?.interactions ?? [] {
+            (interaction as? UIEditMenuInteraction)?.dismissMenu()
+        }
     }
 
     /// `UIDevice.orientationDidChangeNotification` also reports physical
@@ -9994,7 +11362,11 @@ final class TerminalBox: TerminalRenderSurface {
     /// window remains portrait. Dismissing the terminal for those notifications
     /// makes the phone keyboard hide, then `TerminalSurfaceBound` immediately
     /// reclaims first responder on the next SwiftUI update. Only a real
-    /// interface-orientation transition should invalidate transient UI.
+    /// interface-orientation transition should invalidate transient UI, and
+    /// then only the selection and its menu, which point at cells the
+    /// rotation reflows. The keyboard stays with the terminal: UIKit hides it
+    /// for the rotation and shows it again in the new orientation, and the
+    /// coordinator reads that hide as the rotation rather than a dismissal.
     func dismissTransientInteractionsIfInterfaceOrientationChanged() {
         guard let current = view?.window?.windowScene?.interfaceOrientation else {
             return
@@ -10003,7 +11375,7 @@ final class TerminalBox: TerminalRenderSurface {
         guard let previous = lastInterfaceOrientation,
               previous != current
         else { return }
-        dismissTransientInteractions()
+        dismissSelection()
     }
 
     func attach(_ view: TerminalView) {
@@ -10012,6 +11384,9 @@ final class TerminalBox: TerminalRenderSurface {
             lastInterfaceOrientation = nil
         }
         self.view = view
+        (view as? TesseraResponderAwareTerminalView)?.onGeometryChanged = { [weak self] old, new in
+            self?.followGeometryChange(from: old, to: new)
+        }
         if let latencyHost {
             (view as? TesseraResponderAwareTerminalView)?.bindLatencyDiagnostics(host: latencyHost)
         }
@@ -10160,19 +11535,33 @@ final class TerminalBox: TerminalRenderSurface {
         MoshDiagnostics.log(
             "render_surface bind surface=\(traceLabel) owner=\(owner) previous=\(previousOwner?.description ?? "nil") discarded_pending_bytes=\(discardedPendingByteCount)"
         )
-        if isAwaitingContentAfterRebind, let carried = scrollPositionBeforeRebind {
-            // The previous bind emptied the buffer and nothing has filled it
-            // since, so the view only knows the trivial tail. The reader's
-            // real distance is the one recorded before that clear; it now
+        let keepsPane = previousOwner?.windowId == owner.windowId && previousOwner?.paneId == owner.paneId
+        // Nothing has filled the buffer since the previous bind emptied it,
+        // or only that rebuild's visible capture, ahead of its deep one:
+        // less than a screen of history, the rows a repaint into a surface
+        // taller than its pane scrolls off the top. There was nothing to
+        // read, so the place recorded before that clear travels on, unless
+        // the reader moved since among the rows that did arrive.
+        let knowsOnlyTheTail = isAwaitingContentAfterRebind
+            || view.map { $0.contentSize.height - $0.bounds.height < $0.bounds.height } ?? false
+        if knowsOnlyTheTail, let carried = scrollPositionBeforeRebind,
+           isAwaitingContentAfterRebind || !carried.position.readerMoved {
+            // The view only knows the trivial tail. The reader's real
+            // distance is the one recorded before that clear; it now
             // belongs to whichever owner finally presents a page.
-            scrollPositionBeforeRebind = (owner: owner, position: carried.position)
+            var position = carried.position
+            position.keepsPane = position.keepsPane && keepsPane
+            scrollPositionBeforeRebind = (owner: owner, position: position)
         } else if let view {
             let maxOffsetY = max(0, view.contentSize.height - view.bounds.height)
             scrollPositionBeforeRebind = (
                 owner: owner,
                 position: ScrollPositionBeforeRebind(
                     offsetY: min(max(0, view.contentOffset.y), maxOffsetY),
-                    maxOffsetY: maxOffsetY
+                    maxOffsetY: maxOffsetY,
+                    keepsPane: keepsPane,
+                    held: (view as? TesseraResponderAwareTerminalView)?.holdsReader?() ?? false,
+                    readerText: (view as? TesseraResponderAwareTerminalView)?.readerText()
                 )
             )
         } else {
@@ -10579,6 +11968,13 @@ private final class MoshPaneScrollbackOverlayRuntime {
         desiredScrollOffsetY = nil
     }
 
+    /// The view put the reader back on their row after a new font or grid:
+    /// the offset restored after each history feed follows them.
+    func followReaderReplacement(in view: TerminalView) {
+        guard desiredScrollOffsetY != nil else { return }
+        desiredScrollOffsetY = view.contentOffset.y
+    }
+
     /// Halt any in-flight native deceleration on the runtime's view (a
     /// same-offset setContentOffset ends UIScrollView momentum). A hidden
     /// view must never remain "natively active": its ghost motion would
@@ -10734,6 +12130,7 @@ final class MoshRenderLedgerSurfaceAdapter {
     private var painterHandoff: PainterHandoff?
     private var painterRetryTask: Task<Void, Never>?
     private var painterReceiptWatchdogTask: Task<Void, Never>?
+    private var painterCausalWatchdogTask: Task<Void, Never>?
     private var historyRepaintRetryTasks: [UInt64: Task<Void, Never>] = [:]
     private var historyRepaintReceiptWatchdogs: [UInt64: Task<Void, Never>] = [:]
     private var deferredOwnedRepaints: [DeferredOwnedRepaint] = []
@@ -10749,12 +12146,18 @@ final class MoshRenderLedgerSurfaceAdapter {
     private var cancelTransportFullFrame: (@MainActor (UInt64) -> Void)?
     private var retireAllTransportFullFrames: (@MainActor () -> UInt64)?
     private var currentTransportOutputDeliveryID: (@MainActor () -> UInt64)?
+    private var transportIsReachable: (@MainActor () -> Bool)?
     private var painterEventsForTesting: [String] = []
     private weak var activityController: TmuxController?
 
     /// Production contract is four seconds. Tests shorten only this adapter-
     /// local clock; the shared ledger never owns transport receipt timing.
     var repaintReceiptTimeoutNanoseconds: UInt64 = 4_000_000_000
+
+    /// How long a window or pane switch waits, with the link up, for Mosh's
+    /// first frame above its floor before taking the quiet canvas as the
+    /// new one. Android: `MOSH_PAINTER_CAUSAL_TIMEOUT_MS`.
+    var painterCausalTimeoutNanoseconds: UInt64 = 400_000_000
 
     var retiredTransportRequestTombstoneCountForTesting: Int {
         retiredTransportRequestIDs.count
@@ -10838,6 +12241,8 @@ final class MoshRenderLedgerSurfaceAdapter {
         painterRetryTask = nil
         painterReceiptWatchdogTask?.cancel()
         painterReceiptWatchdogTask = nil
+        painterCausalWatchdogTask?.cancel()
+        painterCausalWatchdogTask = nil
         cancelHistoryRepaintTasks()
         let handoffOwner = painterHandoff.flatMap { handoff in
             surfaceHandler?(.live)?.boundOwner == handoff.owner ? handoff.owner : nil
@@ -10875,6 +12280,8 @@ final class MoshRenderLedgerSurfaceAdapter {
         painterRetryTask = nil
         painterReceiptWatchdogTask?.cancel()
         painterReceiptWatchdogTask = nil
+        painterCausalWatchdogTask?.cancel()
+        painterCausalWatchdogTask = nil
         cancelHistoryRepaintTasks()
         retireTransportRequestsThroughCurrent()
         repaintFences.forEach(retireTransportRequest)
@@ -11161,6 +12568,7 @@ final class MoshRenderLedgerSurfaceAdapter {
         onCancelTransportFullFrame: @escaping @MainActor (UInt64) -> Void,
         onRetireAllTransportFullFrames: @escaping @MainActor () -> UInt64,
         currentTransportOutputDeliveryID: @escaping @MainActor () -> UInt64,
+        transportIsReachable: @escaping @MainActor () -> Bool = { true },
         onSaveWindowModes: @escaping @MainActor (SurfaceId, WindowId) -> Void
     ) {
         activityController = controller
@@ -11170,6 +12578,7 @@ final class MoshRenderLedgerSurfaceAdapter {
         cancelTransportFullFrame = onCancelTransportFullFrame
         retireAllTransportFullFrames = onRetireAllTransportFullFrames
         self.currentTransportOutputDeliveryID = currentTransportOutputDeliveryID
+        self.transportIsReachable = transportIsReachable
         retireTransportRequestsThroughCurrent()
         controller.renderBindSurface = { [weak self] surfaceID, owner in
             guard let self,
@@ -11252,6 +12661,8 @@ final class MoshRenderLedgerSurfaceAdapter {
                             for: terminalOwner,
                             retryAttempt: handoff.retryAttempt
                         )
+                    } else if !handoff.causalBoundaryObserved {
+                        self.schedulePainterCausalWatchdog(for: terminalOwner)
                     }
                     return
                 }
@@ -11280,6 +12691,8 @@ final class MoshRenderLedgerSurfaceAdapter {
                 )
                 if !identityChanged {
                     self.schedulePainterRepaint(for: terminalOwner, retryAttempt: 0)
+                } else {
+                    self.schedulePainterCausalWatchdog(for: terminalOwner)
                 }
                 return
             }
@@ -11471,6 +12884,44 @@ final class MoshRenderLedgerSurfaceAdapter {
             else { return }
             self.painterRetryTask = nil
             self.beginCausalPainterRepaintIfNeeded()
+        }
+    }
+
+    /// tmux's frame for a window or pane switch can cross the driver before
+    /// the side-channel bind that waits for it: it then sits at the bind's
+    /// floor, and a quiet window sends nothing newer, so the painter stayed
+    /// closed on the previous window. With the link up and no newer frame
+    /// after the timeout, Mosh's framebuffer already shows the selection (a
+    /// differing one would have produced a delivery), and the owned full
+    /// frame snapshots it. A frame still on its way is a diff against that
+    /// snapshot and is admitted after it. Android:
+    /// `scheduleMoshPainterCausalWatchdog`.
+    private func schedulePainterCausalWatchdog(for owner: TerminalRenderOwner) {
+        painterCausalWatchdogTask?.cancel()
+        painterCausalWatchdogTask = Task { @MainActor [weak self] in
+            while true {
+                guard let timeout = self?.painterCausalTimeoutNanoseconds else { return }
+                try? await Task.sleep(nanoseconds: timeout)
+                guard !Task.isCancelled,
+                      let self,
+                      var handoff = self.painterHandoff,
+                      handoff.owner == owner,
+                      !handoff.causalBoundaryObserved,
+                      !handoff.requestInFlight,
+                      self.surfaceHandler?(.live)?.boundOwner == owner
+                else { return }
+                guard self.transportIsReachable?() ?? true else {
+                    self.recordPainterEvent("quiet-wait-unreachable owner=\(Self.ownerDescription(owner))")
+                    continue
+                }
+                handoff.causalBoundaryObserved = true
+                self.painterHandoff = handoff
+                self.painterCausalWatchdogTask = nil
+                self.recordPainterEvent("quiet-settle owner=\(Self.ownerDescription(owner))")
+                MoshDiagnostics.log("mosh view quiet-settle owner=\(Self.ownerDescription(owner))")
+                self.beginCausalPainterRepaintIfNeeded()
+                return
+            }
         }
     }
 
@@ -12364,20 +13815,23 @@ enum TerminalPrimaryScrollConsumption {
 @MainActor
 final class TerminalKeyboardHandoff {
     let issuedAt: TimeInterval
+    let validity: TimeInterval
 
     // Cover the palette fade and a pane mounted after a window switch, then
     // expire so a later, unrelated text field keeps its first responder.
-    static let validityDuration: TimeInterval = 1.0
+    nonisolated static let validityDuration: TimeInterval = 1.0
 
     private(set) var isSpent = false
     private var editingObservers: [NSObjectProtocol] = []
 
     var isLive: Bool {
-        !isSpent && ProcessInfo.processInfo.systemUptime - issuedAt <= Self.validityDuration
+        !isSpent && ProcessInfo.processInfo.systemUptime - issuedAt <= validity
     }
 
-    init(issuedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+    init(issuedAt: TimeInterval = ProcessInfo.processInfo.systemUptime,
+         validity: TimeInterval = TerminalKeyboardHandoff.validityDuration) {
         self.issuedAt = issuedAt
+        self.validity = validity
         guard isLive else { spend(); return }
 
         // The palette field is already editing. A new editing session means
@@ -12389,7 +13843,7 @@ final class TerminalKeyboardHandoff {
                 MainActor.assumeIsolated { self?.spend() }
             })
         }
-        let remaining = Self.validityDuration - (ProcessInfo.processInfo.systemUptime - issuedAt)
+        let remaining = validity - (ProcessInfo.processInfo.systemUptime - issuedAt)
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, remaining)) { [weak self] in
             self?.spend()
         }
@@ -12443,6 +13897,59 @@ extension EnvironmentValues {
     }
 }
 
+/// Change key for the session registry's one-shot requests a session view
+/// consumes (tmux focus from the switcher, Files reveal from Agent Center).
+struct SessionRegistryRequestTokens: Equatable {
+    let tmuxFocus: UInt64?
+    let filesReveal: UInt64?
+}
+
+enum ArtifactTerminalLinkRouting {
+    static func handle(
+        _ link: String,
+        openArtifact: () -> Bool,
+        showFailure: (String) -> Void
+    ) -> Bool {
+        if case .refused = ArtifactsLinkClassifier.classify(link) {
+            showFailure(String(localized: "this link could not be opened"))
+            // Pane callers resign terminal focus only when an artifact opened.
+            return false
+        }
+        return openArtifact()
+    }
+
+    static func open(
+        _ link: String,
+        onOpenLink: ((String) -> Bool)?,
+        openExternal: (URL) -> Void
+    ) {
+        if onOpenLink?(link) == true { return }
+        // A surface without an artifact callback must still refuse device loopback.
+        guard ArtifactsLinkClassifier.classify(link) != .refused,
+              let url = URL(string: link) else { return }
+        openExternal(url)
+    }
+
+    /// `sessionID` is the "opened from" hint: the terminal's own session,
+    /// or an Agent Center thread's bound session (nil when unbound).
+    static func request(
+        for link: String,
+        hostID: UUID?,
+        sessionID: UUID?,
+        canOpenArtifact: Bool
+    ) -> ArtifactOpenRequest? {
+        guard canOpenArtifact, let hostID,
+              case let .remoteLoopback(scheme, port, path) = ArtifactsLinkClassifier.classify(link)
+        else { return nil }
+        return ArtifactOpenRequest(
+            hostID: hostID,
+            target: .page(scheme: scheme, port: Int(port), path: path),
+            origin: .terminalLink,
+            sessionID: sessionID
+        )
+    }
+}
+
 struct TerminalSurfaceBound: UIViewRepresentable {
     @Environment(\.terminalDrawingEnabled) private var terminalDrawingEnabled
     @Environment(\.terminalInputAllowed) private var terminalInputAllowed
@@ -12454,14 +13961,21 @@ struct TerminalSurfaceBound: UIViewRepresentable {
     let onResize: (Int, Int) -> Void
     let onTitle: (String) -> Void
     let onUserActivity: (() -> Void)?
+    /// The reader's own input on this surface: a key, a finger or trackpad
+    /// pan. Unlike `onUserActivity`, never a terminal's automatic reply.
+    var onReaderInput: (() -> Void)? = nil
     var focusOnlyTap: (() -> Void)? = nil
     let onBell: (() -> Void)?
+    var onOpenLink: ((String) -> Bool)? = nil
     /// Primary-screen scroll delta hook (mosh shared surface). Params:
     /// view, raw pointsY, proposed offsetY (after multiplier), max offsetY,
     /// isInertial (true when the delta is a synthetic post-release glide
     /// frame rather than a live gesture event), gesture-start pane ID.
     var onPrimaryScrollbackDelta: ((TerminalView, Double, CGFloat, CGFloat, Bool, PaneId?) -> TerminalPrimaryScrollConsumption)? = nil
     var primaryScrollPaneAtLocation: ((TerminalView, CGPoint) -> PaneId?)? = nil
+    /// Rows a VoiceOver page shows when the history it moves is shorter
+    /// than this surface: a split's pane on a shared mosh canvas.
+    var primaryScrollPageRows: (() -> Int?)? = nil
     var onPrimaryScrollbackUnderflow: ((TerminalView, Double, CGFloat, CGFloat) -> Void)? = nil
     /// Pane metadata can distinguish a primary shell from the mouse-enabled
     /// tmux wrapper around it. Nil falls back to the local terminal state.
@@ -12509,7 +14023,26 @@ struct TerminalSurfaceBound: UIViewRepresentable {
     /// terminal already holds, or software-keyboard keystrokes keep flowing
     /// into the shared PTY underneath the blur.
     var forceResignFirstResponder: Bool = false
+    /// A sheet covers the terminal (the phone Files sheet). Raising it
+    /// resigns focus once, as a transition, so the software keyboard does
+    /// not squeeze the sheet and returns when it closes. Reclaim stays off
+    /// while it is up; a terminal tap may still take focus.
+    var coveringSheetPresented: Bool = false
+    private var reclaimSuppressed: Bool { suppressFirstResponderReclaim || coveringSheetPresented }
     let onHardwareKey: ((TesseraTerminalHardwareKey) -> Void)?
+    /// The session refuses keys now (the launch overlay, a veil or an
+    /// unresolved authority, the walkthrough, a hidden pane): a VoiceOver
+    /// page that would send a full-screen program its page key sends none.
+    var refusesInput: Bool = false
+    /// The focused pane of a shared mosh+tmux canvas runs a full-screen
+    /// program: the canvas shows the primary screen, but the page is the
+    /// program's own key, as the trackpad's scroll is its wheel or arrows.
+    var paneTakesPageKeys: ((TerminalView) -> Bool)? = nil
+    /// An agent's scroll block on the focused pane where the surface's own
+    /// (`agentScrollBlockingActive`) is off: a split's shared mosh canvas
+    /// holds history per pane, but its keys go to the focused one. Page keys
+    /// from the keyboard, the GCKeyboard passthrough and VoiceOver stop here.
+    var agentPageKeysBlocked: Bool = false
     /// SwiftTerm's `scrolled` (output and `changeScrollback`), plus the
     /// coordinator's own wheel/trackpad writes. UIScrollView's native pan and
     /// deceleration never arrive here.
@@ -12517,6 +14050,12 @@ struct TerminalSurfaceBound: UIViewRepresentable {
     /// A reader's finger frames on a non-native surface: UIScrollView's own
     /// pan and the deceleration after it, with the offset before the frame.
     var onNativeScrollFrame: ((TerminalView, CGFloat) -> Void)? = nil
+    /// A native-scroll surface moved by a reader without UIScrollView's own
+    /// motion (VoiceOver's page): treat it as a settled native scroll.
+    var onNativeReaderScroll: ((TerminalView) -> Void)? = nil
+    /// The view put a reader in history back on their row after a new font
+    /// or grid moved it.
+    var onReaderReplaced: ((TerminalView) -> Void)? = nil
     var scrollRetentionID: String? = nil
     var onScrollDiagnostic: ((String) -> Void)? = nil
     /// OSC 7 cwd reports (SwiftTerm's `hostCurrentDirectoryUpdate`).
@@ -12595,6 +14134,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
             onTitle: onTitle,
             onUserActivity: onUserActivity,
             onBell: onBell,
+            onOpenLink: onOpenLink,
             onPrimaryScrollbackDelta: onPrimaryScrollbackDelta,
             onPrimaryScrollbackUnderflow: onPrimaryScrollbackUnderflow,
             agentScrollBlockingActive: agentScrollBlockingActive,
@@ -12612,7 +14152,10 @@ struct TerminalSurfaceBound: UIViewRepresentable {
     func makeUIView(context: Context) -> TesseraTerminalContainer {
         let container = TesseraTerminalContainer(frame: .zero)
         context.coordinator.onNativeScrollFrame = onNativeScrollFrame
+        context.coordinator.onNativeReaderScroll = onNativeReaderScroll
+        context.coordinator.onReaderReplaced = onReaderReplaced
         context.coordinator.primaryScrollPaneAtLocation = primaryScrollPaneAtLocation
+        context.coordinator.primaryScrollPageRows = primaryScrollPageRows
         context.coordinator.primaryTouchScrollIsLocal = primaryTouchScrollIsLocal
         context.coordinator.primaryTouchScrollIsLocalForPane = primaryTouchScrollIsLocalForPane
         context.coordinator.remotePaneReportsMouse = remotePaneReportsMouse
@@ -12626,7 +14169,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         container.onSwitcherShortcut = onSwitcherShortcut
         container.onOpenSettings = onOpenSettings
         container.onOpenAgentCenter = onOpenAgentCenter
-        container.agentScrollBlockingActive = agentScrollBlockingActive
+        container.agentScrollBlockingActive = agentScrollBlockingActive || agentPageKeysBlocked
         container.onAgentScrollBlocked = onAgentScrollBlocked
         container.onFilesShortcut = onFilesShortcut
         container.onSelectionPathAction = onSelectionPathAction
@@ -12638,7 +14181,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         context.coordinator.smoothScrollingSpeed = appearance.smoothScrollingSpeed
         context.coordinator.inputAllowed = terminalInputAllowed
         context.coordinator.keyboardHandoff = terminalKeyboardHandoff
-        context.coordinator.noteFocusSuppression(suppressFirstResponderReclaim)
+        context.coordinator.noteFocusSuppression(reclaimSuppressed)
         context.coordinator.onHostDirectory = onHostDirectory
 
         let view = container.terminalView
@@ -12659,6 +14202,17 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         // would yank the whole scrollback to row 0. Disable it.
         view.scrollsToTop = false
 
+        view.onReaderReplaced = { [weak coordinator = context.coordinator, weak view] in
+            guard let view else { return }
+            coordinator?.followReaderReplacement(in: view)
+        }
+        view.onReaderPlaced = { [weak coordinator = context.coordinator, weak view] held in
+            guard let view else { return }
+            coordinator?.followPlacedReader(in: view, held: held)
+        }
+        view.holdsReader = { [weak coordinator = context.coordinator] in
+            coordinator?.holdsReader ?? false
+        }
         applyAppearance(to: view, container: container)
         if !initialData.isEmpty { view.feed(byteArray: initialData[...]) }
         context.coordinator.terminalView = view
@@ -12704,6 +14258,10 @@ struct TerminalSurfaceBound: UIViewRepresentable {
                 context.coordinator,
                 action: #selector(Coordinator.handleNativeScrollSurfacePan(_:))
             )
+            view.onAccessibilityPageScroll = { [weak coordinator = context.coordinator, weak view] direction in
+                guard let coordinator, let view else { return false }
+                return coordinator.handleNativeAccessibilityPageScroll(direction, in: view)
+            }
         } else {
             // The semantic dispatcher covers indirect input, mouse-enabled or
             // alternate-screen vertical finger pans, and every mosh+tmux
@@ -12736,6 +14294,10 @@ struct TerminalSurfaceBound: UIViewRepresentable {
             view.addGestureRecognizer(wheel)
             context.coordinator.discreteScrollGesture = wheel
             view.discreteScrollGesture = wheel
+            view.onAccessibilityPageScroll = { [weak coordinator = context.coordinator, weak view] direction in
+                guard let coordinator, let view else { return false }
+                return coordinator.handleAccessibilityPageScroll(direction, in: view)
+            }
 
             // UIScrollView (SwiftTerm's TerminalView superclass) has its own
             // built-in panGestureRecognizer that also responds to scroll-type
@@ -12825,7 +14387,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         // but only the focused pane (suppress == false) may claim first
         // responder — otherwise the last-mounted pane wins and keystrokes
         // misroute (the structural single-claimant invariant).
-        if !suppressFirstResponderReclaim {
+        if !reclaimSuppressed {
             DispatchQueue.main.async {
                 guard context.coordinator.permitsFirstResponderReclaim else { return }
                 context.coordinator.reclaimFirstResponder(on: view)
@@ -12847,7 +14409,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         container.onSwitcherShortcut = onSwitcherShortcut
         container.onOpenSettings = onOpenSettings
         container.onOpenAgentCenter = onOpenAgentCenter
-        container.agentScrollBlockingActive = agentScrollBlockingActive
+        container.agentScrollBlockingActive = agentScrollBlockingActive || agentPageKeysBlocked
         container.onAgentScrollBlocked = onAgentScrollBlocked
         container.terminalView.focusOnlyTap = focusOnlyTap
         container.terminalView.agentScrollBlockingActive = agentScrollBlockingActive
@@ -12856,21 +14418,35 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         container.onSelectionPathAction = onSelectionPathAction
         container.shortcutStore = shortcutStore
         container.onCustomShortcut = onCustomShortcut
+        context.coordinator.onReady = onReady
+        context.coordinator.onSend = onSend
+        context.coordinator.onResize = onResize
+        context.coordinator.onTitle = onTitle
+        context.coordinator.onBell = onBell
+        context.coordinator.onHardwareKey = onHardwareKey
         context.coordinator.onHostDirectory = onHostDirectory
         context.coordinator.onUserActivity = onUserActivity
+        context.coordinator.onOpenLink = onOpenLink
         context.coordinator.onPrimaryScrollbackDelta = onPrimaryScrollbackDelta
         context.coordinator.onPrimaryScrollbackUnderflow = onPrimaryScrollbackUnderflow
         context.coordinator.primaryScrollPaneAtLocation = primaryScrollPaneAtLocation
+        context.coordinator.primaryScrollPageRows = primaryScrollPageRows
         context.coordinator.primaryTouchScrollIsLocal = primaryTouchScrollIsLocal
         context.coordinator.primaryTouchScrollIsLocalForPane = primaryTouchScrollIsLocalForPane
         context.coordinator.remotePaneReportsMouse = remotePaneReportsMouse
         context.coordinator.touchPansTakePointerRoute = touchPansTakePointerRoute
         context.coordinator.remoteHistoryRevealed = remoteHistoryRevealed
         context.coordinator.onScrollGestureActivity = onScrollGestureActivity
+        context.coordinator.onReaderInput = onReaderInput
         context.coordinator.onAgentScrollBlocked = onAgentScrollBlocked
         context.coordinator.setAgentScrollBlockingActive(agentScrollBlockingActive)
         context.coordinator.onTerminalScrolled = onTerminalScrolled
         context.coordinator.onNativeScrollFrame = onNativeScrollFrame
+        context.coordinator.onNativeReaderScroll = onNativeReaderScroll
+        context.coordinator.onReaderReplaced = onReaderReplaced
+        context.coordinator.refusesInput = refusesInput
+        context.coordinator.paneTakesPageKeys = paneTakesPageKeys
+        context.coordinator.agentPageKeysBlocked = agentPageKeysBlocked
         context.coordinator.setScrollRetentionID(scrollRetentionID)
         context.coordinator.onScrollDiagnostic = onScrollDiagnostic
         context.coordinator.mouseReportingImpliesAltScreen = mouseReportingImpliesAltScreen
@@ -12882,7 +14458,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         context.coordinator.smoothScrollingSpeed = appearance.smoothScrollingSpeed
         context.coordinator.inputAllowed = terminalInputAllowed
         context.coordinator.keyboardHandoff = terminalKeyboardHandoff
-        context.coordinator.noteFocusSuppression(suppressFirstResponderReclaim)
+        context.coordinator.noteFocusSuppression(reclaimSuppressed)
         // Re-bind the mosh tap-to-focus closure + gate every update so the hit
         // test reads the current active window's layout, not a stale capture.
         context.coordinator.onPaneFocusTap = onPaneFocusTap
@@ -12899,11 +14475,12 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         // first responder back from the find input on every SwiftUI
         // re-render, so typing into the find bar loses focus mid-key.
         let view = container.terminalView
-        if forceResignFirstResponder, view.isFirstResponder {
+        let sheetRaised = context.coordinator.noteCoveringSheet(coveringSheetPresented)
+        if forceResignFirstResponder || sheetRaised, view.isFirstResponder {
             _ = view.resignFirstResponderForTransition()
         }
         if !view.isFirstResponder {
-            if !suppressFirstResponderReclaim {
+            if !reclaimSuppressed {
                 DispatchQueue.main.async {
                     guard context.coordinator.permitsFirstResponderReclaim else { return }
                     context.coordinator.reclaimFirstResponder(on: view)
@@ -12934,7 +14511,12 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         let desiredFontID = appearance.terminalFontID
         if abs(view.font.pointSize - desiredSize) > 0.5
             || container.appliedTerminalFontID != desiredFontID {
-            view.font = TerminalFontResolver.uiFont(id: desiredFontID, size: desiredSize)
+            let font = TerminalFontResolver.uiFont(id: desiredFontID, size: desiredSize)
+            if let view = view as? TesseraResponderAwareTerminalView {
+                view.setFontKeepingReader(font)
+            } else {
+                view.font = font
+            }
             container.appliedTerminalFontID = desiredFontID
         }
 
@@ -13023,15 +14605,21 @@ struct TerminalSurfaceBound: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, TerminalViewDelegate, UIGestureRecognizerDelegate {
-        let onReady: () -> Void
-        let onSend: (ArraySlice<UInt8>) -> Void
-        let onResize: (Int, Int) -> Void
-        let onTitle: (String) -> Void
+        // Every callback is a `var` that `updateUIView` re-assigns: one
+        // kept from `makeCoordinator` reads the view's first state, so a
+        // resize after an iPad grows from compact to regular went out
+        // under the compact guard and never reached the server.
+        var onReady: () -> Void
+        var onSend: (ArraySlice<UInt8>) -> Void
+        var onResize: (Int, Int) -> Void
+        var onTitle: (String) -> Void
         var onUserActivity: (() -> Void)?
-        let onBell: (() -> Void)?
+        var onBell: (() -> Void)?
+        var onOpenLink: ((String) -> Bool)?
         var onPrimaryScrollbackDelta: ((TerminalView, Double, CGFloat, CGFloat, Bool, PaneId?) -> TerminalPrimaryScrollConsumption)?
         var onPrimaryScrollbackUnderflow: ((TerminalView, Double, CGFloat, CGFloat) -> Void)?
         var onScrollGestureActivity: ((Bool) -> Void)?
+        var onReaderInput: (() -> Void)?
         var agentScrollBlockingActive: Bool
         var onAgentScrollBlocked: (() -> Void)?
         var mouseReportingImpliesAltScreen: Bool
@@ -13039,9 +14627,14 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         var softwareModifierState: ModifierState?
         /// Needed to resolve an on-screen ⌘ chord against the user's keymap.
         var shortcutStore: ShortcutStore?
-        let onHardwareKey: ((TesseraTerminalHardwareKey) -> Void)?
+        var onHardwareKey: ((TesseraTerminalHardwareKey) -> Void)?
+        var refusesInput = false
+        var paneTakesPageKeys: ((TerminalView) -> Bool)?
+        var agentPageKeysBlocked = false
         var onTerminalScrolled: ((TerminalView) -> Void)?
         var onNativeScrollFrame: ((TerminalView, CGFloat) -> Void)?
+        var onNativeReaderScroll: ((TerminalView) -> Void)?
+        var onReaderReplaced: ((TerminalView) -> Void)?
         private var nativeScrollFrameObservation: NSKeyValueObservation?
         private var scrollRetentionID: String?
         var onScrollDiagnostic: ((String) -> Void)?
@@ -13173,10 +14766,89 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         private var pendingKeyboardDismissal: Int?
         private var keyboardResigningForTransition = false
         private var expectsTransitionKeyboardHide = false
+        /// The scene the keyboard last showed in, per window like its
+        /// visibility, so a pane mounted under a shown keyboard inherits it;
+        /// see `KeyboardSceneGeometry`.
+        private final class ShownGeometry {
+            let value: KeyboardSceneGeometry
+            init(_ value: KeyboardSceneGeometry) { self.value = value }
+        }
+        private static let keyboardShownGeometryByWindow = NSMapTable<UIWindow, ShownGeometry>(
+            keyOptions: .weakMemory, valueOptions: .strongMemory)
+        private var keyboardShownGeometry: KeyboardSceneGeometry? {
+            get { terminalView?.window.flatMap { Self.keyboardShownGeometryByWindow.object(forKey: $0)?.value } }
+            set {
+                guard let window = terminalView?.window, let newValue else { return }
+                Self.keyboardShownGeometryByWindow.setObject(ShownGeometry(newValue), forKey: window)
+            }
+        }
+        /// A shown keyboard with no geometry on record, from a show this
+        /// window's panes missed, takes the scene it is in now.
+        private func seedKeyboardShownGeometry() {
+            if keyboardShownGeometry == nil, softwareKeyboardVisible || windowHasSoftwareKeyboard {
+                keyboardShownGeometry = sceneGeometry
+            }
+        }
+        /// How long a hide in changed geometry waits for the show that ends
+        /// a rotation or pose change (up to 1.1 s on a Duo turning its outer
+        /// display) before it counts as the user's. A scene still changing
+        /// then waits again, at most `transitionReshowRearms` times.
+        var transitionReshowGrace: TimeInterval = 4
+        static let transitionReshowRearms = 2
+        /// Tests that post their own keyboard notifications set this to
+        /// ignore the host's real keyboard, which can land between them.
+        var admitsKeyboardNotification: (Notification) -> Bool = { _ in true }
+
+        private var sceneGeometry: KeyboardSceneGeometry? {
+            guard let window = terminalView?.window else { return nil }
+            return KeyboardSceneGeometry(orientation: window.windowScene?.interfaceOrientation,
+                                         windowSize: window.bounds.size)
+        }
+
+        /// The scene's interface orientation beside the device's, both raw,
+        /// and the window's size.
+        private var orientationDiagnostic: String {
+            let geometry = sceneGeometry
+            let scene = geometry?.orientation?.rawValue ?? -1
+            let size = geometry.map { "\($0.windowSize.width)x\($0.windowSize.height)" } ?? "none"
+            return "scene=\(scene) device=\(UIDevice.current.orientation.rawValue) window=\(size)"
+        }
 
         private func cancelPendingKeyboardDismissal() {
             keyboardDismissalGeneration += 1
             pendingKeyboardDismissal = nil
+        }
+
+        /// A rotation or pose change shows the keyboard again once it lands;
+        /// any show or focus change in between cancels this. Without one,
+        /// the scene had already settled (a window resized with the keyboard
+        /// up) and the hide was the user's.
+        private func confirmKeyboardDismissalUnlessReshown(_ generation: Int, rearms: Int = 0) {
+            let armedIn = sceneGeometry
+            DispatchQueue.main.asyncAfter(deadline: .now() + transitionReshowGrace) { [weak self] in
+                guard let self, self.keyboardDismissalGeneration == generation, !self.softwareKeyboardVisible,
+                      self.terminalView?.isFirstResponder == true, self.keyboardContextIsActive,
+                      self.softwareModifierState?.suppressesSoftwareKeyboardReclaim == false else { return }
+                if rearms < Self.transitionReshowRearms,
+                   KeyboardSceneGeometry.hideIsTransition(shown: armedIn, now: self.sceneGeometry) {
+                    self.confirmKeyboardDismissalUnlessReshown(generation, rearms: rearms + 1)
+                    return
+                }
+                (self.terminalView as? TesseraResponderAwareTerminalView)?.noteKeyboardDiagnostic("keyboard-hide-not-reshown \(self.orientationDiagnostic)")
+                self.keyboardShownGeometry = self.sceneGeometry
+                self.pendingKeyboardDismissal = generation
+                self.settleKeyboardDismissal(generation, keyboardWasHidden: true)
+                DispatchQueue.main.async { [weak self] in self?.releaseFocusAfterDismissal() }
+            }
+        }
+
+        /// Native Hide can retain first responder. Release it only after
+        /// UIKit finishes retracting input, not in the middle of its
+        /// presentation transition.
+        private func releaseFocusAfterDismissal() {
+            guard keyboardContextIsActive, softwareModifierState?.suppressesSoftwareKeyboardReclaim == true,
+                  terminalView?.isFirstResponder == true else { return }
+            (terminalView as? TesseraResponderAwareTerminalView)?.resignFirstResponderForTransition()
         }
 
         private func settleKeyboardDismissal(_ generation: Int, keyboardWasHidden: Bool = false) {
@@ -13196,11 +14868,13 @@ struct TerminalSurfaceBound: UIViewRepresentable {
 
         func bindKeyboardFocus(to view: TesseraResponderAwareTerminalView) {
             if view.isFirstResponder, windowHasSoftwareKeyboard { softwareKeyboardVisible = true }
+            seedKeyboardShownGeometry()
             // The deferred make/update reclaim can run before SwiftUI attaches
             // a newly mounted pane, and no further update is guaranteed while
             // a palette handoff is live. Retry under the same gate once the
             // view reaches a window.
             view.onDidMoveToWindow = { [weak self, weak view] in
+                self?.seedKeyboardShownGeometry()
                 DispatchQueue.main.async {
                     guard let self, let view, !view.isFirstResponder,
                           self.permitsFirstResponderReclaim else { return }
@@ -13290,6 +14964,15 @@ struct TerminalSurfaceBound: UIViewRepresentable {
             }
         }
 
+        private var coveringSheetPresented = false
+
+        /// True only on the update that raises a covering sheet, so a terminal
+        /// tap under the open sheet keeps the focus it took.
+        func noteCoveringSheet(_ presented: Bool) -> Bool {
+            defer { coveringSheetPresented = presented }
+            return presented && !coveringSheetPresented
+        }
+
         func noteFocusSuppression(_ suppressed: Bool) {
             guard lastFocusSuppression != suppressed else { return }
             let isTransition = lastFocusSuppression != nil
@@ -13362,6 +15045,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         private var pendingGestureScrollPoints: Double = 0
         private var gestureUsesLocalTouchGain = false
         var primaryScrollPaneAtLocation: ((TerminalView, CGPoint) -> PaneId?)?
+        var primaryScrollPageRows: (() -> Int?)?
         private var primaryScrollTarget = TmuxScrollGestureTarget()
         var primaryTouchScrollIsLocal: (() -> Bool?)?
         var primaryTouchScrollIsLocalForPane: ((PaneId?) -> Bool?)?
@@ -13418,6 +15102,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         private var keyboardHideObserver: NSObjectProtocol?
         private var keyboardDidHideObserver: NSObjectProtocol?
         private weak var hardwareKeyboard: GCKeyboard?
+        private var hardwareKeyboardSubscription: HardwareKeyboardSubscription?
         var naturalTextEditingEnabled = true
         private var pendingInputBytes: [UInt8] = []
 
@@ -13428,6 +15113,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
             onTitle: @escaping (String) -> Void,
             onUserActivity: (() -> Void)?,
             onBell: (() -> Void)?,
+            onOpenLink: ((String) -> Bool)? = nil,
             onPrimaryScrollbackDelta: ((TerminalView, Double, CGFloat, CGFloat, Bool, PaneId?) -> TerminalPrimaryScrollConsumption)?,
             onPrimaryScrollbackUnderflow: ((TerminalView, Double, CGFloat, CGFloat) -> Void)?,
             agentScrollBlockingActive: Bool,
@@ -13446,6 +15132,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
             self.onTitle = onTitle
             self.onUserActivity = onUserActivity
             self.onBell = onBell
+            self.onOpenLink = onOpenLink
             self.onPrimaryScrollbackDelta = onPrimaryScrollbackDelta
             self.onPrimaryScrollbackUnderflow = onPrimaryScrollbackUnderflow
             self.agentScrollBlockingActive = agentScrollBlockingActive
@@ -13465,9 +15152,9 @@ struct TerminalSurfaceBound: UIViewRepresentable {
             keyboardShowObserver = NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
             ) { [weak self] notification in
-                guard let self else { return }
+                guard let self, self.admitsKeyboardNotification(notification) else { return }
                 let frame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-                (self.terminalView as? TesseraResponderAwareTerminalView)?.noteKeyboardDiagnostic("keyboard-will-show frame=\(String(describing: frame))")
+                (self.terminalView as? TesseraResponderAwareTerminalView)?.noteKeyboardDiagnostic("keyboard-will-show frame=\(String(describing: frame)) \(self.orientationDiagnostic)")
                 let safeBottom = self.terminalView?.window?.safeAreaInsets.bottom ?? 0
                 self.softwareKeyboardVisible = frame.map { $0.height > safeBottom } ?? true
                 if let window = self.terminalView?.window, window.isKeyWindow {
@@ -13478,38 +15165,37 @@ struct TerminalSurfaceBound: UIViewRepresentable {
                 // show supersedes that provisional dismissal, never user intent.
                 self.cancelPendingKeyboardDismissal()
                 self.expectsTransitionKeyboardHide = false
+                self.keyboardShownGeometry = self.sceneGeometry
             }
             keyboardHideObserver = NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                guard let self else { return }
+            ) { [weak self] notification in
+                guard let self, self.admitsKeyboardNotification(notification) else { return }
                 let wasVisible = self.softwareKeyboardVisible
-                (self.terminalView as? TesseraResponderAwareTerminalView)?.noteKeyboardDiagnostic("keyboard-will-hide visible=\(wasVisible) transition=\(self.expectsTransitionKeyboardHide)")
+                (self.terminalView as? TesseraResponderAwareTerminalView)?.noteKeyboardDiagnostic("keyboard-will-hide visible=\(wasVisible) transition=\(self.expectsTransitionKeyboardHide) shown=\(self.keyboardShownGeometry.map { "\($0.orientation?.rawValue ?? -1)/\($0.windowSize.width)x\($0.windowSize.height)" } ?? "none") \(self.orientationDiagnostic)")
                 self.softwareKeyboardVisible = false
                 if let window = self.terminalView?.window {
                     Self.keyboardVisibilityByWindow.removeObject(forKey: window)
                 }
-                let forTransition = self.expectsTransitionKeyboardHide
+                let expected = self.expectsTransitionKeyboardHide
+                let inOtherGeometry = KeyboardSceneGeometry.hideIsTransition(shown: self.keyboardShownGeometry, now: self.sceneGeometry)
                 self.expectsTransitionKeyboardHide = false
                 guard wasVisible, self.terminalView?.isFirstResponder == true,
-                      !forTransition, !self.keyboardResigningForTransition, self.keyboardContextIsActive,
+                      !expected, !self.keyboardResigningForTransition, self.keyboardContextIsActive,
                       self.softwareModifierState?.suppressesSoftwareKeyboardReclaim == false else { return }
                 self.cancelPendingKeyboardDismissal()
+                if inOtherGeometry {
+                    self.confirmKeyboardDismissalUnlessReshown(self.keyboardDismissalGeneration)
+                    return
+                }
                 self.pendingKeyboardDismissal = self.keyboardDismissalGeneration
                 self.settleKeyboardDismissal(self.keyboardDismissalGeneration, keyboardWasHidden: true)
             }
             keyboardDidHideObserver = NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.keyboardContextIsActive,
-                          self.softwareModifierState?.suppressesSoftwareKeyboardReclaim == true,
-                          self.terminalView?.isFirstResponder == true else { return }
-                    // Native Hide can retain first responder. Release it only
-                    // after UIKit finishes retracting input, not in the middle
-                    // of its presentation transition.
-                    (self.terminalView as? TesseraResponderAwareTerminalView)?.resignFirstResponderForTransition()
-                }
+            ) { [weak self] notification in
+                guard self?.admitsKeyboardNotification(notification) == true else { return }
+                DispatchQueue.main.async { [weak self] in self?.releaseFocusAfterDismissal() }
             }
 
             // A glide must not survive suspension: CADisplayLink freezes
@@ -13617,18 +15303,11 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         /// catch raw PageUp/PageDown events and send VT sequences ourselves
         /// only when SwiftTerm would not already send them.
         func installHardwareKeyPassthroughIfNeeded() {
-            guard onHardwareKey != nil,
-                  let keyboard = GCKeyboard.coalesced,
-                  let input = keyboard.keyboardInput
-            else { return }
-
-            if hardwareKeyboard === keyboard {
-                return
-            }
-
-            hardwareKeyboard = keyboard
-            input.keyChangedHandler = { [weak self] _, _, keyCode, pressed in
-                DispatchQueue.main.async {
+            guard onHardwareKey != nil else { return }
+            hardwareKeyboard = GCKeyboard.coalesced
+            guard hardwareKeyboardSubscription == nil else { return }
+            hardwareKeyboardSubscription = MainActor.assumeIsolated {
+                HardwareKeyboardEvents.shared.subscribe { [weak self] keyCode, pressed in
                     self?.handleHardwareKeyCode(keyCode, pressed: pressed)
                 }
             }
@@ -13642,7 +15321,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
                   let onHardwareKey
             else { return }
 
-            if agentScrollBlockingActive {
+            if agentScrollBlockingActive || agentPageKeysBlocked {
                 onUserActivity?()
                 onAgentScrollBlocked?()
                 emitScrollDiagnostic(
@@ -13758,6 +15437,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
             // (CPR, DA, DSR, window reports, DCS) carry no user intent and
             // must not kill a glide just because remote output queried us.
             if !Self.isTerminalAutoReply(data) {
+                onReaderInput?()
                 cancelScrollInertia(reason: "user-input")
                 // Typing also snaps the viewport to the live prompt (the
                 // iTerm2/Terminal convention) and drops the retained scroll
@@ -13810,7 +15490,9 @@ struct TerminalSurfaceBound: UIViewRepresentable {
         }
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-            if let url = URL(string: link) { UIApplication.shared.open(url) }
+            ArtifactTerminalLinkRouting.open(link, onOpenLink: onOpenLink) { url in
+                UIApplication.shared.open(url)
+            }
         }
         func bell(source: TerminalView) { onBell?() }
         func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
@@ -13827,6 +15509,34 @@ struct TerminalSurfaceBound: UIViewRepresentable {
                 return
             }
             desiredScrollOffsetY = min(max(0, offsetY), maxOffsetY)
+        }
+
+        /// The view re-placed a reader in history for a new font or grid,
+        /// keeping their row: the retained offset follows, or the next output
+        /// would put them back at the old geometry's offset.
+        func followReaderReplacement(in view: TerminalView) {
+            onReaderReplaced?(view)
+            guard desiredScrollOffsetY != nil else { return }
+            rememberDesiredScrollOffset(
+                view.contentOffset.y,
+                maxOffsetY: max(0, view.contentSize.height - view.bounds.height)
+            )
+        }
+
+        /// Output leaves the reader where a trackpad or VoiceOver page put them.
+        var holdsReader: Bool { desiredScrollOffsetY != nil }
+
+        /// The host put the reader back in a page it repainted. One this view
+        /// held before the repaint emptied it (`held`), or still holds, is
+        /// held at the new place: output, and a scrollback limit change that
+        /// parks the scroller at the tail, return them there, not to the
+        /// place before the rebuild.
+        func followPlacedReader(in view: TerminalView, held: Bool) {
+            guard held || desiredScrollOffsetY != nil else { return }
+            rememberDesiredScrollOffset(
+                view.contentOffset.y,
+                maxOffsetY: max(0, view.contentSize.height - view.bounds.height)
+            )
         }
 
         private func clearDesiredScrollOffset(reason: String, view: TerminalView?) {
@@ -13894,6 +15604,7 @@ struct TerminalSurfaceBound: UIViewRepresentable {
                 gestureCostMaxMs = 0
                 gestureGapMaxMs = 0
                 panGestureActive = true
+                onReaderInput?()
                 updateScrollActivity()
                 startGestureFrameDrainLink()
             } else if gestureLastEventAt > 0 {
@@ -14465,8 +16176,152 @@ struct TerminalSurfaceBound: UIViewRepresentable {
 
         @objc func handleNativeTouchPan(_ recognizer: UIPanGestureRecognizer) {
             if recognizer.state == .began {
+                onReaderInput?()
                 cancelScrollInertia(reason: "touch-pan")
+                // The finger moves the reader now; the place a trackpad or
+                // VoiceOver page held would pull them back on the next output.
+                clearDesiredScrollOffset(reason: "touch-pan", view: recognizer.view as? TerminalView ?? terminalView)
             }
+        }
+
+        /// VoiceOver's page scroll (`onAccessibilityPageScroll`): one page of
+        /// the focused pane, less a row of context, on the trackpad's
+        /// primary-history path, so the reader's place is retained, deepened
+        /// and seen by rebuilds. Where the trackpad's wheel or arrows go to a
+        /// full-screen program (mosh before its pane grid, and a mosh+tmux
+        /// pane's program), the page is the program's own: see
+        /// `sendAccessibilityPageKey`.
+        func handleAccessibilityPageScroll(
+            _ direction: UIAccessibilityScrollDirection,
+            in view: TerminalView
+        ) -> Bool {
+            let terminal = view.getTerminal()
+            guard TerminalScrollRouting.route(
+                bufferIsAlternate: terminal.isCurrentBufferAlternate,
+                mouseReporting: terminal.mouseMode != .off,
+                mouseReportingImpliesAltScreen: mouseReportingImpliesAltScreen
+            ) == .localScrollback,
+                paneTakesPageKeys?(view) != true
+            else { return sendAccessibilityPageKey(direction, in: view) }
+            onUserActivity?()
+            onReaderInput?()
+            cancelScrollInertia(reason: "accessibility-scroll")
+            // No pointer: the focused pane, as for a key.
+            primaryScrollTarget.begin(paneID: nil)
+            let row = cellDimensions(for: view).h
+            let rows = primaryScrollPageRows?() ?? Int(view.bounds.height / row)
+            let page = CGFloat(max(1, rows - 1)) * row
+            let beforeY = view.contentOffset.y
+            // The shared placement applies the pointer's 3x gain.
+            let local = applyPrimaryScrollbackDelta(
+                view: view,
+                pointsY: Double(direction == .up ? page : -page) / 3,
+                isInertial: false,
+                diagnosticPrefix: "accessibility-scroll direction=\(direction == .up ? "up" : "down")"
+            )
+            let moved = abs(view.contentOffset.y - beforeY) > 0.5
+            guard local || moved else { return false }
+            // A repeated status tells VoiceOver it reached an edge, so a page
+            // here names the new position; a pane overlay's own has none.
+            UIAccessibility.post(
+                notification: .pageScrolled,
+                argument: moved ? Self.accessibilityPosition(of: view) : nil
+            )
+            return true
+        }
+
+        /// A full-screen program has no local history to page: the page goes
+        /// to the program as its Page Up or Page Down key, which pagers,
+        /// editors and monitors take with the mouse on or off. The key is
+        /// typing: it takes the reader to the live screen and leaves the
+        /// UIKit input mirror behind. A key the session refuses, or the agent
+        /// scroll block holds, is no page, so VoiceOver hears the edge. The
+        /// program alone knows where it is, so the page names the key it sent.
+        private func sendAccessibilityPageKey(
+            _ direction: UIAccessibilityScrollDirection,
+            in view: TerminalView
+        ) -> Bool {
+            let key: TesseraTerminalHardwareKey = direction == .up ? .pageUp : .pageDown
+            onUserActivity?()
+            if agentScrollBlockingActive || agentPageKeysBlocked {
+                onAgentScrollBlocked?()
+                emitScrollDiagnostic("agent-scroll-blocked input=accessibility-\(key)")
+                return false
+            }
+            guard !refusesInput else {
+                emitScrollDiagnostic("accessibility-page-key refused key=\(key)")
+                return false
+            }
+            clearDesiredScrollOffset(reason: "accessibility-page-key", view: view)
+            followLiveOutputForTyping(reason: "accessibility-page-key")
+            view.discardTextInputMirror()
+            onSend(ArraySlice(key.escapeSequence))
+            emitScrollDiagnostic("accessibility-page-key key=\(key)")
+            UIAccessibility.post(notification: .pageScrolled, argument: Self.pageKeyAnnouncement(key))
+            return true
+        }
+
+        /// VoiceOver hears a status it just heard as an edge, so pages in a
+        /// row count themselves ("Page up", "Page up 2", …); a turn the other
+        /// way starts over, and so does a page after a pause, unless the bare
+        /// name is what VoiceOver heard last.
+        private static var lastPageKey: (key: TesseraTerminalHardwareKey, count: Int, at: TimeInterval)?
+        static let pageKeyCountPause: TimeInterval = 30
+
+        static func pageKeyAnnouncement(
+            _ key: TesseraTerminalHardwareKey,
+            now: TimeInterval = ProcessInfo.processInfo.systemUptime
+        ) -> String {
+            var count = 1
+            if let last = lastPageKey, last.key == key {
+                count = now - last.at < pageKeyCountPause || last.count == 1 ? last.count + 1 : 1
+            }
+            lastPageKey = (key, count, now)
+            let name = key == .pageUp ? String(localized: "Page up") : String(localized: "Page down")
+            return count == 1 ? name : "\(name) \(count.formatted())"
+        }
+
+        /// Typing the view did not send itself (the accessory bar, a
+        /// swipe-pad macro, a custom shortcut, a typed path, a VoiceOver page
+        /// key) takes the reader to the live prompt as the view's own keys do.
+        func followLiveOutputForTyping(reason: String = "user-input") {
+            onReaderInput?()
+            cancelScrollInertia(reason: reason)
+            snapToBottomForUserInput()
+        }
+
+        /// The same page on a native-scroll surface (a split's history
+        /// overlay), reported as a settled reader move: UIKit's own page
+        /// left the host treating it as output and snapping back. At the top
+        /// it still asks the host for older rows.
+        func handleNativeAccessibilityPageScroll(
+            _ direction: UIAccessibilityScrollDirection,
+            in view: TerminalView
+        ) -> Bool {
+            let row = cellDimensions(for: view).h
+            let page = CGFloat(max(1, Int(view.bounds.height / row) - 1)) * row
+            let maxOffsetY = max(0, view.contentSize.height - view.bounds.height)
+            let beforeY = view.contentOffset.y
+            let targetY = min(max(0, beforeY + (direction == .up ? -page : page)), maxOffsetY)
+            onUserActivity?()
+            onReaderInput?()
+            guard abs(targetY - beforeY) > 0.5 else {
+                if direction == .up { onNativeReaderScroll?(view) }
+                return false
+            }
+            view.contentOffset = CGPoint(x: view.contentOffset.x, y: targetY)
+            onNativeReaderScroll?(view)
+            UIAccessibility.post(notification: .pageScrolled, argument: Self.accessibilityPosition(of: view))
+            return true
+        }
+
+        /// "First visible row of all rows", which changes with every page.
+        private static func accessibilityPosition(of view: TerminalView) -> String {
+            let rows = max(1, view.getTerminal().rows)
+            let rowHeight = max(1, view.bounds.height / CGFloat(rows))
+            let total = max(rows, Int((view.contentSize.height / rowHeight).rounded()))
+            let first = min(total, Int((view.contentOffset.y / rowHeight).rounded()) + 1)
+            return String(localized: "\(first) of \(total)")
         }
 
         /// Reports a reader's finger frames to `onNativeScrollFrame`.
@@ -15022,7 +16877,7 @@ struct SplitBatchHarnessView: View {
                 TerminalSurfaceBound(
                     initialData: [], onMade: { box.attach($0); box.markRenderReady() },
                     onReady: {}, onSend: { _ in }, onResize: { _, _ in }, onTitle: { _ in },
-                    onUserActivity: nil, onBell: nil, mouseReportingImpliesAltScreen: false,
+                    onUserActivity: nil, onBell: nil, onOpenLink: nil, mouseReportingImpliesAltScreen: false,
                     suppressDirectColorQueryResponses: true, tmuxShortcutsEnabled: false,
                     onTmuxShortcut: { _ in }, onFindShortcut: nil, onSwitcherShortcut: nil,
                     onOpenSettings: nil, suppressFirstResponderReclaim: true, onHardwareKey: nil

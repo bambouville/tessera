@@ -184,8 +184,7 @@ struct TerminalSettingsView: View {
             .onChange(of: appearance.bellNotificationEnabled) { _, newValue in
                 guard newValue else { return }
                 Task {
-                    let status = await bellController.requestPermissionIfNeeded()
-                    if status == .denied { showDenialSheet = true }
+                    if await bellController.requestPermission().deniedBeforeAsking { showDenialSheet = true }
                 }
             }
             .padding(.bottom, 12)

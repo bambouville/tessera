@@ -108,7 +108,7 @@ class RemoteFilesRecoveryInstrumentedTest {
                 val finished = awaitValue("replace") {
                     replacing.transfers.value.singleOrNull()?.takeIf { it.phase in FINISHED }
                 }
-                assertEquals(finished.error, TransferPhase.COMPLETED, finished.phase)
+                assertEquals(finished.error?.toString(), TransferPhase.COMPLETED, finished.phase)
                 assertEquals("replacement", probe.read(notes))
                 assertEquals(listOf("notes.txt"), probe.list(directory).map { it.name })
                 awaitValue("journal cleared after replace") { Unit.takeIf { journal.getString(JOURNAL_KEY, null) == null } }

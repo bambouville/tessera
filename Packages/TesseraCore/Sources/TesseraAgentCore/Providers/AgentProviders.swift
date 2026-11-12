@@ -410,10 +410,10 @@ public struct AgentTranscriptNormalizer: Sendable {
             return .init(message: .init(recordID: record.recordID, role: .assistant, displayTime: displayTime(object), blocks: [.thinking(clipped(text(object), limit: 16_384))]))
         case "tool_call", "tool-use":
             let name = clipped(object["name"]?.stringValue ?? "Tool", limit: 256)
-            return .init(message: .init(recordID: record.recordID, role: .tool, displayTime: nil, blocks: [.toolCall(name: name, preview: clipped(text(object), limit: 16_384))]))
+            return .init(message: .init(recordID: record.recordID, role: .tool, displayTime: nil, blocks: [.toolCall(name: name, preview: clipped(text(object), limit: 16_384), callID: toolCallID(object))]))
         case "tool_result", "tool-result":
             let original = text(object)
-            return .init(message: .init(recordID: record.recordID, role: .tool, displayTime: displayTime(object), blocks: [.toolResult(preview: clipped(original, limit: 16_384), truncated: original.utf8.count > 16_384)]), activity: activity(record, kind: .tool, title: object["name"]?.stringValue ?? "Tool"))
+            return .init(message: .init(recordID: record.recordID, role: .tool, displayTime: displayTime(object), blocks: [.toolResult(preview: clipped(original, limit: 16_384), truncated: original.utf8.count > 16_384, callID: toolCallID(object))]), activity: activity(record, kind: .tool, title: object["name"]?.stringValue ?? "Tool"))
         case "edit", "file_edit":
             let edit = AgentEditRecord(id: record.recordID, path: object["path"]?.stringValue, additions: decimalInt(object["additions"]?.numberValue), deletions: decimalInt(object["deletions"]?.numberValue), diff: object["diff"]?.stringValue)
             return .init(message: .init(recordID: record.recordID, role: .tool, displayTime: displayTime(object), blocks: [.edit(path: edit.path, diff: edit.diff)]), activity: activity(record, kind: .tool, title: "Edit", detail: edit.path), edit: edit)
@@ -483,6 +483,17 @@ public struct AgentTranscriptNormalizer: Sendable {
         if blocks.isEmpty, let fallback = prose(text(object), truncated: object["truncated"]?.boolValue == true) {
             blocks = [fallback]
         }
+        // Claude records one content block per line, so a record carries at
+        // most one edit; its card follows the call, outside the tool run.
+        var edit: AgentEditRecord?
+        if providerID == .claude {
+            blocks = blocks.flatMap { block -> [AgentBlock] in
+                guard edit == nil, case .toolCall(let name, let preview, _) = block,
+                      let derived = AgentClaudeEdit.edit(name: name, preview: preview, recordID: recordID) else { return [block] }
+                edit = derived
+                return [block, .edit(path: derived.path, diff: derived.diff)]
+            }
+        }
         let shortened = object["truncated"]?.boolValue == true ||
             (object["blocks"]?.arrayValue ?? []).contains { $0.objectValue?["truncated"]?.boolValue == true }
         if shortened && !blocks.isEmpty {
@@ -503,7 +514,8 @@ public struct AgentTranscriptNormalizer: Sendable {
             model: object["model"]?.stringValue.map { clipped($0, limit: 256) },
             projectBasename: object["project"]?.stringValue.map { clipped($0, limit: 256) },
             branch: object["branch"]?.stringValue.map { clipped($0, limit: 512) },
-            permissionMode: permissionMode(object["permissionMode"]?.stringValue)
+            permissionMode: permissionMode(object["permissionMode"]?.stringValue),
+            edit: edit
         )
     }
 
@@ -552,8 +564,8 @@ public struct AgentTranscriptNormalizer: Sendable {
         case "system-event": return .systemEvent(clipped(block["text"]?.stringValue ?? "Provider event", limit: 16_384))
         case "text": return .text(clipped(block["text"]?.stringValue ?? "", limit: 16_384))
         case "thinking": return .thinking(clipped(block["text"]?.stringValue ?? "", limit: 16_384))
-        case "tool_call": return .toolCall(name: clipped(block["name"]?.stringValue ?? "Tool", limit: 256), preview: clipped(block["preview"]?.stringValue ?? "", limit: 16_384))
-        case "tool_result": return .toolResult(preview: clipped(block["preview"]?.stringValue ?? "", limit: 16_384), truncated: block["truncated"]?.boolValue ?? false)
+        case "tool_call": return .toolCall(name: clipped(block["name"]?.stringValue ?? "Tool", limit: 256), preview: clipped(block["preview"]?.stringValue ?? "", limit: 16_384), callID: toolCallID(block))
+        case "tool_result": return .toolResult(preview: clipped(block["preview"]?.stringValue ?? "", limit: 16_384), truncated: block["truncated"]?.boolValue ?? false, callID: toolCallID(block))
         case "edit": return .edit(path: block["path"]?.stringValue.map { clipped($0, limit: 2_048) }, diff: block["diff"]?.stringValue.map { clipped($0, limit: 65_536) })
         case "attachment": return .attachment(name: clipped(block["name"]?.stringValue ?? "attachment", limit: 512), mediaType: block["mediaType"]?.stringValue.map { clipped($0, limit: 128) })
         case "system": return .systemEvent(clipped(block["text"]?.stringValue ?? "System event", limit: 16_384))
@@ -577,6 +589,10 @@ public struct AgentTranscriptNormalizer: Sendable {
 
     private func text(_ object: [String: AgentJSONValue]) -> String {
         object["text"]?.stringValue ?? object["content"]?.stringValue ?? object["message"]?.stringValue ?? ""
+    }
+
+    private func toolCallID(_ object: [String: AgentJSONValue]) -> String? {
+        AgentToolCallIdentity.whole(object["toolCallID"]?.stringValue)
     }
 
     private func clipped(_ value: String, limit: Int) -> String {

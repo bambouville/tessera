@@ -134,6 +134,391 @@ class TerminalPixelScrollInstrumentedTest {
         }
     }
 
+    /**
+     * A same-pane rebind with no gesture asking (a resize, a font change, a
+     * repaint that could not refresh in place) empties the transcript the
+     * reader is in; the settle of the owner it installed puts them back at
+     * their distance from the live screen. A second bind before that page
+     * keeps the first place, also over only the first rebuild's visible
+     * rows; history since, the owner's or a painter's, samples the place
+     * afresh. A settle of another owner never restores, and a touch,
+     * typing, a wheel or a font change in between are honoured.
+     */
+    @Test fun aRebuildReturnsTheReaderToTheirPlace() = withTerminal { surface ->
+        val owner = com.bambouville.tessera.terminal.RenderOwner(1, 1, 1, 1)
+        val page = buildString { repeat(400) { append("ROW-$it\r\n") } }.encodeToByteArray()
+        val cases = listOf(
+            "none", "second-bind", "visible-only", "history-since", "painter-history", "other-owner-settle",
+            "touch", "typing", "wheel", "font",
+        )
+        cases.forEachIndexed { index, interruption ->
+            instrumentation.runOnMainSync {
+                val view = surface.view
+                val first = owner.copy(epoch = 10L * (index + 1))
+                surface.bind(first)
+                surface.feed(first, page)
+                view.topRow = -120
+                var held = view.scrollPositionPixels
+                assertTrue(held < 0)
+
+                var bound = first.copy(epoch = first.epoch + 1)
+                view.holdScrollForRebuild(bound)
+                surface.bind(bound)
+                assertEquals("the bind empties the transcript onto its tail", 0f, view.scrollPositionPixels, 0f)
+                fun rebindAgain() {
+                    bound = bound.copy(epoch = bound.epoch + 1)
+                    view.holdScrollForRebuild(bound)
+                    surface.bind(bound)
+                }
+                when (interruption) {
+                    "second-bind" -> rebindAgain()
+                    "visible-only" -> {
+                        // A repaint into a surface taller than its pane
+                        // scrolls a few rows off the top.
+                        val rows = view.mEmulator.mRows
+                        surface.feed(bound, ("\u001b[H\u001b[2JVISIBLE" + "\r\n".repeat(rows + 2)).encodeToByteArray())
+                        assertTrue(view.mEmulator.screen.activeTranscriptRows in 1 until rows)
+                        rebindAgain()
+                    }
+                    "history-since" -> {
+                        surface.feed(bound, page)
+                        rebindAgain()
+                    }
+                    "painter-history" -> {
+                        surface.feed(page)
+                        rebindAgain()
+                    }
+                    "touch" -> view.mGestureRecognizer.mListener.onDown(200f, 400f)
+                    "typing" -> view.followLiveOutput()
+                    "wheel" -> {
+                        val event = MotionEvent.obtain(0, 0, MotionEvent.ACTION_SCROLL, 100f, 100f, 0)
+                        view.doScroll(event, -1)
+                        event.recycle()
+                    }
+                    "font" -> {
+                        val before = view.mRenderer.fontLineSpacing
+                        view.setFont(view.mRenderer.mTextSize * 2, view.typeface)
+                        held *= view.mRenderer.fontLineSpacing.toFloat() / before
+                    }
+                }
+                surface.feed(bound, page)
+                if (interruption == "other-owner-settle") {
+                    view.completeRebuildScroll(first)
+                    assertEquals("another owner's settle leaves the reader be", 0f, view.scrollPositionPixels, 0f)
+                }
+                view.completeRebuildScroll(bound)
+                when (interruption) {
+                    "history-since", "painter-history", "touch", "typing", "wheel" ->
+                        assertEquals("$interruption: the reader's own place wins", 0f, view.scrollPositionPixels, 0f)
+                    else ->
+                        assertEquals("$interruption: the reader's distance from the live screen", held, view.scrollPositionPixels, .01f)
+                }
+                view.completeRebuildScroll(bound)
+                view.followLiveOutput()
+                if (interruption == "font") view.setFont(view.mRenderer.mTextSize / 2, view.typeface)
+            }
+            // A font change lays out its new grid before the next case.
+            instrumentation.waitForIdleSync()
+        }
+    }
+
+    /**
+     * A grid change (a font, a rotation, a fold) put a history reader on the
+     * live tail before the rebuild that follows it sampled their place, so
+     * the rebuild restored the tail (Duo retest M5 items 1, 3 and 4). They
+     * keep their row, through an explicit pane grid too.
+     */
+    @Test fun aGridChangeKeepsTheReaderOnTheirRow() = withTerminal { surface ->
+        fun topLine(): String = surface.view.let { view ->
+            view.mEmulator.screen.getSelectedText(0, view.topRow, view.mEmulator.mColumns - 1, view.topRow).take(4)
+        }
+        var held = ""
+        var rows = 0
+        instrumentation.runOnMainSync {
+            // A narrow device wraps the 48-cell rows: read from a line's first.
+            val view = surface.view
+            view.topRow = (-100 downTo -101).first { row ->
+                view.mEmulator.screen.getSelectedText(0, row, 3, row).all(Char::isDigit)
+            }
+            held = topLine()
+            rows = surface.view.mEmulator.mRows
+            assertTrue("the reader must be in history", surface.view.scrollPositionPixels < 0)
+            // A smaller font widens the grid, so no row rewraps.
+            surface.view.setFont(surface.view.mRenderer.mTextSize * 2 / 3, surface.view.typeface)
+        }
+        instrumentation.waitForIdleSync()
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            assertNotEquals("the font must refit the grid", rows, view.mEmulator.mRows)
+            assertEquals("a new font keeps the reader's row", held, topLine())
+            surface.resize(view.mEmulator.mColumns, view.mEmulator.mRows - 3)
+            assertEquals("an explicit grid keeps the reader's row", held, topLine())
+            view.followLiveOutput()
+            surface.resize(view.mEmulator.mColumns, view.mEmulator.mRows + 3)
+            assertEquals("the live screen keeps its tail", 0f, view.scrollPositionPixels, 0f)
+            view.setFont(view.mRenderer.mTextSize * 3 / 2, view.typeface)
+        }
+        instrumentation.waitForIdleSync()
+    }
+
+    /**
+     * A narrower grid rewraps the lines above the cursor and a shorter one
+     * drops the blank rows below it, so the reader is kept on their line, not
+     * a row count. A rebuild's held place and a page's pending one move with
+     * it, and one a bind emptied the transcript under takes the rows a taller
+     * grid fills from the pane's history.
+     */
+    @Test fun aGridChangeKeepsTheReaderOnTheirLine() = withTerminal { surface ->
+        fun topLine(view: TerminalView): String =
+            view.mEmulator.screen.getSelectedText(0, view.topRow, view.mEmulator.mColumns - 1, view.topRow).take(5)
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            surface.resize(100, 30)
+            surface.feed(buildString { repeat(400) { append("L%04d %s\r\n".format(it, "x".repeat(64))) } }.encodeToByteArray())
+            view.topRow = -200
+            val held = topLine(view)
+            assertTrue(held, held.startsWith("L0"))
+            surface.resize(40, 30)
+            assertEquals("a narrower grid keeps the reader's line", held, topLine(view))
+            surface.resize(100, 30)
+            assertEquals("a wider grid keeps the reader's line", held, topLine(view))
+
+            // Fewer blank rows below the cursor than the grid loses: the rest
+            // of the screen goes into history above the reader.
+            surface.feed("\u001b[2J\u001b[H${buildString { repeat(25) { append("C%04d\r\n".format(it)) } }}$ ".encodeToByteArray())
+            view.topRow = -50
+            val cleared = topLine(view)
+            surface.resize(100, 20)
+            assertEquals("a shorter grid keeps the reader's line", cleared, topLine(view))
+
+            view.topRow = -120
+            val rebuilt = topLine(view)
+            val owner = Any()
+            view.holdScrollForRebuild(owner)
+            view.resetScrollForRenderOwner()
+            surface.resize(40, 20)
+            view.completeRebuildScroll(owner)
+            assertEquals("a held rebuild keeps the reader's line", rebuilt, topLine(view))
+
+            // At 40 columns a line takes two rows: start on a line's first.
+            view.topRow = (-90 downTo -91).first { row ->
+                view.mEmulator.screen.getSelectedText(0, row, 4, row).startsWith("L")
+            }
+            val paged = topLine(view)
+            view.beginHistoryScroll()
+            view.resetScrollForRenderOwner()
+            surface.resize(100, 20)
+            view.completeHistoryScroll(0)
+            assertEquals("a pending page keeps the reader's line", paged, topLine(view))
+
+            // The pane's page after a taller grid: tmux pulls its history back
+            // onto the screen, as feeding the same lines into it does.
+            val page = buildString { repeat(300) { append("R%04d\r\n".format(it)) } }.encodeToByteArray()
+            val shown = com.bambouville.tessera.terminal.RenderOwner(1, 1, 1, 1)
+            surface.bind(shown)
+            surface.feed(shown, page)
+            view.topRow = -120
+            val pulled = topLine(view)
+            val bound = shown.copy(epoch = 2)
+            view.holdScrollForRebuild(bound)
+            surface.bind(bound)
+            assertEquals("the bind empties the transcript", 0, view.mEmulator.screen.activeTranscriptRows)
+            surface.resize(100, 25)
+            surface.feed(bound, page)
+            view.completeRebuildScroll(bound)
+            assertEquals("a taller grid fills from the pane's history", pulled, topLine(view))
+            view.followLiveOutput()
+        }
+    }
+
+    /**
+     * A taller grid pulls the pane's history back over a held place a few
+     * rows up, below the screen's top, where the emptied transcript adds
+     * blank rows instead. A shorter grid before the page drops those blank
+     * rows here, and pushes the rows back in the pane: the place returns.
+     */
+    @Test fun aHeldPlacePulledOntoTheScreenComesBack() = withTerminal { surface ->
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            surface.resize(100, 20)
+            // Rows alike, so the reader's text can't stand in for the place.
+            val page = "same\r\n".repeat(300).encodeToByteArray()
+            val shown = com.bambouville.tessera.terminal.RenderOwner(1, 1, 1, 1)
+            surface.bind(shown)
+            surface.feed(shown, page)
+            view.topRow = -5
+            val held = view.scrollPositionPixels
+            val bound = shown.copy(epoch = 2)
+            view.holdScrollForRebuild(bound)
+            surface.bind(bound)
+            surface.resize(100, 35)
+            surface.resize(100, 20)
+            surface.feed(bound, page)
+            view.completeRebuildScroll(bound)
+            assertEquals("the reader is a few rows up again", held, view.scrollPositionPixels, .01f)
+
+            // A taller grid alone: the pane shows the rows it pulled back.
+            val grown = shown.copy(epoch = 3)
+            view.holdScrollForRebuild(grown)
+            surface.bind(grown)
+            surface.resize(100, 23)
+            surface.feed(grown, page)
+            view.completeRebuildScroll(grown)
+            assertEquals("the reader is three rows nearer the tail", held + 3 * view.mRenderer.mFontLineSpacing,
+                view.scrollPositionPixels, .01f)
+
+            // A pending page holds its place through the same change.
+            surface.resize(100, 20)
+            view.topRow = -5
+            val paged = shown.copy(epoch = 4)
+            view.beginHistoryScroll()
+            surface.bind(paged)
+            surface.resize(100, 35)
+            surface.resize(100, 20)
+            surface.feed(paged, page)
+            view.completeHistoryScroll(0)
+            assertEquals("the page puts the reader a few rows up again", held, view.scrollPositionPixels, .01f)
+            view.followLiveOutput()
+        }
+    }
+
+    /**
+     * After `clear` the pane's cursor sits near its top. A taller pane pulls
+     * its history back over the new rows all the same, and a shorter one
+     * then drops its blank rows below the cursor and pushes nothing back.
+     */
+    @Test fun aPaneOverBlankRowsKeepsTheRowsItPulled() = withTerminal { surface ->
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            surface.resize(100, 20)
+            val page = "same\r\n".repeat(300).encodeToByteArray()
+            val shown = com.bambouville.tessera.terminal.RenderOwner(1, 1, 1, 1)
+            surface.bind(shown)
+            surface.feed(shown, page)
+            surface.feed(shown, "\u001b[2J\u001b[Hprompt$ ".encodeToByteArray())
+            view.topRow = -15
+            val bound = shown.copy(epoch = 2)
+            view.holdScrollForRebuild(bound)
+            surface.bind(bound)
+            surface.resize(100, 30)
+            surface.resize(100, 25)
+            surface.feed(bound, page)
+            view.completeRebuildScroll(bound)
+            assertEquals("the reader is the ten pulled rows nearer the tail", -5f * view.mRenderer.mFontLineSpacing,
+                view.scrollPositionPixels, .01f)
+            view.followLiveOutput()
+        }
+    }
+
+    /** A pending page's reader dragged onto the live tail stays there through a shorter grid. */
+    @Test fun aPendingPageDraggedOntoTheTailStaysThere() = withTerminal { surface ->
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            surface.resize(100, 20)
+            val page = "same\r\n".repeat(300).encodeToByteArray()
+            val shown = com.bambouville.tessera.terminal.RenderOwner(1, 1, 1, 1)
+            surface.bind(shown)
+            surface.feed(shown, page)
+            view.topRow = -2
+            view.beginHistoryScroll()
+            val paged = shown.copy(epoch = 2)
+            surface.bind(paged)
+            surface.resize(100, 30)
+            drag(view, view.mRenderer.mFontLineSpacing.toFloat())
+            surface.resize(100, 20)
+            surface.feed(paged, page)
+            view.completeHistoryScroll(0)
+            assertEquals("the reader follows the live tail", 0f, view.scrollPositionPixels, .01f)
+            view.followLiveOutput()
+        }
+    }
+
+    /**
+     * tmux repaints a rebuilt page in its own rows at the new width, which
+     * need not be this view's: a line tmux wrapped came back from the last
+     * capture as two rows the view can't join, and comes back from this one
+     * joined. The rows from the live screen land elsewhere; the reader's
+     * text doesn't.
+     */
+    @Test fun aRebuiltPageInTmuxRowsFindsTheReadersText() = withTerminal { surface ->
+        fun topLine(view: TerminalView): String =
+            view.mEmulator.screen.getSelectedText(0, view.topRow, view.mEmulator.mColumns - 1, view.topRow)
+                .takeWhile { it != '-' }
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            surface.resize(50, 20)
+            // Each line starts as the last one's tail goes on: its text is found past a false start.
+            val lines = (1..200).map { "aaab$it-" + "a".repeat(61) }
+            val shown = com.bambouville.tessera.terminal.RenderOwner(1, 1, 1, 1)
+            surface.bind(shown)
+            surface.feed(shown, lines.joinToString("") { "${it.take(50)}\r\n${it.drop(50)}\r\n" }.encodeToByteArray())
+            view.topRow = (-100 downTo -101).first { row ->
+                view.mEmulator.screen.getSelectedText(0, row, 4, row).startsWith("aaab")
+            }
+            val held = topLine(view)
+            val bound = shown.copy(epoch = 2)
+            view.holdScrollForRebuild(bound)
+            surface.bind(bound)
+            surface.resize(100, 20)
+            surface.feed(bound, lines.joinToString("") { "$it\r\n" }.encodeToByteArray())
+            view.completeRebuildScroll(bound)
+            assertEquals("the rebuild finds the reader's line in tmux's rows", held, topLine(view))
+            view.followLiveOutput()
+        }
+    }
+
+    /**
+     * A shorter grid with no blank rows below the cursor pushes the cursor's
+     * own line above the screen, and the emulator's cursor to the screen's
+     * top row, another line: the reader is kept from the cursor's line.
+     */
+    @Test fun aCursorPushedAboveTheScreenKeepsTheReaderOnTheirLine() = withTerminal { surface ->
+        fun topLine(view: TerminalView): String =
+            view.mEmulator.screen.getSelectedText(0, view.topRow, view.mEmulator.mColumns - 1, view.topRow).take(5)
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            surface.resize(100, 30)
+            surface.feed(buildString { repeat(200) { append("L%04d\r\n".format(it)) } }.encodeToByteArray())
+            surface.feed("\u001b[3;1H".encodeToByteArray())
+            view.topRow = -50
+            val held = topLine(view)
+            surface.resize(100, 20)
+            assertEquals("the emulator puts the cursor on the screen's top row", 0, view.mEmulator.cursorRow)
+            assertEquals("a shorter grid keeps the reader's line", held, topLine(view))
+            view.followLiveOutput()
+        }
+    }
+
+    /**
+     * A refit while a page is pending (a font's, here) keeps the release
+     * motion the page will carry on, as the font change itself does.
+     */
+    @Test fun aRefitWhileAPageIsPendingKeepsItsRelease() = withTerminal { surface ->
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            view.setSmoothScrollingEnabled(true)
+            view.topRow = -10
+            view.setHistoryScrollRequest { view.beginHistoryScroll() }
+            drag(view, -30f)
+            val event = MotionEvent.obtain(0, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, 300f, 800f, 0)
+            view.mGestureRecognizer.mListener.onFling(event, 0f, 2400f)
+            event.recycle()
+            assertTrue("the release waits for the page", view.isHistoryScrollPending)
+            view.setFont(view.mRenderer.mTextSize * 2 / 3, view.typeface)
+        }
+        instrumentation.waitForIdleSync()
+        instrumentation.runOnMainSync {
+            val view = surface.view
+            view.completeHistoryScroll(-10)
+            assertFalse("the page carries the release on", view.mScroller.isFinished)
+            view.cancelSmoothScroll()
+            view.setHistoryScrollRequest(null)
+            view.followLiveOutput()
+            view.setFont(view.mRenderer.mTextSize * 3 / 2, view.typeface)
+        }
+        instrumentation.waitForIdleSync()
+    }
+
     @Test fun rejectedPageAndTypingReleasePendingMotion() = withTerminal { surface ->
         instrumentation.runOnMainSync {
             val view = surface.view

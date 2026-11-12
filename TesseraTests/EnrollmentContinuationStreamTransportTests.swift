@@ -103,7 +103,7 @@ final class EnrollmentContinuationStreamTransportTests: XCTestCase {
                 input: pair.firstInput,
                 output: pair.firstOutput
             )
-        weak var drainingSender = sender
+        weak let drainingSender = sender
         let receiver = EnrollmentContinuationStreamTransport(
             input: pair.secondInput,
             output: pair.secondOutput
@@ -133,8 +133,12 @@ final class EnrollmentContinuationStreamTransportTests: XCTestCase {
 
         receiver.close()
         await fulfillment(of: [senderClosed], timeout: 2)
-        for _ in 0..<10 where drainingSender != nil {
-            await Task.yield()
+        // The cancelled forced-close task holds the last reference; its sleep
+        // resumes off the main actor, so yields alone don't bound the release.
+        // One second stays well inside the five-second forced close.
+        let releaseDeadline = ContinuousClock.now + .seconds(1)
+        while drainingSender != nil, ContinuousClock.now < releaseDeadline {
+            try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertNil(
             drainingSender,

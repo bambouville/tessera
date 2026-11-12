@@ -1,24 +1,74 @@
 #include "WindowSession.h"
+#include <iterator>
 #include <set>
 
 namespace tessera {
+namespace {
+const char* const seekableSources[] = {"claude-chain:", "pi-chain:", "kimi-history:", "codex-history:"};
+// A provider's own record ID, not one a reader made from its offset ("v1:",
+// and "interrupted:" for a Kimi call that never got its result).
+bool ownRecordID(const std::string& id) {
+    return !id.empty() && id.size() <= 64 && id.rfind("v1:", 0) != 0 && id.rfind("interrupted:", 0) != 0 &&
+        std::all_of(id.begin(), id.end(), [](unsigned char c) { return c > 0x20 && c < 0x7f && c != '"' && c != '\\'; });
+}
+void fold(uint64_t& hash, const std::string& bytes) {
+    for (const unsigned char c : bytes) { hash ^= c; hash *= 1099511628211ull; }
+}
+}
+std::string seekToken(const NormalizedRecord& record) {
+    // A record with an ID of its own is proven by its name, which a revision
+    // keeps: the digest covers its turn (Codex names an item by turn and ID)
+    // and the ID follows it. Any other record is proven by its content.
+    const bool named = ownRecordID(record.providerID);
+    uint64_t hash = 14695981039346656037ull;
+    if (named) { fold(hash, record.turnID); fold(hash, std::string(1, '\0')); fold(hash, record.providerID); }
+    else fold(hash, record.json);
+    static const char digits[] = "0123456789abcdef";
+    std::string token(16, '0');
+    for (size_t index = 16; index-- > 0; hash >>= 4) token[index] = digits[hash & 15];
+    return named ? token + ":" + record.providerID : token;
+}
+bool validSeekToken(const std::string& token) {
+    return token.size() >= 16 && std::all_of(token.begin(), token.begin() + 16,
+        [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }) &&
+        (token.size() == 16 || (token[16] == ':' && ownRecordID(token.substr(17))));
+}
 WindowReply WindowSession::read(WindowPageReader& reader, CodexServer& codex, const Source& suppliedSource,
         const std::string& transaction, const std::string& operation, const std::string& cursor,
-        uint64_t version, size_t limit, bool automatic, size_t serviceBytes) {
+        uint64_t version, size_t limit, bool automatic, size_t serviceBytes, const WindowSeek& target) {
     auto source = suppliedSource;
-    const bool bootstrap = operation == "bootstrap", head = operation == "head";
-    const bool forward = operation == "after" || head;
-    if (!bootstrap && !head && operation != "before" && operation != "after") throw std::runtime_error("invalidWindowOperation");
+    const bool bootstrap = operation == "bootstrap", head = operation == "head", seek = operation == "seek";
+    const bool forward = operation == "after" || head || seek;
+    if (!bootstrap && !head && !seek && operation != "before" && operation != "after") throw std::runtime_error("invalidWindowOperation");
     if (bootstrap && !cursor.empty()) throw std::runtime_error("invalidWindowAnchor");
     expire();
     std::optional<WindowAnchor> anchor;
     if (!bootstrap) {
+        // A seek names the live cursor: it is asked of the window the app
+        // holds now, whose source the match's order must still belong to.
         auto found = anchors_.find(cursor);
         if (found == anchors_.end() || found->second.source != generation_ || found->second.forward != forward ||
-            (head && cursor != live_)) throw std::runtime_error("windowAnchorExpired");
+            ((head || seek) && cursor != live_)) throw std::runtime_error("windowAnchorExpired");
         anchor = found->second;
     }
-    auto kind = bootstrap ? PageWindow::Kind::Bootstrap : head ? PageWindow::Kind::Head :
+    bool counted = false;
+    if (seek) {
+        // Only an index position names one record wherever a page starts.
+        // App Server and OpenCode orders count from wherever their read
+        // began, and raw JSONL pages by byte.
+        const bool indexed = std::any_of(std::begin(seekableSources), std::end(seekableSources),
+            [&](const char* prefix) { return generation_.rfind(prefix, 0) == 0; });
+        if (!indexed) throw std::runtime_error("seekUnsupported");
+        // An order counts in the generation the search read. A later one
+        // numbers the file anew: an index the cache evicted and rebuilt keeps
+        // every record where it was, but a rewind or a branch can give the
+        // order to another record, so the match then proves itself by offset.
+        counted = target.recordID == generation_ + ":" + std::to_string(target.order);
+        if (!counted && !target.sourceOffset && target.token.empty()) throw std::runtime_error("seekRecordMoved");
+        // Some rows above the match, so it does not open as the first line.
+        anchor = WindowAnchor{generation_, "", "", target.order - std::min<uint64_t>(target.order, limit / 4), 0, true, false};
+    }
+    auto kind = bootstrap ? PageWindow::Kind::Bootstrap : head ? PageWindow::Kind::Head : seek ? PageWindow::Kind::Seek :
         forward ? PageWindow::Kind::After : PageWindow::Kind::Before;
     window_.reserve(transaction, version, kind, serviceBytes);
     pendingTransaction_ = transaction;
@@ -45,7 +95,7 @@ WindowReply WindowSession::read(WindowPageReader& reader, CodexServer& codex, co
             source.provider == "claude" || source.provider == "codex" || source.provider == "kimi" ? source.path : "";
         WindowRead page;
         try {
-            page = reader.read(source, generation, anchor, forward, limit, revision);
+            page = reader.read(source, generation, anchor, forward, limit, revision, seek);
             if (bootstrap && generation.rfind("codex-appserver:", 0) == 0 && page.segment.records.empty())
                 throw std::runtime_error("codexEmptyHistory");
         }
@@ -53,6 +103,39 @@ WindowReply WindowSession::read(WindowPageReader& reader, CodexServer& codex, co
             if (!bootstrap || source.provider != "codex" || source.path.empty() || reader.cancelled()) throw;
             reply.fallback = error.what(); generation.clear(); revision = 0;
             page = reader.read(source, generation, std::nullopt, false, limit, revision);
+        }
+        if (seek) {
+            auto landed = [&] {
+                return std::find_if(page.segment.records.begin(), page.segment.records.end(),
+                    [&](const PositionedRecord& record) { return record.start == target.order; });
+            };
+            // Large rows above the match can fill the page before it: start
+            // at the match itself instead.
+            if (landed() == page.segment.records.end() && anchor->position < target.order) {
+                anchor->position = target.order;
+                const auto skipped = page.bytesRead;
+                page = reader.read(source, generation, anchor, forward, limit, revision, true);
+                page.bytesRead += skipped;
+            }
+            // A Codex item's offset is its latest completed copy, which a
+            // revision moves later; within the search's generation its order
+            // names it. The token proves the record wherever the order was
+            // counted: its provider's name for it, which a revision keeps,
+            // else the same JSON at the search's offset (a file rewritten in
+            // place can put another record there, which a Kimi index whose
+            // records keep their shape still counts as its generation). A
+            // search without a token proves it by offset.
+            const bool revisable = counted && generation_.rfind("codex-history:", 0) == 0;
+            const auto match = landed();
+            bool moved = match == page.segment.records.end();
+            const bool named = target.token.size() > 16;
+            if (!moved && (named || (!target.token.empty() && !revisable))) {
+                moved = seekToken(match->value) != target.token ||
+                    (!named && target.sourceOffset && match->sourceByteOffset != *target.sourceOffset);
+            } else if (!moved && target.sourceOffset) {
+                moved = revisable ? match->sourceByteOffset < *target.sourceOffset : match->sourceByteOffset != *target.sourceOffset;
+            }
+            if (moved) throw std::runtime_error("seekRecordMoved");
         }
         generation = page.segment.source; reply.source = generation;
         reply.native = generation.rfind("codex-appserver:", 0) == 0 || source.provider == "opencode";

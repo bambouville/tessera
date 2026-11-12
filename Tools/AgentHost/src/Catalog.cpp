@@ -23,11 +23,9 @@ namespace tessera {
 namespace {
 // Walk from / using directory descriptors. No ancestor symlink or '..' can
 // redirect an authorized source open, even during a concurrent rename.
-int openComponents(const std::string& path, bool directory = false) {
-    if (path.empty() || path[0] != '/' || path.size() > 2048 || path.back() == '/' ||
-        path.find('\0') != std::string::npos) { errno = EINVAL; return -1; }
-    int current = ::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    for (size_t start = 1; current >= 0 && start < path.size();) {
+// Takes `current`, the directory holding `path`'s component at `start`.
+int walkComponents(int current, const std::string& path, size_t start, bool directory) {
+    for (; current >= 0 && start < path.size();) {
         auto end = path.find('/', start);
         auto part = path.substr(start, end == std::string::npos ? path.size() - start : end - start);
         if (part.empty() || part == "." || part == "..") { ::close(current); return -1; }
@@ -41,6 +39,55 @@ int openComponents(const std::string& path, bool directory = false) {
         start = end + 1;
     }
     return current;
+}
+int openComponents(const std::string& path, bool directory = false) {
+    if (path.empty() || path[0] != '/' || path.size() > 2048 || path.back() == '/' ||
+        path.find('\0') != std::string::npos) { errno = EINVAL; return -1; }
+    return walkComponents(::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC), path, 1, directory);
+}
+// The entry is gone, replaced, or not this user's to read. Anything else
+// (EMFILE, EIO) is the host's trouble, not the file's.
+bool unreadable(int error) {
+    return error == ENOENT || error == ENOTDIR || error == EACCES || error == EPERM || error == ELOOP || error == ENXIO;
+}
+// One unusable transcript, directory or provider store used to fail every
+// provider's inventory until it changed: a Pi format this host does not know
+// yet, until the next app update. It now skips just its rows. Budget,
+// cancellation and resource failures still fail the pass.
+bool failsInventory(const std::string& reason) {
+    return reason == "catalogBudgetExceeded" || reason == "cancelled" || reason == "catalogSourceUnavailable" ||
+        reason == "opencodeReadBudgetExceeded" || reason == "opencodeResourceLimit";
+}
+// A skip a writer may still be finishing leaves the pass incomplete, so the
+// app asks again: a header or index line half-written, a busy database, a
+// file swapped while listed. Formats this host cannot read, unreadable files
+// and unrecognised agent directories stay skipped: retrying those walked the
+// whole host every interval for nothing.
+bool skippedMidWrite(const std::string& reason, time_t modified) {
+    if (reason == "sourceChanged") return true;
+    const bool partial = reason == "piHeaderMissing" || reason == "kimiHeaderMissing" || reason == "headerUnparsable" ||
+        reason == "kimiIndexUnproven" || reason == "opencodeDatabaseUnavailable";
+    return partial && modified > 0 && ::time(nullptr) - modified < 60;
+}
+time_t modifiedAt(const std::string& path) {
+    struct stat info{};
+    return ::lstat(path.c_str(), &info) ? 0 : info.st_mtime;
+}
+using KimiSessions = std::map<std::string, std::string>;
+std::string kimiIdentityIn(const std::string& path, const std::function<const KimiSessions&()>& index) {
+    const auto marker = path.rfind("/agents/");
+    if (marker == std::string::npos || path.size() < marker + 19 || path.substr(path.size() - 11) != "/wire.jsonl")
+        throw std::runtime_error("sourceNotAuthorized");
+    const auto directory = path.substr(0, marker);
+    const auto id = directory.substr(directory.rfind('/') + 1);
+    const auto agent = path.substr(marker + 8, path.size() - marker - 19);
+    if (agent.empty() || agent.size() > 96 || agent.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos || agent == "." || agent == "..")
+        throw std::runtime_error("sourceNotAuthorized");
+    const auto& sessions = index(); const auto found = sessions.find(id);
+    if (found == sessions.end() || found->second != directory) throw std::runtime_error("sourceNotAuthorized");
+    // Separate child transcripts rather than accidentally merging their
+    // identical session IDs into a single inventory row.
+    return agent == "main" ? id : id + "@" + agent;
 }
 std::string environmentPath(const char* name, const std::string& fallback) {
     const auto value = ::getenv(name);
@@ -167,11 +214,12 @@ int Catalog::open(const Source& source) const {
     }
     return descriptor;
 }
+bool Catalog::plainAbsolutePath(const std::string& path) {
+    return !path.empty() && path.front() == '/' && path.size() <= 2048 && path.find('\0') == std::string::npos &&
+        simdjson::validate_utf8(path) && path.find("/../") == std::string::npos && path.find("/./") == std::string::npos;
+}
 Source Catalog::remember(const std::string& provider, const std::string& requestedPath) {
-    if (requestedPath.empty() || requestedPath.front() != '/' || requestedPath.size() > 2048 ||
-        requestedPath.find('\0') != std::string::npos || !simdjson::validate_utf8(requestedPath) ||
-        requestedPath.find("/../") != std::string::npos || requestedPath.find("/./") != std::string::npos)
-        throw std::runtime_error("sourceNotAuthorized");
+    if (!plainAbsolutePath(requestedPath)) throw std::runtime_error("sourceNotAuthorized");
     // Resolve route/root aliases, but never grant authority through them:
     // open() rechecks the canonical target against the fixed provider roots
     // and walks its actual components with O_NOFOLLOW. Leaf symlinks remain
@@ -190,13 +238,44 @@ Source Catalog::remember(const std::string& provider, const std::string& request
     struct stat info{};
     const auto valid = ::fstat(descriptor, &info) == 0 && info.st_dev == named.st_dev && info.st_ino == named.st_ino;
     if (!valid) throw std::runtime_error("sourceChanged");
+    return record(std::move(source), info, [&] { const int fd = guard.fd; guard.fd = -1; return fd; });
+}
+Source Catalog::rememberListed(const std::string& provider, const std::string& path, int directory,
+                               const std::string& name, const struct stat& listed, const KimiSessions& kimiIndex) {
+    if (path.size() > 2048 || !simdjson::validate_utf8(path)) throw std::runtime_error("sourceNotAuthorized");
+    // The walk reached this leaf through descriptors that open() would walk
+    // again from /. That walk opens the home directory once per file, which
+    // costs about a millisecond of kernel time on a busy WSL home: 8 s for
+    // a host with 5,500 transcripts, every inventory. Kimi's index, too, is
+    // the copy this walk already validated rather than one reopened per file.
+    Source source; source.provider = provider; source.path = path;
+    if (provider == "kimi") source.sessionID = kimiIdentityIn(path, [&]() -> const KimiSessions& { return kimiIndex; });
+    return record(std::move(source), listed, [&] {
+        const int fd = ::openat(directory, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+        if (fd < 0 && errno == ENOENT) throw std::runtime_error("sourceMissing");
+        if (fd < 0 && (errno == EACCES || errno == EPERM)) throw std::runtime_error("sourceUnreadable");
+        if (fd < 0 && !unreadable(errno)) throw std::runtime_error("catalogSourceUnavailable");
+        struct stat opened{};
+        if (fd < 0 || ::fstat(fd, &opened) || !S_ISREG(opened.st_mode) ||
+            opened.st_dev != listed.st_dev || opened.st_ino != listed.st_ino) {
+            if (fd >= 0) ::close(fd);
+            throw std::runtime_error("sourceChanged");
+        }
+        return fd;
+    });
+}
+Source Catalog::record(Source source, const struct stat& info, const std::function<int()>& openLeaf) {
+    const auto& provider = source.provider; const auto path = source.path;
     source.bytes = static_cast<uint64_t>(info.st_size);
     source.modified = static_cast<uint64_t>(std::max<time_t>(0, info.st_mtime));
-    source.sessionID = path.substr(path.find_last_of('/') + 1);
-    source.sessionID.resize(source.sessionID.size() - 6);
-    if (provider == "codex" && source.sessionID.size() >= 36)
-        source.sessionID = source.sessionID.substr(source.sessionID.size() - 36);
-    if (provider == "kimi") source.sessionID = kimiIdentity(path);
+    if (provider == "kimi") {
+        if (source.sessionID.empty()) source.sessionID = kimiIdentity(path);
+    } else {
+        source.sessionID = path.substr(path.find_last_of('/') + 1);
+        source.sessionID.resize(source.sessionID.size() - 6);
+        if (provider == "codex" && source.sessionID.size() >= 36)
+            source.sessionID = source.sessionID.substr(source.sessionID.size() - 36);
+    }
     const auto key = provider + ":" + path;
     const auto found = handles_.find(key);
     const Source* existing = found == handles_.end() ? nullptr : &sources_.at(found->second);
@@ -209,12 +288,24 @@ Source Catalog::remember(const std::string& provider, const std::string& request
         source.fileWitness = std::to_string(info.st_dev) + ":" + std::to_string(info.st_ino) + ":" +
             std::to_string(info.st_size) + ":" + std::to_string(modified.tv_sec) + ":" + std::to_string(modified.tv_nsec) + ":" +
             std::to_string(changed.tv_sec) + ":" + std::to_string(changed.tv_nsec);
+        const auto rejected = rejectedHeaders_.find(key);
+        // Refusing a header again costs a whole pass nothing. Reading it
+        // again cost an open, a 64 KiB read and a walk from / per file,
+        // every pass: on a host whose Pi wrote a newer format, every session.
+        auto reject = [&](const std::string& reason) {
+            if (!failsInventory(reason) && reason != "sourceMissing") {
+                if (rejected == rejectedHeaders_.end() && rejectedHeaders_.size() >= 4096) rejectedHeaders_.erase(rejectedHeaders_.begin());
+                rejectedHeaders_[key] = {source.fileWitness, reason};
+            }
+            throw std::runtime_error(reason);
+        };
         if (existing && source.fileWitness == existing->fileWitness) source.sessionID = existing->sessionID;
-        else {
+        else if (rejected != rejectedHeaders_.end() && rejected->second.first == source.fileWitness)
+            throw std::runtime_error(rejected->second.second);
+        else try {
             // Reuse the exact authorized descriptor we just stat'ed. The
             // reader also checks the named snapshot before and after decoding.
-            guard.fd = -1;
-            JsonlReader reader(path, provider, descriptor, cancelled,
+            JsonlReader reader(path, provider, openLeaf(), cancelled,
                 provider == "kimi" ? JsonlReader::Normalizer(KimiHistoryIndex::metadata) : JsonlReader::Normalizer());
             const auto header = reader.firstRecord();
             simdjson::dom::parser parser;
@@ -230,6 +321,12 @@ Source Catalog::remember(const std::string& provider, const std::string& request
                 source.sessionID = header->value.providerID;
             }
             reader.validateSnapshot();
+            if (rejected != rejectedHeaders_.end()) rejectedHeaders_.erase(rejected);
+        } catch (const simdjson::simdjson_error& error) {
+            if (error.error() == simdjson::MEMALLOC) throw std::runtime_error("catalogSourceUnavailable");
+            reject("headerUnparsable");
+        } catch (const std::runtime_error& error) {
+            reject(error.what());
         }
         if (existing && source.sessionID != existing->sessionID) throw std::runtime_error(provider + "IdentityConflict");
     }
@@ -253,13 +350,20 @@ Source Catalog::remember(const std::string& provider, const std::string& request
     return source;
 }
 Source Catalog::resolve(const std::string& provider, const std::string& path) { return remember(provider, path); }
-Source Catalog::identifyCodex(const std::string& sessionID, const std::string& path, uint64_t modified) {
+Source Catalog::identifyCodex(const std::string& sessionID, const std::string& path, uint64_t modified, const std::string& listedPath) {
     if (sessionID.size() != 36 || sessionID.find_first_not_of("0123456789abcdef-") != std::string::npos)
         throw std::runtime_error("invalidCodexThreadID");
     const auto key = "codex-native:" + sessionID;
     const auto found = handles_.find(key);
     Source value;
-    if (!path.empty()) {
+    // The walk that just listed this file recorded it as remember() would;
+    // walking from / again per thread spent Codex's whole list budget on a
+    // host with thousands of threads. A rollout this service cannot read
+    // stays native-only, as remember() leaves it. Reads still reopen it.
+    const auto recorded = listedPath.empty() ? handles_.end() : handles_.find("codex:" + listedPath);
+    if (recorded != handles_.end() && sources_.at(recorded->second).path == listedPath &&
+        ::access(listedPath.c_str(), R_OK) == 0) value = sources_.at(recorded->second);
+    else if (!path.empty()) {
         try { value = remember("codex", path); }
         catch (const std::runtime_error& error) {
             const auto reason = std::string(error.what());
@@ -368,6 +472,7 @@ const std::map<std::string, std::string>& Catalog::kimiSessions() const {
     const int descriptor = openComponents(path);
     if (descriptor < 0) {
         if (errno == ENOENT) { kimiSessions_.clear(); kimiIndexWitness_.clear(); return kimiSessions_; }
+        if (!unreadable(errno)) throw std::runtime_error("catalogSourceUnavailable");
         throw std::runtime_error("kimiIndexUnavailable");
     }
     struct stat info{};
@@ -423,23 +528,18 @@ const std::map<std::string, std::string>& Catalog::kimiSessions() const {
     reader.validateSnapshot(); kimiSessions_ = std::move(sessions); kimiIndexWitness_ = witness; return kimiSessions_;
 }
 std::string Catalog::kimiIdentity(const std::string& path) const {
-    const auto marker = path.rfind("/agents/");
-    if (marker == std::string::npos || path.size() < marker + 19 || path.substr(path.size() - 11) != "/wire.jsonl")
-        throw std::runtime_error("sourceNotAuthorized");
-    const auto directory = path.substr(0, marker);
-    const auto id = directory.substr(directory.rfind('/') + 1);
-    const auto agent = path.substr(marker + 8, path.size() - marker - 19);
-    if (agent.empty() || agent.size() > 96 || agent.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos || agent == "." || agent == "..")
-        throw std::runtime_error("sourceNotAuthorized");
-    const auto& sessions = kimiSessions(); const auto found = sessions.find(id);
-    if (found == sessions.end() || found->second != directory) throw std::runtime_error("sourceNotAuthorized");
-    // Separate child transcripts rather than accidentally merging their
-    // identical session IDs into a single inventory row.
-    return agent == "main" ? id : id + "@" + agent;
+    return kimiIdentityIn(path, [this]() -> const KimiSessions& { return kimiSessions(); });
 }
 std::vector<Source> Catalog::inventory(const std::string& provider) {
     std::vector<Source> result;
     size_t visited = 0;
+    skippedSources_ = 0; skipReason_.clear(); inventoryIncomplete_ = false;
+    auto skip = [&](const std::string& reason, time_t modified) {
+        if (failsInventory(reason)) throw std::runtime_error(reason);
+        if (reason == "sourceMissing") return; // Deleted while listing.
+        if (!skippedSources_++) skipReason_ = reason;
+        if (skippedMidWrite(reason, modified)) inventoryIncomplete_ = true;
+    };
     for (const auto& root : roots_) {
         if (!provider.empty() && root.provider != provider) continue;
         if (root.provider == "opencode") {
@@ -447,21 +547,42 @@ std::vector<Source> Catalog::inventory(const std::string& provider) {
                 OpenCodeStore database(openCodePath(), cancelled);
                 for (const auto& row : database.inventory()) result.push_back(rememberOpenCode(row.id, row.modified));
             } catch (const std::runtime_error& error) {
-                if (std::string(error.what()) != "sourceMissing") throw;
+                const auto path = openCodePath();
+                if (std::string(error.what()) != "sourceMissing")
+                    skip(error.what(), std::max(modifiedAt(path), modifiedAt(path + "-wal")));
             }
             continue;
         }
         std::map<std::string, std::string> kimi;
-        if (root.provider == "kimi") kimi = kimiSessions();
+        if (root.provider == "kimi") {
+            try { kimi = kimiSessions(); }
+            catch (const std::runtime_error& error) {
+                skip(error.what(), modifiedAt(root.path.substr(0, root.path.size() - 9) + "/session_index.jsonl"));
+                continue;
+            }
+        }
+        const int rootDescriptor = openComponents(root.path, true);
+        if (rootDescriptor < 0) {
+            if (errno == ENOENT) continue;
+            if (!unreadable(errno)) throw std::runtime_error("catalogSourceUnavailable");
+            skip("catalogSourceUnreadable", 0); continue;
+        }
+        struct DescriptorGuard { int fd; ~DescriptorGuard() { ::close(fd); } } rootGuard{rootDescriptor};
         std::vector<std::pair<std::string, size_t>> pending{{root.path, 0}};
         while (!pending.empty()) {
             if (cancelled && cancelled()) throw std::runtime_error("cancelled");
             auto [path, depth] = std::move(pending.back()); pending.pop_back();
             if (++visited > 32768 || depth > 32) throw std::runtime_error("catalogBudgetExceeded");
-            const int descriptor = openComponents(path, true);
+            // Below the root, walk from its descriptor rather than from /:
+            // that would reopen the home directory for every directory.
+            const int start = ::fcntl(rootDescriptor, F_DUPFD_CLOEXEC, 0);
+            if (start < 0) throw std::runtime_error("catalogSourceUnavailable");
+            const int descriptor = depth ? walkComponents(start, path, root.path.size() + 1, true) : start;
             if (descriptor < 0) {
-                if (!depth && errno == ENOENT) continue;
-                throw std::runtime_error("catalogSourceUnavailable");
+                // Removed, replaced or unreadable since its parent listed it.
+                if (!unreadable(errno)) throw std::runtime_error("catalogSourceUnavailable");
+                if (errno != ENOENT) skip("catalogSourceUnreadable", 0);
+                continue;
             }
             DIR* directory = ::fdopendir(descriptor);
             if (!directory) { ::close(descriptor); throw std::runtime_error("catalogSourceUnavailable"); }
@@ -472,8 +593,12 @@ std::vector<Source> Catalog::inventory(const std::string& provider) {
                 if (name == "." || name == "..") continue;
                 if (++visited > 32768) throw std::runtime_error("catalogBudgetExceeded");
                 struct stat info{};
-                if (::fstatat(descriptor, name.c_str(), &info, AT_SYMLINK_NOFOLLOW))
+                if (::fstatat(descriptor, name.c_str(), &info, AT_SYMLINK_NOFOLLOW)) {
+                    if (errno == ENOENT) continue; // Deleted while listing.
+                    // Readable but not searchable: none of its entries can be listed.
+                    if (errno == EACCES || errno == EPERM) { skip("catalogSourceUnreadable", 0); break; }
                     throw std::runtime_error("catalogSourceChanged");
+                }
                 const auto child = path + "/" + name;
                 if (S_ISLNK(info.st_mode)) continue; // Never follow private-root escape links.
                 if (S_ISDIR(info.st_mode)) {
@@ -489,7 +614,8 @@ std::vector<Source> Catalog::inventory(const std::string& provider) {
                         const auto found = kimi.find(id);
                         if (found == kimi.end() || found->second != directory) continue;
                     }
-                    result.push_back(remember(root.provider, child));
+                    try { result.push_back(rememberListed(root.provider, child, descriptor, name, info, kimi)); }
+                    catch (const std::runtime_error& error) { skip(error.what(), info.st_mtime); }
                 }
             }
         }

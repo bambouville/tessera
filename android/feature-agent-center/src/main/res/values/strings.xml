@@ -1,4 +1,256 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="agent_context_tokens">%1$s tokens</string>
+    <!-- Agent Center transcript selection menu; the terminal selection toolbar's items. -->
+    <string name="agent_selection_open_in_artifacts">Open in Artifacts</string>
+    <string name="agent_selection_reveal_in_files">Reveal in Files</string>
+    <!-- A waiting thread row's foldable answers, worded as on iOS. The label marks a folded row
+         whose thread is open in the detail pane beside the list; the others name the chevron. -->
+    <string name="agent_row_answer_beside">answer beside</string>
+    <string name="agent_row_answers_fold">fold answers</string>
+    <string name="agent_row_answers_show">show answers</string>
+
+    <!-- Agent Center list. -->
+    <string name="agent_center_title">agents</string>
+    <string name="agent_center_ok" tools:ignore="ButtonCase,Typos">ok</string>
+    <string name="agent_center_send_anyway">Send anyway</string>
+    <string name="agent_center_spawn_agent">spawn agent</string>
+    <string name="agent_center_fork_agent">fork agent</string>
+    <string name="agent_center_interrupt_agent">interrupt agent</string>
+    <string name="agent_center_search_placeholder">search agents</string>
+    <string name="agent_center_search_clear">clear agent search</string>
+    <!-- The list's grouping segments: by attention, or by host. -->
+    <string name="agent_center_grouping_attention">attention</string>
+    <string name="agent_center_grouping_host">host</string>
+    <plurals name="agent_center_search_hosts_unavailable">
+        <item quantity="one">%d connected host could not be fully searched</item>
+        <item quantity="other">%d connected hosts could not be fully searched</item>
+    </plurals>
+    <string name="agent_center_loading">loading agent center…</string>
+    <string name="agent_center_unavailable_title">agents unavailable</string>
+    <string name="agent_center_no_matches_title">no transcript matches</string>
+    <string name="agent_center_no_matches_body">Available connected-host transcripts did not contain this query.</string>
+    <!-- A search result whose thread is no longer listed. -->
+    <string name="agent_center_search_result_untitled">agent thread</string>
+    <string name="agent_center_empty_title">no live agents</string>
+    <string name="agent_center_empty_body">Connect an SSH, SSH+tmux, Mosh, or Mosh+tmux session with an available agent integration.</string>
+    <!-- Live agent terminals with no proven conversation identity. -->
+    <string name="agent_center_live_terminals">live terminals</string>
+    <string name="agent_center_open_terminal">open terminal</string>
+    <string name="agent_center_candidate_identity_unavailable">Transcript identity unavailable; review in terminal.</string>
+    <string name="agent_center_open_terminal_to_answer">Open terminal to answer</string>
+    <!-- Group headers when grouped by attention; the status words also describe a row to accessibility. -->
+    <string name="agent_center_needs_you">needs you</string>
+    <string name="agent_center_working">working</string>
+    <string name="agent_center_finished">finished</string>
+    <string name="agent_center_recent">recent</string>
+    <string name="agent_center_unlabeled_host">unlabeled host</string>
+    <string name="agent_center_needs_input">needs input</string>
+    <string name="agent_center_idle">idle</string>
+    <string name="agent_center_unavailable">unavailable</string>
+    <string name="agent_center_needs_your_attention">needs your attention</string>
+    <!-- A thread forked from another one. -->
+    <string name="agent_center_fork">fork</string>
+    <!-- %1$s: the number of queued messages. -->
+    <string name="agent_center_queued">%1$s queued</string>
+    <!-- %1$s: a host's display name. -->
+    <string name="agent_center_host">host %1$s</string>
+    <!-- %1$s: the whole percent of the context window used. -->
+    <string name="agent_center_context_percent">%1$s%% context</string>
+    <!-- %1$s: line counts such as "+14 −3". -->
+    <string name="agent_center_line_changes">%1$s changes</string>
+    <!-- A row's last activity, in compact relative form. -->
+    <string name="agent_center_time_now">now</string>
+    <string name="agent_center_time_minutes_ago">%1$dm ago</string>
+    <string name="agent_center_time_hours_ago">%1$dh ago</string>
+    <string name="agent_center_time_days_ago">%1$dd ago</string>
+    <string name="agent_center_time_in_minutes">in %1$dm</string>
+    <string name="agent_center_time_in_hours">in %1$dh</string>
+    <string name="agent_center_time_in_days">in %1$dd</string>
+
+    <!-- Agent Center thread detail. -->
+    <string name="agent_center_select_title">select an agent</string>
+    <string name="agent_center_select_body">Choose a live agent from the list.</string>
+    <string name="agent_center_back_to_agents">back to agents</string>
+    <string name="agent_center_retry">Retry</string>
+    <string name="agent_center_live_updates_paused">Live updates paused while this history view is retained.</string>
+    <string name="agent_center_return_to_latest">Return to latest</string>
+    <string name="agent_center_loading_conversation">loading conversation…</string>
+    <string name="agent_center_projection_unavailable">live projection is unavailable</string>
+    <string name="agent_center_live_preview_gap">live preview · awaiting missing text</string>
+    <string name="agent_center_live_preview_syncing">live preview · syncing transcript</string>
+    <string name="agent_center_loading_messages">loading messages</string>
+    <!-- A message the reader sent, below the transcript until the transcript shows it. -->
+    <string name="agent_center_outgoing_sending">sending…</string>
+    <string name="agent_center_outgoing_queueing">queueing…</string>
+    <string name="agent_center_outgoing_awaiting_receipt">sent · waiting for transcript…</string>
+    <string name="agent_center_outgoing_sent_unconfirmed">sent · transcript receipt unavailable</string>
+    <string name="agent_center_outgoing_unconfirmed">receipt unconfirmed · check terminal before retrying</string>
+    <!-- The detail header's terminal route; %1$s is a tmux session, window or pane identifier. -->
+    <string name="agent_center_route_session">session %1$s</string>
+    <string name="agent_center_route_pane">pane %1$s</string>
+    <!-- %1$s: one of the permission modes below. -->
+    <string name="agent_center_permission_mode">mode %1$s</string>
+    <string name="agent_center_permission_default">default</string>
+    <string name="agent_center_permission_auto">auto</string>
+    <string name="agent_center_permission_plan">plan</string>
+    <string name="agent_center_permission_read_only">read only</string>
+    <string name="agent_center_collapse">collapse</string>
+    <string name="agent_center_details">details</string>
+    <string name="agent_center_open_as_tab">open as a tab</string>
+    <!-- Transcript card headings (shown in capitals). %1$s: a tool name or a file path. -->
+    <string name="agent_center_block_thinking">thinking</string>
+    <string name="agent_center_block_tool_call">tool call</string>
+    <string name="agent_center_block_tool_call_named">tool call · %1$s</string>
+    <string name="agent_center_block_tool_result">tool result</string>
+    <string name="agent_center_block_workflow">workflow</string>
+    <string name="agent_center_block_subagents">subagents</string>
+    <string name="agent_center_block_change">change</string>
+    <string name="agent_center_block_change_named">change · %1$s</string>
+    <string name="agent_center_block_completed">completed</string>
+    <string name="agent_center_block_context_compacted">context compacted</string>
+    <string name="agent_center_block_permission">permission</string>
+    <string name="agent_center_block_question">question</string>
+    <string name="agent_center_block_queued_message">queued message</string>
+    <string name="agent_center_block_system">system</string>
+    <string name="agent_center_block_attachment">attachment</string>
+    <string name="agent_center_block_unsupported">unsupported event</string>
+
+    <!-- A question or permission prompt waiting for the reader. -->
+    <string name="agent_center_needs_your_answer">needs your answer</string>
+    <plurals name="agent_center_questions_waiting">
+        <item quantity="one">%d question waiting</item>
+        <item quantity="other">%d questions waiting</item>
+    </plurals>
+    <string name="agent_center_codex_keeps_working">Codex keeps working while they wait</string>
+    <string name="agent_center_agent_keeps_working">The agent keeps working while this waits</string>
+    <string name="agent_center_less">less</string>
+    <string name="agent_center_more">more</string>
+    <!-- %1$s: the answer text already typed in the terminal. -->
+    <string name="agent_center_in_terminal">In the terminal: %1$s</string>
+    <string name="agent_center_prompt_next">Next</string>
+    <string name="agent_center_prompt_skip">Skip</string>
+    <string name="agent_center_prompt_cancel">Cancel</string>
+    <string name="agent_center_prompt_answer">Answer</string>
+    <string name="agent_center_prompt_send">Send</string>
+
+    <!-- The composer below a thread. -->
+    <string name="agent_center_uploading_attachment">uploading attachment</string>
+    <string name="agent_center_add_attachment">add attachment</string>
+    <string name="agent_center_attach_file">File</string>
+    <string name="agent_center_attach_photo">Photo</string>
+    <string name="agent_center_composer_placeholder">message…</string>
+    <string name="agent_center_composer_placeholder_disabled">open terminal to continue</string>
+    <string name="agent_center_sending_message">sending message</string>
+    <string name="agent_center_dictate_message">dictate message</string>
+    <string name="agent_center_dictation_unavailable">on-device dictation unavailable</string>
+    <string name="agent_center_send">send</string>
+    <string name="agent_center_queue_options">queue options</string>
+    <string name="agent_center_queue_message">Queue message</string>
+    <string name="agent_center_control_key_paste">Control-key paste requires Open terminal.</string>
+
+    <!-- The spawn and fork sheet. -->
+    <string name="agent_center_spawn_unadvertised">This live endpoint does not currently advertise spawn.</string>
+    <string name="agent_center_fork_unadvertised">This live endpoint does not currently advertise fork.</string>
+    <string name="agent_center_launch_provider">provider</string>
+    <!-- %1$s: the host; %2$s: the tmux session. -->
+    <string name="agent_center_launch_target">Target: %1$s · %2$s</string>
+    <string name="agent_center_launch_task">task</string>
+    <string name="agent_center_launch_task_placeholder">instruction</string>
+    <string name="agent_center_launch_name">name (optional)</string>
+    <string name="agent_center_launch_name_placeholder">agent name</string>
+    <string name="agent_center_launch_directory">directory</string>
+    <string name="agent_center_launch_directory_placeholder">choose a proven directory</string>
+    <string name="agent_center_launch_directory_proven">currently proven for this pane</string>
+    <string name="agent_center_launch_directory_must_match">must exactly match a currently proven directory</string>
+    <string name="agent_center_launch_placement">placement</string>
+    <string name="agent_center_launch_new_window">new window</string>
+    <string name="agent_center_launch_split_right">split right</string>
+    <string name="agent_center_launch_split_down">split down</string>
+    <!-- %1$s: the tmux window; %2$s: the tmux pane. -->
+    <string name="agent_center_launch_split_target">Window %1$s · pane %2$s</string>
+    <string name="agent_center_launch_isolation">isolation</string>
+    <string name="agent_center_launch_current_worktree">current worktree</string>
+    <string name="agent_center_launch_new_worktree">new worktree</string>
+    <string name="agent_center_launch_branch">branch</string>
+    <string name="agent_center_launch_unavailable">Launch execution is unavailable until this app binds a generation-safe endpoint executor.</string>
+    <string name="agent_center_launch_cancel" tools:ignore="ButtonCase">cancel</string>
+    <string name="agent_center_launch_spawn">spawn</string>
+    <string name="agent_center_launch_fork">fork</string>
+
+    <!-- Notices. The presenter keeps these in English and the notice dialog shows them
+         translated, so each English text must match the presenter's exactly. -->
+    <string name="agent_center_notice_runtime_unavailable">Agent runtime unavailable</string>
+    <string name="agent_center_notice_disabled">Agent Center is disabled</string>
+    <string name="agent_center_notice_upload_terminal_unavailable">The original upload terminal is unavailable</string>
+    <string name="agent_center_notice_reopen_before_attaching">The terminal changed; reopen it before attaching a file</string>
+    <string name="agent_center_notice_attachment_cancelled">Attachment cancelled: the original terminal changed</string>
+    <string name="agent_center_notice_upload_stopped">Upload stopped: the original terminal changed</string>
+    <string name="agent_center_notice_upload_unsupported_path">The upload returned an unsupported file path</string>
+    <!-- %1$s: the uploaded file's quoted remote path. -->
+    <string name="agent_center_notice_uploaded_terminal_changed">File uploaded to %1$s; the terminal changed, so no draft was changed</string>
+    <string name="agent_center_notice_upload_failed">File upload failed; your draft was preserved</string>
+    <string name="agent_center_notice_open_terminal_to_continue">Open terminal to continue</string>
+    <string name="agent_center_notice_action_in_progress">An action is already in progress</string>
+    <string name="agent_center_notice_action_proof_unavailable">Terminal action proof is unavailable</string>
+    <string name="agent_center_notice_send_could_not_start">The send could not start; your draft was preserved</string>
+    <string name="agent_center_notice_prompt_changed">Prompt changed; review it in the terminal</string>
+    <string name="agent_center_notice_review_prompt">Review the current prompt before answering.</string>
+    <string name="agent_center_notice_original_terminal_unavailable">The original terminal is unavailable</string>
+    <string name="agent_center_notice_terminal_gone">This terminal is no longer available. Open its session to continue.</string>
+    <string name="agent_center_notice_control_pending">Terminal opened; control has not settled yet</string>
+    <string name="agent_center_notice_focus_failed">Terminal opened; the requested pane could not be focused</string>
+    <string name="agent_center_notice_request_unavailable">Agent request unavailable</string>
+    <string name="agent_center_notice_launch_in_progress">Another agent launch is already in progress</string>
+    <string name="agent_center_notice_launch_target_stale">Launch target is stale</string>
+    <string name="agent_center_notice_session_disconnected">Terminal session disconnected</string>
+    <string name="agent_center_notice_terminal_not_connected">The terminal session is not connected</string>
+    <string name="agent_center_notice_launch_authority_unavailable">Launch authority is unavailable</string>
+    <string name="agent_center_notice_choose_proven_directory">Choose the current proven tmux pane directory</string>
+    <string name="agent_center_notice_launch_invalid">Launch configuration is invalid</string>
+    <string name="agent_center_notice_launch_no_correlation">Launch plan did not include a correlation ID</string>
+    <string name="agent_center_notice_launch_malformed">Launch plan was malformed</string>
+    <string name="agent_center_notice_launch_plan_changed">Launch plan changed before execution</string>
+    <string name="agent_center_notice_binding_stale">Terminal binding is stale</string>
+    <string name="agent_center_notice_process_proof_unavailable">Agent process proof is unavailable</string>
+    <string name="agent_center_notice_process_changed">Agent process changed before launch</string>
+    <string name="agent_center_notice_directory_proof_changed">Launch directory proof changed</string>
+    <string name="agent_center_notice_split_target_unavailable">Split target is unavailable</string>
+    <string name="agent_center_notice_fork_provenance_unavailable">Fork provenance is unavailable</string>
+    <string name="agent_center_notice_worktree_unacknowledged">Remote worktree creation was not acknowledged</string>
+    <string name="agent_center_notice_receipt_not_accepted">Launch receipt was not accepted by Agent Core; review the terminal before retrying</string>
+    <!-- %1$s: the tmux pane the agent launched in. -->
+    <string name="agent_center_notice_launch_acknowledged">Launch acknowledged; waiting for the agent lifecycle in %1$s</string>
+    <string name="agent_center_notice_receipt_persistence">Launch acknowledged, but receipt persistence needs attention</string>
+    <string name="agent_center_notice_launch_failed_code">Launch failed: %1$s</string>
+    <!-- %1$s: the tmux pane the agent launched in. -->
+    <string name="agent_center_notice_agent_launched">Agent launched in %1$s</string>
+    <!-- A finished action's result. -->
+    <string name="agent_center_notice_binding_stale_retry">Terminal binding is stale; reopen the terminal before retrying</string>
+    <string name="agent_center_notice_verification_failed">Terminal verification failed; review the terminal before retrying</string>
+    <string name="agent_center_notice_action_in_flight">Another action is still running on this thread; try again in a moment</string>
+    <string name="agent_center_notice_terminal_cannot_act">This terminal can\'t take actions right now</string>
+    <string name="agent_center_notice_input_not_ready">The agent\'s input wasn\'t ready; nothing was typed</string>
+    <string name="agent_center_notice_terminal_draft">The terminal already has unsent text; clear it before retrying</string>
+    <string name="agent_center_notice_launch_request_invalid">That launch request isn\'t valid here</string>
+    <!-- A message that was not sent: one of these sentences, then one saying where the message went.
+         %1$s: the agent's provider, such as Claude or Codex. -->
+    <string name="agent_center_not_sent_input_not_ready_named">Not sent — %1$s\'s input wasn\'t ready.</string>
+    <string name="agent_center_not_sent_input_not_ready">Not sent — the agent\'s input wasn\'t ready.</string>
+    <string name="agent_center_not_sent_terminal_draft_named">Not sent — the terminal already has unsent text in %1$s\'s prompt.</string>
+    <string name="agent_center_not_sent_terminal_draft">Not sent — the terminal already has unsent text in the agent\'s prompt.</string>
+    <string name="agent_center_not_sent_route_changed">Not sent — the terminal changed.</string>
+    <string name="agent_center_not_sent_input_unavailable">Not sent — this terminal can\'t take verified input right now.</string>
+    <string name="agent_center_not_sent_unsupported_input_named">Not sent — this message can\'t be typed into %1$s\'s prompt from here.</string>
+    <string name="agent_center_not_sent_unsupported_input">Not sent — this message can\'t be typed into the agent\'s prompt from here.</string>
+    <string name="agent_center_not_sent_plan_mismatch">Not sent — the message changed before it could be typed.</string>
+    <string name="agent_center_not_sent_receipt_unavailable">Not sent — delivery tracking couldn\'t start.</string>
+    <string name="agent_center_not_sent_cancelled">Not sent — the send was cancelled.</string>
+    <string name="agent_center_not_sent_unexpected">Not sent — an unexpected error stopped the send.</string>
+    <string name="agent_center_not_sent_restored">Nothing was typed; your message is back in the box.</string>
+    <string name="agent_center_not_sent_merged">Nothing was typed; your message is back in the box above what you typed since.</string>
+    <string name="agent_center_not_sent_nothing_typed">Nothing was typed.</string>
+    <string name="agent_center_notice_send_anyway_unverified">Send anyway skips prompt verification.</string>
+    <!-- Two whole sentences of one notice, in order. -->
+    <string name="agent_center_notice_sentences">%1$s %2$s</string>
 </resources>

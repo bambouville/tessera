@@ -5,6 +5,7 @@
 #include "CodexReviewDisplay.h"
 #include "CodexAuxiliary.h"
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
@@ -20,6 +21,9 @@ std::string first(Element value, std::initializer_list<const char*> fields) {
     for (auto field : fields) { auto result = text(value, field); if (!result.empty()) return result; }
     return {};
 }
+// A call's ID names it whole or not at all: one clipped could name another
+// call. The Tier C projector keeps the same bound.
+std::string callIdentity(std::string value) { return value.size() <= 255 ? value : std::string(); }
 using json::displayText;
 std::string contentText(Element value, size_t depth = 0) {
     if (depth > 16) return {};
@@ -168,6 +172,81 @@ bool claudeBookkeeping(Element source, const std::string& type) {
     return true;
 }
 
+bool uniqueKeys(Element value) {
+    if (!value.is_object()) return false;
+    std::set<std::string_view> keys;
+    for (const auto field : simdjson::dom::object(value.get_object().value())) if (!keys.insert(field.key).second) return false;
+    return true;
+}
+bool validIdentity(Element value, const char* key) {
+    return get(value, key).is_string() && !text(value, key).empty() && text(value, key).size() <= 256;
+}
+// The fields ClaudeChainIndex decodes. normalize() and the index's
+// metadata-only reads share them, so no chain decision depends on which one
+// read a record.
+// Pi's identity is id, never Claude's uuid. Offset fallback is only display
+// identity for v1 records; the index separately proves version and rejects
+// missing structural IDs in v2/v3.
+void piChain(Element source, const std::string& type, const std::string& fallbackID, NormalizedRecord& result) {
+    result.providerID = text(source, "id");
+    if (result.providerID.empty() && type != "session") result.providerID = fallbackID;
+    result.chainID = text(source, "id"); result.chainParentID = text(source, "parentId");
+    result.parentField = source.at_key("parentId").error() != simdjson::NO_SUCH_FIELD;
+    result.chainEntry = type != "session" && get(source, "id").is_string();
+    result.chainUnproven = !uniqueKeys(source) || result.chainID.size() > 256 || result.chainParentID.size() > 256 ||
+        (type == "session" && !validIdentity(source, "id")) ||
+        (result.parentField && !get(source, "parentId").is_null() && !get(source, "parentId").is_string());
+}
+void claudeChain(Element source, const std::string& type, NormalizedRecord& result) {
+    result.parentField = source.at_key("parentUuid").error() != simdjson::NO_SUCH_FIELD;
+    result.chainID = text(source, "uuid"); result.chainParentID = text(source, "parentUuid");
+    result.chainUnproven = result.chainID.size() > 256 || result.chainParentID.size() > 256;
+    // These fields select authored membership and ancestry. Unlike an
+    // unknown display block, an ambiguous or ill-typed structural field
+    // cannot be treated as false/empty without choosing another history.
+    // A bit per structural field: an index scan meets every record, and a
+    // node-allocating set per record is costly under musl's allocator.
+    static constexpr std::array<std::string_view, 6> structural{"type", "uuid", "parentUuid", "isSidechain", "isMeta", "teamName"};
+    unsigned seen = 0;
+    size_t subtypeFields = 0, logicalFields = 0;
+    if (source.is_object()) for (const auto field : simdjson::dom::object(source.get_object().value())) {
+        const auto found = std::find(structural.begin(), structural.end(), field.key);
+        if (found != structural.end()) {
+            const auto bit = 1u << (found - structural.begin());
+            if (seen & bit) result.chainUnproven = true;
+            seen |= bit;
+        }
+        subtypeFields += field.key == "subtype"; logicalFields += field.key == "logicalParentUuid";
+    }
+    if (source.at_key("uuid").error() != simdjson::NO_SUCH_FIELD &&
+        (!get(source, "uuid").is_string() || result.chainID.empty())) result.chainUnproven = true;
+    if (result.parentField && !get(source, "parentUuid").is_null() && !get(source, "parentUuid").is_string())
+        result.chainUnproven = true;
+    for (const auto key : {"isSidechain", "isMeta"})
+        if (source.at_key(key).error() != simdjson::NO_SUCH_FIELD && !get(source, key).is_bool()) result.chainUnproven = true;
+    if (!get(source, "teamName").is_null() && !get(source, "teamName").is_string()) result.chainUnproven = true;
+    result.chainEntry = get(source, "uuid").is_string() && (type == "user" || type == "assistant" ||
+        type == "progress" || type == "system" || type == "attachment");
+    result.chainMessage = type == "user" || type == "assistant";
+    result.chainMain = result.chainMessage && !json::boolean(source, "isSidechain") && !json::boolean(source, "isMeta") && text(source, "teamName").empty();
+    result.chainSidechain = json::boolean(source, "isSidechain") || !text(source, "teamName").empty();
+    // Compaction writes a new root whose logicalParentUuid names the prior
+    // history only advisorily (it can name a later record or nothing).
+    // Boundary membership and the advisory link therefore never make a
+    // transcript unproven: an ambiguous subtype keeps the old root
+    // behaviour, and an ill-typed, overlong or duplicated logical link
+    // is ignored so the index uses its positional fallback. Either way
+    // the index accepts only an effective parent physically before the
+    // boundary and stops the path rather than revisit a node, so neither
+    // choice can make a readable transcript unproven.
+    result.chainCompactBoundary = result.chainEntry && type == "system" && subtypeFields == 1 &&
+        get(source, "subtype").is_string() && text(source, "subtype") == "compact_boundary" && result.chainParentID.empty();
+    if (result.chainCompactBoundary && logicalFields == 1 && get(source, "logicalParentUuid").is_string()) {
+        const auto logical = text(source, "logicalParentUuid");
+        if (logical.size() <= 256) result.chainLogicalParentID = logical;
+    }
+}
+
 // Claude's signed thinking blocks carry a protobuf block_kind at 2/1/8.
 // Walk every field so a malformed suffix cannot validate an earlier match;
 // repeated fields use the last occurrence, as in Claude's display filter.
@@ -305,7 +384,7 @@ struct Blocks {
         allResults &= type == "tool_result" || type == "function_call_output" || type == "custom_tool_call_output";
         bool humanText = type == "text" || type == "input_text" || type == "output_text";
         json::Object block;
-        block.optional("toolCallID", resultID, 256);
+        block.optional("toolCallID", callIdentity(resultID));
         std::string body;
         bool bodyTruncated = false;
         auto writeBody = [&](const char* field) {
@@ -354,11 +433,11 @@ struct Blocks {
             block.string("type", "tool_call");
             block.string("name", type == "tool_search_call" ? "Tool search" : type == "web_search_call" ? "Web search" :
                 text(item, "name").empty() ? "Tool" : text(item, "name"), 256);
-            block.optional("toolCallID", first(item, {"call_id", "id"}), 256);
+            block.optional("toolCallID", callIdentity(first(item, {"call_id", "id"})));
             body = preview(firstValue(item, {"input", "arguments", "action"}));
             writeBody("preview");
         } else if (type == "tool_search_output") {
-            block.string("type", "tool_result"); block.optional("toolCallID", first(item, {"call_id", "id"}), 256);
+            block.string("type", "tool_result"); block.optional("toolCallID", callIdentity(first(item, {"call_id", "id"})));
             body = preview(get(item, "tools")); writeBody("preview");
         } else if (type == "tool_result" || type == "function_call_output" || type == "custom_tool_call_output") {
             const auto content = firstValue(item, {"content", "output"});
@@ -403,7 +482,7 @@ struct Blocks {
                 }
             }
             block.string("type", "tool_result");
-            block.optional("toolCallID", identifier, 256);
+            block.optional("toolCallID", callIdentity(identifier));
             body = contentText(content);
             writeBody("preview");
         } else if (type == "advisor_tool_result") {
@@ -416,7 +495,7 @@ struct Blocks {
                 unsupported("invalid-" + variant); return;
             }
             if (variant == "advisor_result" || variant == "advisor_redacted_result" || variant == "advisor_tool_result_error") {
-                block.string("type", "tool_result"); block.optional("toolCallID", text(item, "tool_use_id"), 256);
+                block.string("type", "tool_result"); block.optional("toolCallID", callIdentity(text(item, "tool_use_id")));
                 body = variant == "advisor_result" ? text(content, "text") :
                     variant == "advisor_redacted_result" ? "Advisor result is encrypted" : "Advisor error: " + text(content, "error_code");
                 writeBody("preview");
@@ -773,15 +852,8 @@ NormalizedRecord normalize(const std::string& provider, Element source, bool cut
             out.number("unparsedContentCount", 1); known = false; result.visible = true;
         }
     } else if (provider == "pi") {
-        auto unique = [](Element value) {
-            if (!value.is_object()) return false;
-            std::set<std::string_view> keys;
-            for (const auto field : simdjson::dom::object(value.get_object().value())) if (!keys.insert(field.key).second) return false;
-            return true;
-        };
-        auto validID = [](Element value, const char* key) {
-            return get(value, key).is_string() && !text(value, key).empty() && text(value, key).size() <= 256;
-        };
+        auto unique = uniqueKeys;
+        auto validID = validIdentity;
         auto optionalBool = [](Element value, const char* key) {
             return value.at_key(key).error() == simdjson::NO_SUCH_FIELD || get(value, key).is_bool();
         };
@@ -791,17 +863,7 @@ NormalizedRecord normalize(const std::string& provider, Element source, bool cut
             for (const auto part : simdjson::dom::array(value.get_array().value())) if (!unique(part)) return false;
             return true;
         };
-        // Pi's identity is id, never Claude's uuid. Offset fallback is only
-        // display identity for v1 records; the index separately proves version
-        // and rejects missing structural IDs in v2/v3.
-        result.providerID = text(source, "id");
-        if (result.providerID.empty() && type != "session") result.providerID = fallbackID;
-        result.chainID = text(source, "id"); result.chainParentID = text(source, "parentId");
-        result.parentField = source.at_key("parentId").error() != simdjson::NO_SUCH_FIELD;
-        result.chainEntry = type != "session" && get(source, "id").is_string();
-        result.chainUnproven = !unique(source) || result.chainID.size() > 256 || result.chainParentID.size() > 256 ||
-            (type == "session" && !validID(source, "id")) ||
-            (result.parentField && !get(source, "parentId").is_null() && !get(source, "parentId").is_string());
+        piChain(source, type, fallbackID, result);
         const auto entry = get(source, "message"); const auto role = text(entry, "role");
         bool valid = true;
         if (type == "message") {
@@ -933,46 +995,7 @@ NormalizedRecord normalize(const std::string& provider, Element source, bool cut
             opaqueMetadata("pi-" + type);
         } else { out.string("type", "unknown"); out.string("sourceType", "pi/" + type, 128); known = false; result.visible = true; }
     } else if (provider == "claude") {
-        result.parentField = source.at_key("parentUuid").error() != simdjson::NO_SUCH_FIELD;
-        result.chainID = text(source, "uuid"); result.chainParentID = text(source, "parentUuid");
-        result.chainUnproven = result.chainID.size() > 256 || result.chainParentID.size() > 256;
-        // These fields select authored membership and ancestry. Unlike an
-        // unknown display block, an ambiguous or ill-typed structural field
-        // cannot be treated as false/empty without choosing another history.
-        const std::set<std::string_view> structural{"type", "uuid", "parentUuid", "isSidechain", "isMeta", "teamName"};
-        std::set<std::string_view> seen;
-        size_t subtypeFields = 0, logicalFields = 0;
-        if (source.is_object()) for (const auto field : simdjson::dom::object(source.get_object().value())) {
-            if (structural.count(field.key) && !seen.insert(field.key).second) result.chainUnproven = true;
-            subtypeFields += field.key == "subtype"; logicalFields += field.key == "logicalParentUuid";
-        }
-        if (source.at_key("uuid").error() != simdjson::NO_SUCH_FIELD &&
-            (!get(source, "uuid").is_string() || result.chainID.empty())) result.chainUnproven = true;
-        if (result.parentField && !get(source, "parentUuid").is_null() && !get(source, "parentUuid").is_string())
-            result.chainUnproven = true;
-        for (const auto key : {"isSidechain", "isMeta"})
-            if (source.at_key(key).error() != simdjson::NO_SUCH_FIELD && !get(source, key).is_bool()) result.chainUnproven = true;
-        if (!get(source, "teamName").is_null() && !get(source, "teamName").is_string()) result.chainUnproven = true;
-        result.chainEntry = get(source, "uuid").is_string() && (type == "user" || type == "assistant" ||
-            type == "progress" || type == "system" || type == "attachment");
-        result.chainMessage = type == "user" || type == "assistant";
-        result.chainMain = result.chainMessage && !json::boolean(source, "isSidechain") && !json::boolean(source, "isMeta") && text(source, "teamName").empty();
-        result.chainSidechain = json::boolean(source, "isSidechain") || !text(source, "teamName").empty();
-        // Compaction writes a new root whose logicalParentUuid names the prior
-        // history only advisorily (it can name a later record or nothing).
-        // Boundary membership and the advisory link therefore never make a
-        // transcript unproven: an ambiguous subtype keeps the old root
-        // behaviour, and an ill-typed, overlong or duplicated logical link
-        // is ignored so the index uses its positional fallback. Either way
-        // the index accepts only an effective parent physically before the
-        // boundary and stops the path rather than revisit a node, so neither
-        // choice can make a readable transcript unproven.
-        result.chainCompactBoundary = result.chainEntry && type == "system" && subtypeFields == 1 &&
-            get(source, "subtype").is_string() && text(source, "subtype") == "compact_boundary" && result.chainParentID.empty();
-        if (result.chainCompactBoundary && logicalFields == 1 && get(source, "logicalParentUuid").is_string()) {
-            const auto logical = text(source, "logicalParentUuid");
-            if (logical.size() <= 256) result.chainLogicalParentID = logical;
-        }
+        claudeChain(source, type, result);
         if (type == "user" || type == "assistant" || type == "system") {
             const auto msg = get(source, "message");
             auto content = get(msg, "content");
@@ -1162,6 +1185,19 @@ NormalizedRecord normalize(const std::string& provider, Element source, bool cut
     return result;
 }
 
+NormalizedRecord normalizeChainMetadata(const std::string& provider, Element source, bool cut, const std::string& fallbackID) {
+    const auto type = text(source, "type");
+    // The index reads a Pi header's sessionVersion from its display JSON.
+    if (provider == "pi" && type == "session") return normalize(provider, source, cut, fallbackID);
+    NormalizedRecord result;
+    const auto payloadType = text(get(source, "payload"), "type");
+    result.sourceType = type + (payloadType.empty() ? "" : "/" + payloadType);
+    if (result.sourceType.size() > 256) result.sourceType = "source-type-too-large";
+    if (provider == "pi") piChain(source, type, fallbackID, result);
+    else claudeChain(source, type, result);
+    return result;
+}
+
 NormalizedRecord normalizeCodexCoreItem(Element item, const std::string& turnID, bool cut) {
     // Port of CoreTurnItem -> ThreadItem's display-field conversion, not an
     // alternative JSONL history reducer. See the pinned upstream conversion
@@ -1342,7 +1378,7 @@ NormalizedRecord normalizeCodexItem(Element item, const std::string& turnID, boo
     NormalizedRecord result;
     const auto type = text(item, "type");
     result.sourceType = "app-server/" + type;
-    result.providerID = text(item, "id");
+    result.providerID = text(item, "id"); result.turnID = turnID;
     json::Object out;
     out.string("provider", "codex"); out.string("type", "message"); out.optional("turnID", turnID, 256);
     out.optional("providerItemID", result.providerID, 256); out.optional("toolStatus", text(item, "status"), 128);

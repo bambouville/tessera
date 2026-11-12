@@ -1,16 +1,32 @@
 import SwiftUI
 
-/// The two on-screen elements the guided walkthrough spotlights. They live in
-/// different subtrees (the landing detail pane and the floating sidebar), so the
+/// The on-screen elements the guided walkthrough spotlights. They live in
+/// different subtrees (the landing detail pane, sidebar and compact tab bar), so the
 /// overlay can't reach them directly — it discovers their frames through the
 /// standard SwiftUI anchor-preference channel, merged at the `ContentView`
 /// ZStack that is the common ancestor of both.
 ///
-/// Only the two *spotlight* steps need an anchor. The illustration steps (tmux,
+/// Only the *spotlight* steps need an anchor. The illustration steps (tmux,
 /// swipe pad, shortcuts) render as centered cards and look up nothing.
 enum OnboardingTarget: Hashable {
     case addHost
     case keysNav
+    case artifactsNav
+    case agentsNav
+    case settingsNav
+}
+
+private struct OnboardingInputSuppressedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Session rendering layers use this to keep a passive release card or
+    /// walkthrough from reopening the software keyboard beneath the overlay.
+    var onboardingInputSuppressed: Bool {
+        get { self[OnboardingInputSuppressedKey.self] }
+        set { self[OnboardingInputSuppressedKey.self] = newValue }
+    }
 }
 
 /// Collects `Anchor<CGRect>` bounds keyed by target. `reduce` keeps the last

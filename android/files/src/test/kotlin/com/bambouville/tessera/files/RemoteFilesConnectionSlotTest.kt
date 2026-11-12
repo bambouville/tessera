@@ -98,6 +98,7 @@ class RemoteFilesConnectionSlotTest {
             val result = withTimeout(WAIT_S * 1_000) { opening.await() }
             assertTrue("late open was handed out: $result", result.exceptionOrNull() is CancellationException)
             assertNull(slot.currentOrNull)
+            assertEquals(0L, slot.generation)
             assertTrue("late connection leaked", connection.closeFinished.await(WAIT_S, TimeUnit.SECONDS))
             assertEquals(1, connection.closeCount.get())
         } finally {
@@ -163,6 +164,34 @@ class RemoteFilesConnectionSlotTest {
         assertTrue("the dead connection was never closed", first.closeFinished.await(WAIT_S, TimeUnit.SECONDS))
 
         slot.closeAndJoin()
+        assertEquals(1, first.closeCount.get())
+        assertEquals(1, second.closeCount.get())
+    }
+
+    @Test fun generationsCountOnlyKeptConnectionsAndReadsNeverOpenOrCheckUsability() = runBlocking {
+        var checks = 0
+        var opens = 0
+        val slot = RemoteFilesConnectionSlot<FakeConnection>(isUsable = { checks++; !it.dead })
+        repeat(1_000) { assertEquals(0L, slot.generation) }
+        assertEquals(0, checks)
+        assertEquals(0, opens)
+        val first = FakeConnection()
+        assertSame(first, slot.obtain { opens++; first })
+        assertEquals(1L, slot.generation)
+        repeat(10) { assertSame(first, slot.obtain { error("a stable connection must not reopen") }) }
+        val checksBeforeReads = checks
+        repeat(1_000) { assertEquals(1L, slot.generation) }
+        assertEquals(checksBeforeReads, checks)
+        first.dead = true
+        val second = FakeConnection()
+        assertSame(second, slot.obtain { opens++; second })
+        assertEquals(2L, slot.generation)
+        val checksAfterReplacement = checks
+        repeat(1_000) { assertEquals(2L, slot.generation) }
+        assertEquals(checksAfterReplacement, checks)
+        assertEquals(2, opens)
+        slot.closeAndJoin()
+        assertEquals(2L, slot.generation)
         assertEquals(1, first.closeCount.get())
         assertEquals(1, second.closeCount.get())
     }

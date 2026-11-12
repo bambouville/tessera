@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_hostname_required">ホスト名は必須です</string>
+    <string name="data_hostname_whitespace">ホスト名に空白は使えません</string>
+    <string name="data_hostname_control_characters">ホスト名に制御文字は使えません</string>
+    <string name="data_username_required">ユーザー名は必須です</string>
+    <string name="data_username_whitespace">ユーザー名に空白は使えません</string>
+    <string name="data_username_control_characters">ユーザー名に制御文字は使えません</string>
+    <string name="data_name_control_characters">名前に制御文字は使えません</string>
+    <string name="data_port_range">ポートは 1 〜 65535 の範囲である必要があります</string>
+    <string name="data_host_text_too_long">ホストのテキストが 64 KiB を超えているか、NUL 文字を含んでいます</string>
+    <string name="data_invalid_tmux_mode">無効な tmux モードです</string>
+    <string name="data_invalid_transport_kind">無効なトランスポートの種類です</string>
+    <string name="data_tmux_target_required">固定 tmux のターゲットが必要です</string>
+    <string name="data_tmux_target_too_long">tmux のターゲットが長すぎます</string>
+    <string name="data_tmux_target_characters">tmux のターゲットに使えるのは英字、数字、アンダースコア、ハイフン、ピリオドだけです</string>
+    <string name="data_host_jump_through_itself">ホストは自分自身を踏み台にできません</string>
+    <string name="data_jump_route_cycle">踏み台ルートに循環があります</string>
+    <string name="data_route_host_unavailable">ルート上のホストを利用できません</string>
+    <string name="data_jump_host_unavailable">踏み台ホストを利用できません</string>
+    <string name="data_identity_name_required">識別情報の名前は必須です</string>
+    <string name="data_identity_name_control_characters">識別情報の名前に制御文字は使えません</string>
+    <plurals name="data_jump_route_too_long">
+        <item quantity="other">踏み台ルートが %1$d 台のホストを超えています</item>
+    </plurals>
+</resources>

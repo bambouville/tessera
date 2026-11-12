@@ -43,9 +43,9 @@ enum BindingKey: Codable, Equatable, Hashable {
         }
     }
 
-    /// Display token. Anything without a dedicated glyph falls back to its
-    /// literal characters.
-    var displayToken: KeyToken {
+    /// A single display token where one exists. Function-key labels contain
+    /// several characters, so the binding renders them as a whole below.
+    var displayToken: KeyToken? {
         switch self {
         case .character(let c): return .character(c.first ?? "?")
         case .up:     return .up
@@ -61,7 +61,7 @@ enum BindingKey: Codable, Equatable, Hashable {
         case .pageDown: return .character("⇟")
         case .home:     return .character("↖")
         case .end:      return .character("↘")
-        case .function(let n): return .character(Character("\(n)"))
+        case .function: return nil
         }
     }
 
@@ -117,9 +117,21 @@ struct KeyBinding: Codable, Equatable, Hashable {
     static func cmd(_ c: Character) -> KeyBinding { KeyBinding([.command], .character(String(c))) }
     static func cmdShift(_ c: Character) -> KeyBinding { KeyBinding([.command, .shift], .character(String(c))) }
 
-    var chord: Chord { Chord(modifiers, key.displayToken) }
+    /// Keep each function-key label intact: `Character("10")` traps, and a
+    /// single digit also makes F1 indistinguishable from the number key.
+    func renderedParts(_ notation: ModifierNotation) -> [String] {
+        var parts = Chord(modifiers).tokens.map { $0.rendered(notation) }
+        if case .function(let number) = key {
+            parts.append(notation == .glyph ? "F\(number)" : "f\(number)")
+        } else if let token = key.displayToken {
+            parts.append(token.rendered(notation))
+        }
+        return parts
+    }
 
-    func rendered(_ notation: ModifierNotation) -> String { chord.rendered(notation) }
+    func rendered(_ notation: ModifierNotation) -> String {
+        renderedParts(notation).joined(separator: notation.joiner)
+    }
 
     var modifierFlags: UIKeyModifierFlags {
         var flags: UIKeyModifierFlags = []

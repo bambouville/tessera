@@ -25,7 +25,7 @@ internal class RemoteFilePresentationCache(context: Context) {
     }
 
     fun dispatch(file: File, displayName: String, action: RemoteFilePresentationAction, images: Map<String, File> = emptyMap()) {
-        check(file.isFile) { "The staged remote file is unavailable" }
+        if (!file.isFile) throw FilesLocalFileUnavailableException(FilesLocalFileUnavailableException.Reason.Staged)
         val uri = FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file)
         val mime = mimeType(displayName)
         val intent = when (action) {
@@ -42,15 +42,15 @@ internal class RemoteFilePresentationCache(context: Context) {
                     putExtra(RemoteFileTextPreviewActivity.EXTRA_IMAGES, stagedImages)
                 }
             } else Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, mime) }
-            RemoteFilePresentationAction.SHARE -> Intent(Intent.ACTION_SEND).apply {
-                type = mime
-                putExtra(Intent.EXTRA_STREAM, uri)
-            }
+            RemoteFilePresentationAction.SHARE -> fileShareIntent(uri, displayName, mime)
         }.apply {
             clipData = ClipData.newRawUri(displayName, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val title = if (action == RemoteFilePresentationAction.OPEN) "Open $displayName" else "Share $displayName"
+        val title = appContext.getString(
+            if (action == RemoteFilePresentationAction.OPEN) R.string.files_chooser_open else R.string.files_chooser_share,
+            displayName,
+        )
         val launched = if (action == RemoteFilePresentationAction.OPEN &&
             intent.component?.className == RemoteFileTextPreviewActivity::class.java.name
         ) intent else Intent.createChooser(intent, title)
@@ -82,6 +82,18 @@ internal class RemoteFilePresentationCache(context: Context) {
     private companion object {
         const val MAX_AGE_MILLIS = 24 * 60 * 60 * 1000L
     }
+}
+
+/**
+ * Sends one FileProvider file to another app: the file itself with its MIME
+ * type and a read grant, as Files shares and the artifacts browser share.
+ * The caller wraps it in a chooser.
+ */
+fun fileShareIntent(uri: Uri, displayName: String, mimeType: String): Intent = Intent(Intent.ACTION_SEND).apply {
+    type = mimeType
+    putExtra(Intent.EXTRA_STREAM, uri)
+    clipData = ClipData.newRawUri(displayName, uri)
+    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 }
 
 internal fun shouldPreviewText(name: String, mime: String, sample: ByteArray): Boolean {

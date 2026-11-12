@@ -132,4 +132,22 @@ class RemoteSelectionPathResolverTest {
         )
         assertEquals(2, RemoteSelectionPathResolver.entriesNamed("r eviewv3.pdf", twins) { it }.size)
     }
+
+    @Test
+    fun `absolute candidate needs no anchor and never guesses home or cwd`() {
+        assertEquals("/srv/app/out.log", RemoteSelectionPathResolver.absoluteCandidate(" '/srv/app/./x/../out.log:12' "))
+        assertEquals("/docs/review v3.pdf", RemoteSelectionPathResolver.absoluteCandidate("'/docs/review v3.pdf'"))
+        assertEquals("/docs/reviewv3.pdf", RemoteSelectionPathResolver.absoluteCandidate("/docs/review\n    v3.pdf"))
+        assertNull(RemoteSelectionPathResolver.absoluteCandidate("~/notes.md"))
+        assertNull(RemoteSelectionPathResolver.absoluteCandidate("src/App.kt"))
+        assertNull(RemoteSelectionPathResolver.absoluteCandidate("plain prose sentence"))
+    }
+
+    @Test
+    fun `no directory miss names the candidate as the terminal does`() {
+        assertEquals(
+            "Can't resolve src/App.kt — no terminal directory is available for a relative path.",
+            RemoteSelectionPathResolver.noDirectoryMessage("src/App.kt"),
+        )
+    }
 }

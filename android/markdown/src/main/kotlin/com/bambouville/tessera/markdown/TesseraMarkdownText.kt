@@ -20,11 +20,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -52,18 +55,35 @@ import java.net.URI
 fun TesseraMarkdownText(
     source: String,
     modifier: Modifier = Modifier,
+    /**
+     * Takes every link as written, relative paths included, in place of the
+     * device's browser. Without it only web and mail links are tappable.
+     */
+    onLink: ((destination: String) -> Unit)? = null,
     imageContent: (@Composable (destination: String, alt: String) -> Unit)? = null,
 ) {
     val tokens = LocalTesseraTokens.current
+    // Callers rebuild their handler as their state changes; the tree keeps one
+    // opener that calls the latest, so a new handler re-renders no text.
+    val latestOnLink by rememberUpdatedState(onLink)
+    val documentLink = remember(onLink != null) {
+        val open: (String) -> Unit = { link -> latestOnLink?.invoke(link) }
+        open.takeIf { onLink != null }
+    }
     // A bridge load failure must never make content disappear. The literal
     // fallback deliberately does not run a local Markdown parser.
-    val document = remember(source) { runCatching { SharedAgentMarkdown.parse(source) }.getOrNull() }
+    val document = remember(source, onLink != null) {
+        runCatching { if (onLink != null) SharedAgentMarkdown.parseDocument(source) else SharedAgentMarkdown.parse(source) }.getOrNull()
+    }
     if (document == null) {
         Text(source, modifier = modifier, style = TesseraType.body, color = tokens.fg)
         return
     }
 
-    CompositionLocalProvider(LocalMarkdownImageContent provides imageContent) {
+    CompositionLocalProvider(
+        LocalMarkdownImageContent provides imageContent,
+        LocalMarkdownDocumentLink provides documentLink,
+    ) {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             document.blocks.forEach { block -> AgentMarkdownBlock(block) }
             if (document.truncated) Text("…", style = TesseraType.rowMicro, color = tokens.fgDim)
@@ -195,6 +215,8 @@ private fun AgentMarkdownTable(table: SharedAgentMarkdownNode) {
 }
 
 private val LocalMarkdownImageContent = staticCompositionLocalOf<(@Composable (String, String) -> Unit)?> { null }
+/** A document's link opener, which takes every link in place of the device's browser. */
+private val LocalMarkdownDocumentLink = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
 internal data class MarkdownInlinePart(
     val nodes: List<SharedAgentMarkdownNode> = emptyList(),
@@ -203,7 +225,10 @@ internal data class MarkdownInlinePart(
 )
 
 /** Split images out of prose while retaining enclosing emphasis/link styles. */
-internal fun markdownInlineParts(nodes: List<SharedAgentMarkdownNode>): List<MarkdownInlinePart> {
+internal fun markdownInlineParts(
+    nodes: List<SharedAgentMarkdownNode>,
+    takesLink: (String) -> Boolean = ::isSafeAgentLink,
+): List<MarkdownInlinePart> {
     val result = mutableListOf<MarkdownInlinePart>()
     fun add(part: MarkdownInlinePart) {
         if (part.image == null && result.lastOrNull()?.image == null && result.isNotEmpty()) {
@@ -214,9 +239,9 @@ internal fun markdownInlineParts(nodes: List<SharedAgentMarkdownNode>): List<Mar
         if (node.kind == "image" && node.destination != null) {
             add(MarkdownInlinePart(image = node))
         } else if (node.children.isNotEmpty() && node.kind != "image") {
-            markdownInlineParts(node.children).forEach { part ->
+            markdownInlineParts(node.children, takesLink).forEach { part ->
                 add(if (part.image != null) {
-                    if (node.kind == "link") part.copy(link = node.destination?.takeIf(::isSafeAgentLink)) else part
+                    if (node.kind == "link") part.copy(link = node.destination?.takeIf(takesLink)) else part
                 } else MarkdownInlinePart(listOf(node.copy(children = part.nodes))))
             }
         } else add(MarkdownInlinePart(listOf(node)))
@@ -235,22 +260,35 @@ private fun AgentMarkdownInline(
     val tokens = LocalTesseraTokens.current
     val imageContent = LocalMarkdownImageContent.current
     val uriHandler = LocalUriHandler.current
-    val parts = remember(nodes) { markdownInlineParts(nodes) }
+    val documentLink = LocalMarkdownDocumentLink.current
+    val takesLink = linkFilter(documentLink != null)
+    val parts = remember(nodes, takesLink) { markdownInlineParts(nodes, takesLink) }
     val linkColor = tokens.accent
+    val imageLabels = MarkdownImageLabels(
+        bare = stringResource(R.string.markdown_image),
+        withAlt = stringResource(R.string.markdown_image_with_alt),
+    )
     if (imageContent == null || parts.none { it.image != null }) {
-        val text = remember(nodes, linkColor) { agentMarkdownAnnotatedString(nodes, linkColor) }
+        val text = remember(nodes, linkColor, imageLabels, documentLink) { agentMarkdownAnnotatedString(nodes, linkColor, imageLabels, documentLink) }
         Text(text, modifier, color = color, style = style, textAlign = textAlign)
     } else {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             parts.forEach { part ->
                 val image = part.image
                 if (image != null) {
-                    val alt = remember(image, linkColor) { agentMarkdownAnnotatedString(image.children, linkColor).text }
-                    Box(if (part.link != null) Modifier.clickable { uriHandler.openUri(part.link) } else Modifier) {
+                    val alt = remember(image, linkColor, imageLabels, documentLink) {
+                        agentMarkdownAnnotatedString(image.children, linkColor, imageLabels, documentLink).text
+                    }
+                    // A text link swallows a missing browser; an image link does the same.
+                    Box(if (part.link != null) Modifier.clickable {
+                        runCatching { if (documentLink != null) documentLink(part.link) else uriHandler.openUri(part.link) }
+                    } else Modifier) {
                         imageContent(image.destination.orEmpty(), alt)
                     }
                 } else {
-                    val text = remember(part.nodes, linkColor) { agentMarkdownAnnotatedString(part.nodes, linkColor) }
+                    val text = remember(part.nodes, linkColor, imageLabels, documentLink) {
+                        agentMarkdownAnnotatedString(part.nodes, linkColor, imageLabels, documentLink)
+                    }
                     Text(text, color = color, style = style, textAlign = textAlign)
                 }
             }
@@ -258,13 +296,34 @@ private fun AgentMarkdownInline(
     }
 }
 
-/** Builds a display-only inline annotation tree; links are never fetched here. */
-internal fun agentMarkdownAnnotatedString(nodes: List<SharedAgentMarkdownNode>, linkColor: Color): AnnotatedString = buildAnnotatedString {
-    nodes.forEach { appendAgentMarkdownInline(it, linkColor) }
+/**
+ * How an image reads when it renders as text: [bare] alone, or [withAlt] with
+ * its `%1$s` standing for the alt text, which keeps its own styling.
+ */
+internal data class MarkdownImageLabels(val bare: String, val withAlt: String)
+
+/**
+ * Builds a display-only inline annotation tree; links are never fetched here.
+ * A [documentLink] opener takes every link, both taps and the link actions of
+ * accessibility services: a link without a listener reaches those as a plain
+ * URLSpan, which hands its raw destination to the device.
+ */
+internal fun agentMarkdownAnnotatedString(
+    nodes: List<SharedAgentMarkdownNode>,
+    linkColor: Color,
+    imageLabels: MarkdownImageLabels,
+    documentLink: ((String) -> Unit)? = null,
+): AnnotatedString = buildAnnotatedString {
+    nodes.forEach { appendAgentMarkdownInline(it, linkColor, imageLabels, documentLink) }
 }
 
-private fun AnnotatedString.Builder.appendAgentMarkdownInline(node: SharedAgentMarkdownNode, linkColor: Color) {
-    fun appendChildren() = node.children.forEach { appendAgentMarkdownInline(it, linkColor) }
+private fun AnnotatedString.Builder.appendAgentMarkdownInline(
+    node: SharedAgentMarkdownNode,
+    linkColor: Color,
+    imageLabels: MarkdownImageLabels,
+    documentLink: ((String) -> Unit)?,
+) {
+    fun appendChildren() = node.children.forEach { appendAgentMarkdownInline(it, linkColor, imageLabels, documentLink) }
     when (node.kind) {
         "text" -> append(node.text.orEmpty())
         "strong" -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { appendChildren() }
@@ -272,8 +331,13 @@ private fun AnnotatedString.Builder.appendAgentMarkdownInline(node: SharedAgentM
         "strikethrough" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendChildren() }
         "inlineCode" -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)) { append(node.text.orEmpty()) }
         "link" -> {
-            val destination = node.destination?.takeIf(::isSafeAgentLink)
-            if (destination == null) appendChildren() else withLink(LinkAnnotation.Url(destination)) {
+            val destination = node.destination?.takeIf(linkFilter(documentLink != null))
+            val link = when {
+                destination == null -> null
+                documentLink == null -> LinkAnnotation.Url(destination)
+                else -> LinkAnnotation.Url(destination, linkInteractionListener = { documentLink(destination) })
+            }
+            if (link == null) appendChildren() else withLink(link) {
                 withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { appendChildren() }
             }
         }
@@ -281,16 +345,25 @@ private fun AnnotatedString.Builder.appendAgentMarkdownInline(node: SharedAgentM
         // Agent transcripts remain alt-only. Files explicitly supplies an
         // image slot backed by privately staged copies from the document host.
         "image" -> {
-            append("[image")
-            if (node.children.isNotEmpty()) {
-                append(": ")
+            val slot = imageLabels.withAlt.indexOf(ALT_PLACEHOLDER)
+            if (node.children.isEmpty() || slot < 0) {
+                append(imageLabels.bare)
+            } else {
+                append(imageLabels.withAlt.substring(0, slot))
                 appendChildren()
+                append(imageLabels.withAlt.substring(slot + ALT_PLACEHOLDER.length))
             }
-            append("]")
         }
         else -> if (node.children.isNotEmpty()) appendChildren() else append(node.text.orEmpty())
     }
 }
+
+private const val ALT_PLACEHOLDER = "%1\$s"
+
+/** One instance per mode, so remembered text survives recomposition. */
+private fun linkFilter(takesEveryLink: Boolean): (String) -> Boolean = if (takesEveryLink) TakesEveryLink else SafeAgentLink
+private val TakesEveryLink: (String) -> Boolean = { it.isNotBlank() }
+private val SafeAgentLink: (String) -> Boolean = ::isSafeAgentLink
 
 private fun isSafeAgentLink(value: String): Boolean = runCatching {
     val uri = URI(value)

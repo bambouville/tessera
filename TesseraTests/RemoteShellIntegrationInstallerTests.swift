@@ -113,7 +113,7 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(script.contains("]1337;TesseraAgentState="))
         XCTAssertTrue(script.contains("tmux display-message -p -t"))
         XCTAssertTrue(script.contains("ps -o tty="))
-        XCTAssertTrue(script.contains(#"metadata="$(TESSERA_AGENT_PROVIDER="$provider" python3 -c"#))
+        XCTAssertTrue(script.contains(#"metadata="$(TESSERA_AGENT_PROVIDER="$provider" python3 -I -c"#))
         XCTAssertTrue(script.contains("dd bs=4096 count=16"))
         XCTAssertFalse(script.contains(#"input="$(cat"#))
         XCTAssertTrue(script.contains("json.load(sys.stdin)"))
@@ -450,9 +450,9 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
         XCTAssertTrue(install.contains("merge-not-valid-toml"))
 
         let projector = RemoteAgentLifecycleIntegrationInstaller.projectorScript
-        XCTAssertTrue(projector.contains(#"exec "$tessera_python" -c"#))
+        XCTAssertTrue(projector.contains(#"exec "$tessera_python" -I -c"#))
         XCTAssertTrue(projector.contains("import tomli as tomllib"))
-        XCTAssertFalse(projector.contains("exec python3 -c"))
+        XCTAssertFalse(projector.contains("exec python3 "))
     }
 
     /// The retry policy is shared, so it is stated once and tested once.
@@ -623,7 +623,10 @@ final class RemoteShellIntegrationInstallerTests: XCTestCase {
 
         XCTAssertTrue(command.contains("active-shells/$tessera_pid"))
         XCTAssertFalse(command.contains(#"/proc/$tessera_pid/environ"#))
-        XCTAssertFalse(command.contains("ps eww"))
+        // `ps eww` may still name the shell's locale and zone for its marker's
+        // start time, but an environment never proves activation here.
+        XCTAssertFalse(command.contains("tessera_env_version TESSERA_AGENT_INTEGRATION_VERSION"))
+        XCTAssertFalse(command.contains("tessera_proof=inherited-environment"))
     }
 
     func test_agentShellStatusParserDistinguishesActiveInactiveAndNoise() {

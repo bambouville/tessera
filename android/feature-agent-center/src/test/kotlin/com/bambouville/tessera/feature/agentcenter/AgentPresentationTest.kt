@@ -1,5 +1,7 @@
 package com.bambouville.tessera.feature.agentcenter
 
+import com.bambouville.tessera.design.ArtifactOpenOrigin
+import com.bambouville.tessera.design.ArtifactOpenRequest
 import com.bambouville.tessera.core.bridge.SharedAgentReadStatus
 import com.bambouville.tessera.core.bridge.SharedAgentSnapshot
 import com.bambouville.tessera.core.bridge.SharedAgentSnapshotKind
@@ -12,12 +14,88 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.TimeZone
 
 class AgentPresentationTest {
+    @Test fun artifactChangesRequireStructuredPathDiffAndHostIdentity() {
+        val edit = AgentBlock("src/App.kt", "+ preview", "edit", path = "src/App.kt", diff = "+ complete")
+        assertEquals(
+            ArtifactOpenRequest.Change("saved-host", "src/App.kt", "+ complete", "src/App.kt", ArtifactOpenOrigin.AgentEdit, "live-session"),
+            edit.artifactChange("saved-host", "live-session"),
+        )
+        assertNull(edit.artifactChange(" "))
+        assertNull(edit.copy(path = null).artifactChange("host"))
+        assertNull(edit.copy(path = " ").artifactChange("host"))
+        assertNull(edit.copy(diff = null).artifactChange("host"))
+        assertNull(edit.copy(diff = " ").artifactChange("host"))
+        assertNull(edit.copy(kind = "text").artifactChange("host"))
+    }
+
+    @Test fun artifactChangesKeepTheDiffBeyondTheCollapsedCardPreview() {
+        val diff = "+ a complete line in the edit\n".repeat(1_000)
+        val thread = SharedAgentValue.ObjectValue(mapOf(
+            "summary" to SharedAgentValue.ObjectValue(mapOf("id" to SharedAgentValue.ObjectValue(mapOf(
+                "hostID" to SharedAgentValue.StringValue("host-a"),
+                "providerID" to SharedAgentValue.StringValue("claude"),
+                "providerSessionID" to SharedAgentValue.StringValue("session-a"),
+            )))),
+            "messages" to SharedAgentValue.ArrayValue(listOf(SharedAgentValue.ObjectValue(mapOf(
+                "recordID" to SharedAgentValue.StringValue("edit-1"),
+                "blocks" to SharedAgentValue.ArrayValue(listOf(SharedAgentValue.ObjectValue(mapOf(
+                    "edit" to SharedAgentValue.ObjectValue(mapOf(
+                        "path" to SharedAgentValue.StringValue("src/App.kt"),
+                        "diff" to SharedAgentValue.StringValue(diff),
+                    )),
+                )))),
+            )))),
+        ))
+        val detail = requireNotNull(AgentPresentation.detail(SharedAgentSnapshot(
+            1, SharedAgentSnapshotKind.Thread, SharedAgentValue.ObjectValue(mapOf("thread" to thread)),
+        )))
+        val block = detail.live.single()
+        assertTrue(block.body.length < diff.length)
+        assertEquals(diff, requireNotNull(block.artifactChange(detail.row.hostID)).diff)
+    }
+
+    @Test fun seventyKiBDiffsWithTheSamePreviewProduceDistinctChangeOpensFromBothSources() {
+        val prefix = "+".repeat(70 * 1024 - 1)
+        val diffs = listOf(prefix + "a", prefix + "b")
+        val edits = diffs.map { diff -> SharedAgentValue.ObjectValue(mapOf(
+            "path" to SharedAgentValue.StringValue("src/App.kt"),
+            "diff" to SharedAgentValue.StringValue(diff),
+        )) }
+        for (transcript in listOf(true, false)) {
+            val fields = mutableMapOf<String, SharedAgentValue>(
+                "summary" to SharedAgentValue.ObjectValue(mapOf("id" to SharedAgentValue.ObjectValue(mapOf(
+                    "hostID" to SharedAgentValue.StringValue("host-a"),
+                    "providerID" to SharedAgentValue.StringValue("claude"),
+                    "providerSessionID" to SharedAgentValue.StringValue("session-a"),
+                )))),
+            )
+            if (transcript) fields["messages"] = SharedAgentValue.ArrayValue(listOf(SharedAgentValue.ObjectValue(mapOf(
+                "blocks" to SharedAgentValue.ArrayValue(edits.map { SharedAgentValue.ObjectValue(mapOf("edit" to it)) }),
+            ))))
+            else fields["changes"] = SharedAgentValue.ObjectValue(mapOf("edits" to SharedAgentValue.ArrayValue(edits)))
+            val detail = requireNotNull(AgentPresentation.detail(SharedAgentSnapshot(1, SharedAgentSnapshotKind.Thread,
+                SharedAgentValue.ObjectValue(mapOf("thread" to SharedAgentValue.ObjectValue(fields))))))
+            val blocks = if (transcript) detail.live else detail.changes
+            assertEquals(blocks[0].body, blocks[1].body)
+            assertTrue(blocks.all { it.body.length <= if (transcript) 16_384 else 4_096 })
+            val opens = blocks.map { requireNotNull(it.artifactChange(detail.row.hostID)) }
+            assertEquals(2, opens.distinct().size)
+            diffs.indices.forEach { index ->
+                assertSame("the snapshot retains the payload string", diffs[index], blocks[index].diff)
+                assertSame(diffs[index], opens[index].diff)
+                assertEquals(70 * 1024, opens[index].diff.length)
+            }
+        }
+    }
+
     @Test fun statusDotTonesMatchIOS() {
         assertEquals(AgentStatusDotTone.Green, agentStatusDotTone("working", "none"))
         assertEquals(AgentStatusDotTone.Green, agentStatusDotTone("finished", "unreadCompletion"))
@@ -28,9 +106,71 @@ class AgentPresentationTest {
         assertEquals(AgentStatusDotTone.Faint, agentStatusDotTone("unavailable", "none"))
     }
 
-    @Test fun partialProviderFailureDoesNotMarkAResultHostUnavailable() {
-        assertEquals(listOf("host-b"), agentSearchUnavailableHosts(setOf("HOST-A", "host-b"), setOf("host-a")))
+    /** A host that stopped early is reported even when it returned matches:
+     * they are partial. Host IDs compare case-insensitively, as Core's UUIDs
+     * do, and result hosts and reported hosts together stay within four. */
+    @Test fun aResultHostThatStoppedEarlyIsStillReported() {
+        assertEquals(listOf("HOST-A", "host-b"), agentSearchUnavailableHosts(setOf("HOST-A", "host-b"), setOf("host-a")))
         assertEquals(listOf("host-a"), agentSearchUnavailableHosts(setOf("host-a", "HOST-A"), emptySet()))
+        // Three result hosts leave one free slot; partial result hosts take none.
+        assertEquals(listOf("host-d", "HOST-A", "host-c"), agentSearchUnavailableHosts(
+            setOf("host-d", "HOST-A", "host-e", "host-c", "host-f"), setOf("host-a", "host-b", "HOST-C")))
+        assertEquals(listOf("h1", "h2", "h3", "h4"), agentSearchUnavailableHosts(setOf("h1", "h2", "h3", "h4", "h5"), emptySet()))
+    }
+
+    /** A running search shows the rows it started with first, then what it
+     * finds, each record once and within Core's per-host bound. */
+    @Test fun aRunningSearchOnlyAddsRows() {
+        fun result(host: String, session: String, record: String, excerpt: String = record) = JSONObject()
+            .put("threadID", JSONObject().put("hostID", host).put("providerID", JSONObject().put("rawValue", "claude"))
+                .put("providerSessionID", session))
+            .put("recordID", record).put("excerpt", excerpt)
+        val shown = JSONArray().put(result("h1", "s1", "r9", "shown"))
+        val found = JSONArray().put(result("h1", "s2", "r1")).put(result("H1", "s1", "r9", "again")).put(result("h1", "s1", "r2"))
+        val merged = agentSearchMerged(shown, found)
+        assertEquals(listOf("r9", "r1", "r2"), (0 until merged.length()).map { merged.getJSONObject(it).getString("recordID") })
+        assertEquals("shown", merged.getJSONObject(0).getString("excerpt"))
+        val many = JSONArray().also { array -> repeat(150) { array.put(result("h2", "s", "m$it")) } }
+        assertEquals(AGENT_SEARCH_HOST_RESULTS, agentSearchMerged(JSONArray(), many).length())
+        // A later copy places a record the first could not; the first keeps
+        // its place and excerpt, and a placed row is never re-placed.
+        val placed = agentSearchMerged(shown, JSONArray().put(result("h1", "s1", "r9", "again").put("sequence", 37).put("sourceOffset", 4096)
+            .put("seekToken", "0123456789abcdef:u-9")))
+        assertEquals(1, placed.length())
+        assertEquals("shown", placed.getJSONObject(0).getString("excerpt"))
+        assertEquals(37, placed.getJSONObject(0).getInt("sequence"))
+        assertEquals(4096, placed.getJSONObject(0).getInt("sourceOffset"))
+        assertEquals("0123456789abcdef:u-9", placed.getJSONObject(0).getString("seekToken"))
+        assertFalse("the shown row is not edited in place", shown.getJSONObject(0).has("sequence"))
+        val kept = agentSearchMerged(placed, JSONArray().put(result("h1", "s1", "r9").put("sequence", 99)))
+        assertEquals(37, kept.getJSONObject(0).getInt("sequence"))
+        // A placed row without a token takes a later copy's whole position
+        // when that one carries a token; one with a token keeps its own.
+        val untokened = JSONArray().put(result("h1", "s1", "r9", "shown").put("sequence", 36).put("sourceOffset", 4000))
+        val proven = agentSearchMerged(untokened, JSONArray().put(result("h1", "s1", "r9", "again").put("sequence", 37)
+            .put("seekToken", "0123456789abcdef:u-9"))).getJSONObject(0)
+        assertEquals("shown", proven.getString("excerpt"))
+        assertEquals(37, proven.getInt("sequence"))
+        assertFalse("an offset never joins another copy's order", proven.has("sourceOffset"))
+        assertEquals("0123456789abcdef:u-9", proven.getString("seekToken"))
+        val own = agentSearchMerged(placed, JSONArray().put(result("h1", "s1", "r9").put("sequence", 99)
+            .put("seekToken", "fedcba9876543210:u-9"))).getJSONObject(0)
+        assertEquals(37, own.getInt("sequence"))
+        assertEquals("0123456789abcdef:u-9", own.getString("seekToken"))
+        val untouched = agentSearchMerged(untokened, JSONArray().put(result("h1", "s1", "r9").put("sequence", 99))).getJSONObject(0)
+        assertEquals(36, untouched.getInt("sequence"))
+        assertEquals(4000, untouched.getInt("sourceOffset"))
+    }
+
+    /** Core refuses a search snapshot holding more than four result hosts,
+     * which would drop the whole search: later hosts' matches are left out. */
+    @Test fun searchResultsKeepTheFirstFourHosts() {
+        val results = JSONArray()
+        for ((host, record) in listOf("h1" to "a", "H1" to "b", "h2" to "c", "h3" to "d", "h4" to "e", "h5" to "f", "h2" to "g")) {
+            results.put(JSONObject().put("threadID", JSONObject().put("hostID", host)).put("recordID", record))
+        }
+        val admitted = agentSearchResultsWithinHostCap(results)
+        assertEquals(listOf("a", "b", "c", "d", "e", "g"), (0 until admitted.length()).map { admitted.getJSONObject(it).getString("recordID") })
     }
 
     @Test fun searchAcceptsCanonicalAndLegacyProviderIDs() {
@@ -53,6 +193,46 @@ class AgentPresentationTest {
             val row = AgentPresentation.search(snapshot).first.single()
             assertEquals("3eda7c27-0e99-4b8d-9e2b-c7a2f2e2df2a:pi:Session-A", row.threadKey)
             assertEquals("Readable reply", row.excerpt)
+            assertNull("a legacy result names no position", row.sequence)
+        }
+    }
+
+    /** A result places its record for a seek with unsigned 64-bit decimal
+     * strings; anything else places nothing. */
+    @Test fun searchResultCarriesItsRecordsPosition() {
+        fun row(sequence: SharedAgentValue?, offset: SharedAgentValue?, token: SharedAgentValue? = null): AgentSearchResultRow {
+            val fields = mutableMapOf<String, SharedAgentValue>(
+                "threadID" to SharedAgentValue.ObjectValue(mapOf(
+                    "hostID" to SharedAgentValue.StringValue("3eda7c27-0e99-4b8d-9e2b-c7a2f2e2df2a"),
+                    "providerID" to SharedAgentValue.ObjectValue(mapOf("rawValue" to SharedAgentValue.StringValue("claude"))),
+                    "providerSessionID" to SharedAgentValue.StringValue("Session-A"),
+                )),
+                "recordID" to SharedAgentValue.StringValue("record-1"),
+                "excerpt" to SharedAgentValue.StringValue("found it"),
+            )
+            sequence?.let { fields["sequence"] = it }
+            offset?.let { fields["sourceOffset"] = it }
+            token?.let { fields["seekToken"] = it }
+            val snapshot = SharedAgentSnapshot(1, SharedAgentSnapshotKind.Search, SharedAgentValue.ObjectValue(mapOf(
+                "search" to SharedAgentValue.ObjectValue(mapOf("results" to SharedAgentValue.ArrayValue(
+                    listOf(SharedAgentValue.ObjectValue(fields))))))))
+            return AgentPresentation.search(snapshot).first.single()
+        }
+        row(SharedAgentValue.NumberValue("4503599627370376"), SharedAgentValue.NumberValue("18446744073709551615")).let {
+            assertEquals("4503599627370376", it.sequence)
+            assertEquals("18446744073709551615", it.sourceOffset)
+        }
+        row(SharedAgentValue.NumberValue("37"), null).let {
+            assertEquals("37", it.sequence)
+            assertNull(it.sourceOffset)
+            assertNull(it.seekToken)
+        }
+        row(SharedAgentValue.NumberValue("37"), null, SharedAgentValue.StringValue("0123456789abcdef:u-37")).let {
+            assertEquals("0123456789abcdef:u-37", it.seekToken)
+        }
+        row(SharedAgentValue.NumberValue("-1"), SharedAgentValue.NumberValue("1.5")).let {
+            assertNull(it.sequence)
+            assertNull(it.sourceOffset)
         }
     }
 
@@ -349,6 +529,12 @@ class AgentPresentationTest {
         assertEquals(1_704_112_440_000L, detail.activity.single().displayTimeMillis)
         assertEquals("Sources/App.kt\n+3 −1\n+ verified", detail.changes.single().body)
         assertEquals("edit-1", detail.changes.single().recordID)
+        assertEquals("Sources/App.kt", detail.changes.single().path)
+        assertEquals("+ verified", detail.changes.single().diff)
+        assertEquals(
+            ArtifactOpenRequest.Change("host-a", "Sources/App.kt", "+ verified", "Sources/App.kt", ArtifactOpenOrigin.AgentEdit),
+            detail.changes.single().artifactChange(detail.row.hostID),
+        )
     }
 
     @Test fun detailDecodesEverySwiftCodableAgentBlockWithoutLeakingWireFieldNames() {
@@ -416,6 +602,8 @@ class AgentPresentationTest {
         assertEquals("AgentDomain.swift", rendered[2].body)
         assertEquals("result · truncated", rendered[3].title)
         assertEquals("App.kt", rendered[4].title)
+        assertEquals("App.kt", rendered[4].path)
+        assertEquals("+ fixed", rendered[4].diff)
         assertEquals("Allow write access", rendered[5].body)
         assertEquals("queued message", rendered[7].title)
         assertEquals("reviewer", rendered[9].title)
@@ -438,8 +626,8 @@ class AgentPresentationTest {
 
         assertEquals(1_704_067_200_000L, value.agentABIDateMillis("lastActivity"))
         assertEquals(null, value.agentABIDateMillis("invalid"))
-        assertEquals("2m ago", agentRelativeTime(1_704_067_200_000L, nowMillis = 1_704_067_320_000L))
-        assertEquals("in 1h", agentRelativeTime(1_704_070_800_000L, nowMillis = 1_704_067_200_000L))
+        assertEquals("2m ago", agentRelativeTime(1_704_067_200_000L, nowMillis = 1_704_067_320_000L, words = EnglishAgentRowWords))
+        assertEquals("in 1h", agentRelativeTime(1_704_070_800_000L, nowMillis = 1_704_067_200_000L, words = EnglishAgentRowWords))
         assertEquals("12:34", agentDisplayTime(1_704_112_440_000L, TimeZone.getTimeZone("UTC")))
     }
 

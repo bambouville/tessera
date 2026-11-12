@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 swift_roots=(
   "$repo_root/Packages/TesseraCore/Sources/TesseraDomainCore"
+  "$repo_root/Packages/TesseraCore/Sources/TesseraArtifactsCore"
   "$repo_root/Packages/TesseraCore/Sources/TesseraProtocolCore"
   "$repo_root/Packages/TesseraCore/Sources/TesseraTrustCore"
   "$repo_root/Packages/TesseraCore/Sources/TesseraInputCore"

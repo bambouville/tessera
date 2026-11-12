@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="design_font_note_jetbrains_mono">x 高度大，含编程连字</string>
+    <string name="design_font_note_fira_code">最丰富的连字集</string>
+    <string name="design_font_note_hack">字身宽、无修饰，为小字号设计</string>
+    <string name="design_font_note_cascadia_mono">Windows Terminal 的字体，无连字</string>
+    <string name="design_font_note_source_code_pro">Adobe 经典，人文风格字形</string>
+    <string name="design_font_note_ibm_plex_mono">温和，略窄</string>
+    <string name="design_font_note_geist_mono">几何风格，字怀非常开阔</string>
+    <string name="design_font_note_ubuntu_mono">窄体 — 可容纳最多列</string>
+    <string name="design_font_note_inconsolata">轻盈紧凑</string>
+    <string name="design_font_note_dejavu_sans_mono">最广的 Unicode 覆盖</string>
+    <string name="design_font_note_system">系统自带的那一款</string>
+</resources>

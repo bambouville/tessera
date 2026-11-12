@@ -12,7 +12,7 @@ UDID="$(jq -r .udid "$RUNTIME")"
 BUNDLE_ID=com.bambouville.TesseraApp
 mkdir -p "$CASE_DIR"
 
-for step in {0..8}; do
+for step in {0..10}; do
   display_step=$((step + 1))
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
   SIMCTL_CHILD_TESSERA_FORCE_TOUR_STEP="$step" \
@@ -35,13 +35,13 @@ done
 cat >"$CASE_DIR/case.json" <<'JSON'
 {
   "id": "O1-onboarding-tour",
-  "title": "All nine onboarding tour states remain readable in landscape",
+  "title": "All eleven onboarding tour states remain readable in landscape",
   "matrix_ids": ["O1"],
   "invariants": [
-    "Exactly nine landscape captures are present and each displays the matching STEP N OF 9 state.",
-    "Every callout is fully on-screen with readable title/body copy and an unbroken single-row footer; buttons and page dots do not overlap or clip.",
-    "Spotlight rings in steps 1 and 2 align with the intended visible control when that control is present; a centered fallback is acceptable only when the target is absent from the seeded landing state.",
-    "The seven illustration steps render complete, coherent diagrams without missing layers, black rectangles, stale frames, or edge clipping."
+    "Exactly eleven landscape captures are present and each displays the matching STEP N OF 11 state.",
+    "Every callout is fully on-screen with readable title/body copy. Past nine steps the footer keeps the page dots and skip tour on one row and back/next on the row below; buttons and page dots do not overlap or clip.",
+    "Spotlight rings in steps 1, 2 and 7 (add host, settings, the artifacts sidebar row) align with the intended visible control when that control is present; a centered fallback is acceptable only when the target is absent from the seeded landing state.",
+    "The eight illustration steps render complete, coherent diagrams without missing layers, black rectangles, stale frames, or edge clipping."
   ],
   "capture_notes": "DEBUG forced-step hook on the dedicated integration simulator. No connection is initiated; screenshots are normalized to landscape pixels before review.",
   "deterministic_precheck": {"verdict": "not-run"}

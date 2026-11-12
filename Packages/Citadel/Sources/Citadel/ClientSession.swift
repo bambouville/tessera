@@ -245,10 +245,9 @@ final class SSHClientSession: Sendable {
         return try await bootstrap.connect(host: settings.host, port: settings.port).flatMap { channel in
             channel.pipeline.handler(type: ClientHandshakeHandler.self).flatMap { handshakeHandler in
                 handshakeHandler.authenticated
-            }.flatMap {
-                channel.pipeline.handler(type: NIOSSHHandler.self)
-            }.map { sshHandler in
-                SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler)
+            }.flatMapThrowing {
+                let sshHandler = try channel.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
+                return SSHClientSession(channel: channel, inboundChannelHandler: inboundChannelHandler, sshHandler: sshHandler)
             }
         }.get()
     }
@@ -298,10 +297,10 @@ public struct InvalidHostKey: Error, Equatable {}
 
 /// A host key validator that can be used to validate an SSH host key. This can be used to validate the host key against a set of trusted keys, or to accept any key.
 public struct SSHHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, Sendable {
-    private enum Method {
+    private enum Method: Sendable {
         case trustedKeys(Set<NIOSSHPublicKey>)
         case acceptAnything
-        case custom(NIOSSHClientServerAuthenticationDelegate)
+        case custom(NIOSSHClientServerAuthenticationDelegate & Sendable)
     }
 
     private let method: Method
@@ -333,7 +332,7 @@ public struct SSHHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, Sen
     }
 
     /// Creates a new host key validator that will use the given custom validator. This can be used to implement custom host key validation logic.
-    public static func custom(_ validator: NIOSSHClientServerAuthenticationDelegate) -> SSHHostKeyValidator {
+    public static func custom(_ validator: NIOSSHClientServerAuthenticationDelegate & Sendable) -> SSHHostKeyValidator {
         SSHHostKeyValidator(method: .custom(validator))
     }
 }

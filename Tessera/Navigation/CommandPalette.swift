@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TesseraArtifactsCore
 import TmuxControl
 
 struct CommandPaletteNotice: Equatable {
@@ -11,6 +12,7 @@ struct CommandPaletteNotice: Equatable {
 }
 
 enum CommandPaletteCommit: Equatable {
+    case artifact(String)
     case home
     case pane(sessionID: UUID, windowID: WindowId, paneID: PaneId)
     case session(UUID)
@@ -131,10 +133,7 @@ struct CommandPaletteTmuxSnapshot: Equatable {
                     command: pane.currentCommand
                 )
             }
-            let activePaneID = window.activePaneId ?? window.panes.first(where: \.isActive)?.id
-            let title = nonDefaultTitle(window.activePaneTitle, isDefault: window.activePaneTitleIsDefault)
-                ?? activePaneID.flatMap(agentProvider)
-                ?? window.displayName
+            let title = window.agentDisplayName(agentProvider: (window.activePaneId ?? window.activePane?.id).flatMap(agentProvider))
             return CommandPaletteTmuxWindow(
                 id: window.id,
                 title: title,
@@ -156,6 +155,7 @@ struct CommandPaletteTmuxSnapshot: Equatable {
 
 enum CommandPaletteEntry: Identifiable {
     enum ID: Hashable {
+        case artifact(String)
         case home
         case pane(WindowId, PaneId)
         case session(UUID)
@@ -163,12 +163,14 @@ enum CommandPaletteEntry: Identifiable {
     }
 
     case home
+    case artifact(ArtifactTab)
     case pane(window: CommandPaletteTmuxWindow, pane: CommandPaletteTmuxPane)
     case session(LiveSession)
     case window(CommandPaletteTmuxWindow)
 
     var id: ID {
         switch self {
+        case .artifact(let tab): return .artifact(tab.id)
         case .home: return .home
         case .pane(let window, let pane): return .pane(window.id, pane.id)
         case .session(let session): return .session(session.id)
@@ -198,6 +200,26 @@ final class CommandPalette {
     /// Re-set on every open and whenever the underlying registry
     /// changes while the palette is visible.
     private(set) var sessions: [LiveSession] = []
+    private(set) var artifactTabs: [ArtifactTab] = []
+
+    /// Kept independently of session snapshots: terminal-owned Cmd-K opens
+    /// and tmux refreshes must retain the app's artifact inventory.
+    func updateArtifacts(_ tabs: [ArtifactTab]) {
+        artifactTabs = tabs
+        clampSelectionToResults()
+    }
+
+    var artifactResults: [ArtifactTab] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.hasPrefix("@") else { return [] }
+        return artifactTabs.filter {
+            needle.isEmpty || [$0.title, $0.hostLabel, $0.target.path].contains { $0.lowercased().contains(needle) }
+        }.sorted {
+            if $0.viewedAt != $1.viewedAt { return $0.viewedAt > $1.viewedAt }
+            if $0.openedAt != $1.openedAt { return $0.openedAt > $1.openedAt }
+            return $0.id < $1.id
+        }
+    }
 
     /// Optional per-session label augmentations (e.g. the active tmux
     /// window name). Keyed by session id. Looked up during filter +
@@ -312,6 +334,7 @@ final class CommandPalette {
         homeResults
             + tmuxResults
             + results.map(CommandPaletteEntry.session)
+            + artifactResults.map(CommandPaletteEntry.artifact)
     }
 
     private var lastTouched: [UUID: Date] = [:]
@@ -457,6 +480,7 @@ final class CommandPalette {
               selectedIndex >= 0,
               selectedIndex < current.count else { return nil }
         switch current[selectedIndex] {
+        case .artifact(let tab): return .artifact(tab.id)
         case .home: return .home
         case .pane(let window, let pane):
             guard let currentSessionID else { return nil }

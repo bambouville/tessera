@@ -27,6 +27,14 @@ grep -q "Swift version $swift_version" <<<"$swift_version_output" || fail \
 "$swift_bin" sdk list | grep -qx "$swift_sdk_id" || fail \
   "missing Swift SDK $swift_sdk_id; see android/README.md"
 
+# Swift 6.3.3 cannot compile package manifests against Xcode 27's macOS SDK
+# (unknown argument -target-arch-variant). Use a macOS 26 SDK when one exists.
+if [[ -z "${SDKROOT:-}" && "$(uname -s)" == "Darwin" ]]; then
+  for macos_sdk in /Library/Developer/CommandLineTools/SDKs/MacOSX26.*.sdk; do
+    [[ -d "$macos_sdk" ]] && export SDKROOT="$macos_sdk"
+  done
+fi
+
 sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 if [[ -z "$sdk_root" && -f "$repo_root/android/local.properties" ]]; then
   sdk_root="$(sed -n 's/^sdk\.dir=//p' "$repo_root/android/local.properties" | head -n 1)"

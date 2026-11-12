@@ -1,14 +1,25 @@
 package com.bambouville.tessera.forwarding
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.Modifier
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.bambouville.tessera.design.TesseraTheme
+import com.bambouville.tessera.design.LocalTesseraTokens
 import java.util.UUID
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -27,6 +38,46 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PortForwardingServiceStatusInstrumentedTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun aRecoveredAttachmentReplacesTheRuntimeFailureWithAListeningRow() = runBlocking {
+        val preview = rule(port = 18_001, target = 8_001).copy(label = "preview")
+        val manager = PortForwardingManager()
+        try {
+            manager.reportTransportUnavailable(listOf(preview), "SSH forwarding runtime is unavailable")
+            compose.setContent {
+                val states by manager.states.collectAsState()
+                TesseraTheme(darkTheme = true) {
+                    Surface(modifier = Modifier.fillMaxSize(), color = LocalTesseraTokens.current.bg) {
+                        PortForwardingPanel(rules = listOf(preview), states = states, onRulesChanged = {},
+                            modifier = Modifier.safeDrawingPadding())
+                    }
+                }
+            }
+            awaitTag("tunnel-status-18001")
+            compose.onNodeWithTag("tunnel-status-18001").assertTextEquals("SSH forwarding runtime is unavailable")
+            capture("runtime-unavailable")
+
+            // Lifecycle runs against the real JNI policy on Android; only
+            // SSH's listener primitive is a host-free fixture here.
+            manager.attach(object : PortForwardingRuntime {
+                override val capabilities = ForwardingCapabilities.forTransport(ForwardingTransport.Ssh)
+                override suspend fun start(rule: PortForwardRule): PortForwardingLease = object : PortForwardingLease {
+                    override val bound = BoundForwardEndpoint(rule.bind.host, rule.bind.port)
+                    override val activeConnectionCount: StateFlow<Int> = MutableStateFlow(0)
+                    override val isOpen = MutableStateFlow(true)
+                    override fun close() { isOpen.value = false }
+                }
+                override fun close() = Unit
+            }, listOf(preview))
+
+            compose.waitForIdle()
+            compose.onNodeWithTag("tunnel-status-18001").assertTextEquals("listening · checking…")
+            compose.onNodeWithTag("tunnel-open-18001").assertIsDisplayed()
+            capture("runtime-restored")
+        } finally {
+            manager.close()
+        }
+    }
 
     @Test fun aListeningRowSaysWhetherAnythingServesBehindIt() {
         val serving = rule(port = 18_080, target = 3_000)
@@ -96,6 +147,20 @@ class PortForwardingServiceStatusInstrumentedTest {
         compose.waitUntil(timeoutMillis = 15_000) {
             compose.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
         }
+    }
+
+    private fun capture(name: String) {
+        compose.waitForIdle()
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        fun shell(command: String): ByteArray = automation.executeShellCommand(command).let { descriptor ->
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
+        }
+        // Gradle uninstalls library test packages before the gate's EXIT trap.
+        // Shell-owned pictures survive that uninstall and can be exported.
+        val path = "/sdcard/Pictures/tessera-forwarding/$name.png"
+        shell("mkdir -p /sdcard/Pictures/tessera-forwarding")
+        shell("screencap -p $path")
+        check(shell("head -c 8 $path").contentEquals(byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10)))
     }
 
     private fun state(rule: PortForwardRule, service: ForwardedServiceState, prohibited: Boolean = false) =

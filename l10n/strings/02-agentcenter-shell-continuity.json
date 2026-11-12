@@ -15,14 +15,6 @@
     "zh-Hans": "完成",
     "zh-Hant": "完成"
   },
-  "Help": {
-    "de": "Hilfe",
-    "es": "Ayuda",
-    "fr": "Aide",
-    "ja": "ヘルプ",
-    "zh-Hans": "帮助",
-    "zh-Hant": "輔助說明"
-  },
   "Open %@ on %@": {
     "de": "%@ auf %@ öffnen",
     "es": "Abrir %@ en %@",
@@ -78,14 +70,6 @@
     "ja": "入力待ち",
     "zh-Hans": "等待输入",
     "zh-Hant": "等待輸入"
-  },
-  "session %@": {
-    "de": "Sitzung %@",
-    "es": "sesión %@",
-    "fr": "session %@",
-    "ja": "セッション %@",
-    "zh-Hans": "会话 %@",
-    "zh-Hant": "工作階段 %@"
   },
   "status unavailable": {
     "de": "Status nicht verfügbar",

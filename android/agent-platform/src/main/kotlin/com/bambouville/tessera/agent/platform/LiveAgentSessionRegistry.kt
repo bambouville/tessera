@@ -148,7 +148,7 @@ class AndroidAgentSessionCoordinator(
      * upgrade a host-wide carrier into pane action authority. */
     suspend fun issueIngestionBinding(threadID: org.json.JSONObject, key: AgentSessionKey): AgentEndpointResult<AgentIssuedBinding> {
         val current = synchronized(this) { runtime }
-            ?: return AgentEndpointResult.Unavailable("Agent runtime unavailable")
+            ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.AgentRuntime.reason)
         val endpoint = registry.resolve(key) ?: return AgentEndpointResult.StaleBinding
         val issued = AgentRouteBindingAuthority(current).issue(endpoint, threadID, endpoint.ingestionBinding,
             claimedPID = null, hostObservation = true)
@@ -163,7 +163,7 @@ class AndroidAgentSessionCoordinator(
         providerID: String,
     ): AgentEndpointResult<AgentIssuedBinding> {
         val current = synchronized(this) { runtime }
-            ?: return AgentEndpointResult.Unavailable("Agent runtime unavailable")
+            ?: return AgentEndpointResult.Unavailable(AgentEndpointUnavailableReason.AgentRuntime.reason)
         val endpoint = registry.resolve(binding.key) ?: return AgentEndpointResult.StaleBinding
         if (!endpoint.isCurrentRoute(binding)) return AgentEndpointResult.StaleBinding
         AgentTierCProvider.fromWire(providerID)?.let { provider ->
