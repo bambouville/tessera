@@ -1527,7 +1527,13 @@ private fun SshSessionScreenBody(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .then(keyboardLayout.sessionModifier)
+                    // The lift keeps the terminal grid still; a panel in its
+                    // place has no grid to keep, and lifting it would carry
+                    // its header and rows off the top of the clip.
+                    .then(
+                        if (forwardingPanelVisible || filesPanelVisible) Modifier.imePadding()
+                        else keyboardLayout.sessionModifier,
+                    )
                     .then(
                         if (tmuxAuthorityPresentation is TmuxAuthorityPresentation.Veiled ||
                             tmuxAuthorityPresentation is TmuxAuthorityPresentation.Reclaiming
