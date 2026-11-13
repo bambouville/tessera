@@ -2239,10 +2239,18 @@ private fun SessionStateEffects(
     onTransportReachableChanged: (Boolean?) -> Unit,
 ) {
     var glowingTmuxWindowId by hostState.glowingTmuxWindowId
+    val sessionView = LocalView.current
     LaunchedEffect(transportReachable) {
         onTransportReachableChanged(transportReachable)
     }
     LaunchedEffect(state, isPresented) {
+        // A terminated session leaves composition in the same pass that ends
+        // its presentation, so the presentation effect never sees it go, and
+        // by now its terminal may have left focus (tmux modes remount it; a
+        // side panel replaces it). A presented session covers the app, so a
+        // keyboard on this window is its own: take it down before the host
+        // drops the session.
+        if (state == SshSessionUiState.Terminated && isPresented) sessionView.hideSoftwareKeyboard()
         onStateChanged(state)
         if (terminal.hasRenderedOutput || paneSurfaces.values.any { it.hasRenderedOutput }) reportRenderedReady()
     }
