@@ -21,6 +21,14 @@ class MarkdownDocumentLinksTest {
         assertEquals(links.map { it.url }, opened)
     }
 
+    @Test fun aSoftBreakReadsAsASpaceAndAHardBreakStartsALine() {
+        val text = agentMarkdownAnnotatedString(
+            listOf(Node("text", text = "one Vite"), Node("softBreak"), Node("text", text = "front end"), Node("lineBreak"), Node("text", text = "next")),
+            Color.Blue, labels,
+        ).text
+        assertEquals("one Vite front end\nnext", text)
+    }
+
     @Test fun agentOutputKeepsOnlyWebLinksForTheDevice() {
         val links = agentMarkdownAnnotatedString(nodes, Color.Blue, labels)
             .let { it.getLinkAnnotations(0, it.length) }.map { it.item as LinkAnnotation.Url }

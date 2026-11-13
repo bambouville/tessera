@@ -1,6 +1,7 @@
 package com.bambouville.tessera.forwarding
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -82,7 +83,9 @@ fun PortForwardingPanel(
     val currentProbeServices by rememberUpdatedState(onProbeServices)
     LaunchedEffect(Unit) { currentProbeServices() }
 
-    Column(modifier = modifier) {
+    // In a session the panel takes the terminal's place on a black scaffold,
+    // so it brings its own page colour, as Files does.
+    Column(modifier = modifier.background(tokens.bg)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
